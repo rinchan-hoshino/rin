@@ -1404,7 +1404,8 @@ test("cron chat-bound agent task submits into the current frontend session", asy
     target: { kind: "agent_prompt", prompt: "hello" },
     trigger: { expression: "*/1 * * * *", timezone: "local" },
   };
-  const calls = [];
+  const runTurnCalls = [];
+  const incomingCalls = [];
   const order = [];
   const scheduledDeliveries = [];
   const scheduledDeliveryOptions = [];
@@ -1425,8 +1426,12 @@ test("cron chat-bound agent task submits into the current frontend session", asy
           };
         },
         runTurn: async (payload) => {
-          order.push("run-turn");
-          calls.push(payload);
+          runTurnCalls.push(payload);
+          throw new Error("scheduled tasks must not call runTurn directly");
+        },
+        submitIncoming: async (payload) => {
+          order.push("submit-incoming");
+          incomingCalls.push(payload);
           return {
             finalText: "done",
             sessionId: "s1",
@@ -1435,7 +1440,7 @@ test("cron chat-bound agent task submits into the current frontend session", asy
         },
       },
     });
-    assert.deepEqual(order, ["scheduled-input", "run-turn"]);
+    assert.deepEqual(order, ["scheduled-input", "submit-incoming"]);
     assert.equal(
       scheduledDeliveries[0].parts.find((part) => part.type === "text")?.text,
       "⏰ Scheduled task · Chat Bound Task\nhello",
@@ -1450,24 +1455,26 @@ test("cron chat-bound agent task submits into the current frontend session", asy
       await fs.readFile(transientSessionFile, "utf8"),
       "temporary session",
     );
-    assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].controllerKey, "default");
-    assert.equal("affectChatBinding" in calls[0], false);
-    assert.equal(calls[0].linkDeliveriesToSession, undefined);
-    assert.equal(calls[0].sessionFile, undefined);
-    assert.equal(calls[0].managedSessionLeaf, undefined);
-    assert.equal(calls[0].disposeAfterTurn, undefined);
-    assert.equal(calls[0].shutdownAfterTurn, undefined);
-    assert.equal(calls[0].deliverFinal, true);
-    assert.equal(calls[0].incomingMessageId, "scheduled-input-1");
-    assert.equal(calls[0].replyToMessageId, "scheduled-input-1");
-    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
-    assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
-    assert.equal(calls[0].promptMeta?.taskName, "Chat Bound Task");
-    assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
-    assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
-    assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
-    assert.equal(calls[0].systemPromptBlocks, undefined);
+    assert.equal(runTurnCalls.length, 0);
+    assert.equal(incomingCalls[0].chatKey, "telegram/demo:1");
+    assert.equal("affectChatBinding" in incomingCalls[0], false);
+    assert.equal(incomingCalls[0].linkDeliveriesToSession, undefined);
+    assert.equal(incomingCalls[0].sessionFile, undefined);
+    assert.equal(incomingCalls[0].managedSessionLeaf, undefined);
+    assert.equal(incomingCalls[0].disposeAfterTurn, undefined);
+    assert.equal(incomingCalls[0].shutdownAfterTurn, undefined);
+    assert.equal(incomingCalls[0].deliverFinal, true);
+    assert.equal(incomingCalls[0].messageId, "scheduled-input-1");
+    assert.equal(incomingCalls[0].promptMeta?.source, "scheduled-task");
+    assert.equal(incomingCalls[0].promptMeta?.taskId, "cron_chat_bound");
+    assert.equal(incomingCalls[0].promptMeta?.taskName, "Chat Bound Task");
+    assert.equal("triggerKind" in (incomingCalls[0].promptMeta || {}), false);
+    assert.equal("taskRunId" in (incomingCalls[0].promptMeta || {}), false);
+    assert.equal(
+      "taskSessionMode" in (incomingCalls[0].promptMeta || {}),
+      false,
+    );
+    assert.equal(incomingCalls[0].systemPromptBlocks, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

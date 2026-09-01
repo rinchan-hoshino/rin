@@ -268,6 +268,14 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           { type: "chat_run_turn", payload },
           override,
         ),
+      submitIncoming: async (
+        payload: Record<string, unknown>,
+        override?: RinAgentSdkOptions,
+      ) =>
+        await request<Record<string, unknown>>(
+          { type: "chat_submit_incoming", payload },
+          override,
+        ),
       typing: async (
         target: ChatTypingOptions,
         override?: RinAgentSdkOptions,

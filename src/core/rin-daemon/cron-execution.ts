@@ -24,6 +24,7 @@ type CronChatCapability = {
     options?: { waitForDeliveryMs?: number; idempotencyKey?: string },
   ) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
+  submitIncoming?: (payload: any) => Promise<any>;
   setWorkingVisible?: (payload: {
     chatKey?: string;
     controllerKey?: string;
@@ -341,32 +342,45 @@ export async function executeCronAgentTask(
       delivery?.delivered === true
         ? chatDeliveryMessageIds(delivery)[0]
         : undefined;
-    if (!scheduledInputMessageId) {
-      throw new Error("cron_scheduled_input_delivery_failed");
-    }
   }
-  const result = await options.chat.runTurn({
-    controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
-    ...(chatKey ? { chatKey } : {}),
-    deliverFinal: !quiet,
-    quietMode: presentationQuiet,
-    text: prompt,
-    ...(scheduledInputMessageId
-      ? {
-          incomingMessageId: scheduledInputMessageId,
-          replyToMessageId: scheduledInputMessageId,
-        }
-      : {}),
-    ...(options.runId ? { requestTag: options.runId } : {}),
-    ...(options.deliveryIdempotencyKey
-      ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
-      : {}),
-    frontend: {
-      kind: frontend.kind,
-      key: frontend.key,
-    },
-    promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
-  });
+  if (chatKey && !presentationQuiet && !scheduledInputMessageId) {
+    throw new Error("cron_scheduled_input_delivery_failed");
+  }
+  const result =
+    chatKey &&
+    scheduledInputMessageId &&
+    typeof options.chat?.submitIncoming === "function"
+      ? await options.chat.submitIncoming({
+          chatKey,
+          messageId: scheduledInputMessageId,
+          text: prompt,
+          deliverFinal: !quiet,
+          quietMode: presentationQuiet,
+          ...(options.runId ? { requestTag: options.runId } : {}),
+          ...(options.deliveryIdempotencyKey
+            ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
+            : {}),
+          promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
+        })
+      : await options.chat.runTurn({
+          controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
+          ...(chatKey ? { chatKey } : {}),
+          ...(scheduledInputMessageId
+            ? {
+                incomingMessageId: scheduledInputMessageId,
+                replyToMessageId: scheduledInputMessageId,
+              }
+            : {}),
+          deliverFinal: !quiet,
+          quietMode: presentationQuiet,
+          text: prompt,
+          ...(options.runId ? { requestTag: options.runId } : {}),
+          ...(options.deliveryIdempotencyKey
+            ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
+            : {}),
+          frontend: { kind: frontend.kind, key: frontend.key },
+          promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
+        });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;

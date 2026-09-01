@@ -53,6 +53,35 @@ function input(messageId = "m1", chatKey = "telegram/1:2") {
   };
 }
 
+test("prepared incoming is committed as one actionable durable inbox item", async () => {
+  const agentDir = await tempDir();
+  const prepared = inbox.enqueueChatInboxItem(agentDir, {
+    ...input("prepared-incoming"),
+    preparedAdmission: {
+      decision: { allow: true, reason: "prepared_incoming_message" },
+      submission: {
+        version: 1,
+        chatKey: "telegram/1:2",
+        text: "scheduled text",
+        attachments: [],
+        promptMeta: {},
+        incomingMessageId: "prepared-incoming",
+        replyToMessageId: "prepared-incoming",
+        receivedAt: new Date().toISOString(),
+      },
+    },
+  });
+  assert.equal(prepared.item.admission.state, "actionable");
+  assert.equal(
+    prepared.item.admission.submission.incomingMessageId,
+    "prepared-incoming",
+  );
+  const claim = inbox.claimChatInboxItem(agentDir, prepared.item.itemId);
+  assert.ok(claim);
+  assert.equal(claim.admission.state, "actionable");
+  await fs.rm(agentDir, { recursive: true, force: true });
+});
+
 test("chat inbox drain completion helpers own success and failure finalization", async () => {
   const agentDir = await tempDir();
   inbox.enqueueChatInboxItem(agentDir, input("helper-success"));

@@ -87,6 +87,7 @@ import {
   type ChatInboxItem,
   abortEarlierChatInboxItems,
   commitClaimedChatInboxAdmission,
+  enqueueChatInboxItem,
   getChatInboxItem,
   restoreChatInboxElements,
   restoreChatInboxSession,
@@ -127,6 +128,7 @@ import {
   composeChatKey,
   composeChatKeyForBot,
   loadIdentity,
+  parseChatKey,
   trustOf,
 } from "./support.js";
 import { recoverInboundHeads } from "./inbound-recovery.js";
@@ -592,6 +594,16 @@ export type ChatBridgeHandle = {
     emoji?: string;
   }) => Promise<{ sent: boolean }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
+  submitIncoming: (payload: {
+    chatKey: string;
+    messageId: string;
+    text: string;
+    deliverFinal?: boolean;
+    quietMode?: boolean;
+    requestTag?: string;
+    deliveryIdempotencyKey?: string;
+    promptMeta?: Record<string, unknown>;
+  }) => Promise<any>;
   terminateTurn: (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -1728,6 +1740,61 @@ export async function startChatBridge(
     if (!emoji) throw new Error("chat_reaction_emoji_required");
     return { sent: await sendReaction(app, chatKey, messageId, emoji) };
   };
+  const submitIncoming = async (input: any) => {
+    const chatKey = safeString(input?.chatKey).trim();
+    const messageId = safeString(input?.messageId).trim();
+    const text = safeString(input?.text);
+    const parsed = parseChatKey(chatKey);
+    if (!chatKey || !messageId || !text.trim() || !parsed) {
+      throw new Error("chat_inbox_message_identity_required");
+    }
+    const session = {
+      platform: parsed.platform,
+      selfId: parsed.botId || "",
+      guildId: parsed.botId || undefined,
+      channelId: parsed.chatId,
+      chatId: parsed.chatId,
+      messageId,
+      userId: "scheduled-message",
+      username: "Scheduled message",
+      type: parsed.botId ? "group" : "private",
+      timestamp: Date.now(),
+      content: text,
+    };
+    const submission: FrozenChatTurnSubmission = {
+      version: 1,
+      chatKey,
+      text,
+      attachments: [],
+      promptMeta: input?.promptMeta || {},
+      incomingMessageId: messageId,
+      replyToMessageId: messageId,
+      receivedAt: new Date(session.timestamp).toISOString(),
+    };
+    const { item } = enqueueChatInboxItem(runtime.agentDir, {
+      chatKey,
+      messageId,
+      session,
+      elements: [{ type: "text", text }],
+      preparedAdmission: {
+        decision: { allow: true, reason: "prepared_incoming_message", chatKey },
+        submission,
+      },
+    });
+    requestDrainChatInbox();
+    for (;;) {
+      const current = getChatInboxItem(runtime.agentDir, item.itemId);
+      if (!current) throw new Error("chat_inbox_turn_commit_failed");
+      if (current.state === "failed") {
+        throw new Error(current.lastError || "chat_inbox_turn_commit_failed");
+      }
+      if (current.state === "terminal") {
+        return { turnId: current.itemId };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
   const runTurn = async (payload: ChatBridgeTurnPayload) => {
     const chatKey = safeString(payload?.chatKey).trim();
     const text = safeString(payload?.text).trim();
@@ -2085,6 +2152,7 @@ export async function startChatBridge(
     typing,
     react,
     runTurn,
+    submitIncoming,
     terminateTurn,
     evalBridge,
   };

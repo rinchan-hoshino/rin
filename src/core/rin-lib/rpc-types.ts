@@ -68,6 +68,7 @@ export type RinDaemonRpcCommandType =
   | "daemon_activity"
   | "chat_send"
   | "chat_run_turn"
+  | "chat_submit_incoming"
   | "chat_typing"
   | "chat_react"
   | "chat_terminate_turn"

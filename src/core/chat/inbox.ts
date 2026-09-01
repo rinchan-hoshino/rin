@@ -352,7 +352,16 @@ export function reclaimRunningChatInboxItem(
 
 export function enqueueChatInboxItem(
   agentDir: string,
-  input: { chatKey: string; messageId: string; session: any; elements: any[] },
+  input: {
+    chatKey: string;
+    messageId: string;
+    session: any;
+    elements: any[];
+    preparedAdmission?: {
+      decision: Record<string, unknown>;
+      submission: FrozenChatTurnSubmission;
+    };
+  },
 ) {
   const item = buildChatInboxItem(input);
   const messageInput = buildInboundStoredChatMessageInput(
@@ -375,6 +384,30 @@ export function enqueueChatInboxItem(
         )
         .get(item.chatKey, item.messageId) as any;
       if (!messageRow) throw new Error("chat_inbox_message_commit_failed");
+      const preparedCommit: DurableChatAdmissionCommit | undefined =
+        input.preparedAdmission
+          ? {
+              state: "actionable",
+              decision: {
+                version: 1,
+                kind: "message",
+                decision: cloneJson(input.preparedAdmission.decision),
+              },
+              submission: cloneJson(input.preparedAdmission.submission),
+            }
+          : undefined;
+      const admissionJson = preparedCommit
+        ? JSON.stringify(preparedCommit.decision)
+        : null;
+      const submissionJson = preparedCommit
+        ? JSON.stringify(preparedCommit.submission)
+        : null;
+      const admissionHash = admissionJson
+        ? hashDurableJson(admissionJson)
+        : null;
+      const submissionHash = submissionJson
+        ? hashDurableJson(submissionJson)
+        : null;
       const existing = getTurnRow(db, item.itemId);
       if (!existing) {
         db.prepare(
@@ -382,9 +415,10 @@ export function enqueueChatInboxItem(
             turn_id, inbound_message_id, chat_key, generation, sequence, state,
             terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
             next_attempt_at, last_error, routing_json, session_json,
-            elements_json, created_at, updated_at
+            elements_json, admission_state, admission_json, admission_hash,
+            submission_json, submission_hash, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, 0, NULL, NULL,
-                    NULL, NULL, ?, ?, ?, ?, ?)`,
+                    NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           item.itemId,
           messageRow.id,
@@ -394,19 +428,31 @@ export function enqueueChatInboxItem(
           JSON.stringify(item.routing),
           JSON.stringify(item.session),
           JSON.stringify(item.elements),
+          preparedCommit ? "actionable" : "unclassified",
+          admissionJson,
+          admissionHash,
+          submissionJson,
+          submissionHash,
           item.createdAt,
           item.updatedAt,
         );
       } else if (existing.state === "pending") {
         db.prepare(
           `UPDATE inbox_jobs
-           SET routing_json = ?, session_json = ?, elements_json = ?, updated_at = ?
+           SET routing_json = ?, session_json = ?, elements_json = ?,
+               admission_state = ?, admission_json = ?, admission_hash = ?,
+               submission_json = ?, submission_hash = ?, updated_at = ?
            WHERE turn_id = ? AND state = 'pending'
              AND admission_state = 'unclassified'`,
         ).run(
           JSON.stringify(item.routing),
           JSON.stringify(item.session),
           JSON.stringify(item.elements),
+          preparedCommit ? "actionable" : "unclassified",
+          admissionJson,
+          admissionHash,
+          submissionJson,
+          submissionHash,
           nowIso(),
           item.itemId,
         );

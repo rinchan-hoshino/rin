@@ -10,12 +10,18 @@ import type { ChatMessageListWindow } from "./message-store.js";
 
 export type ChatBridgeCommandPort = Pick<
   ChatBridgeHandle,
-  "send" | "runTurn" | "typing" | "react" | "terminateTurn" | "evalBridge"
+  | "send"
+  | "runTurn"
+  | "submitIncoming"
+  | "typing"
+  | "react"
+  | "terminateTurn"
+  | "evalBridge"
 >;
 
 export type ChatDaemonDeliveryPort = Pick<
   ChatBridgeCommandPort,
-  "send" | "runTurn" | "typing" | "react" | "terminateTurn"
+  "send" | "runTurn" | "submitIncoming" | "typing" | "react" | "terminateTurn"
 >;
 
 export type ChatDaemonIntegration = {
@@ -48,6 +54,8 @@ export function createChatDaemonIntegration(options: {
       await (await options.getBridge()).send(payload, sendOptions),
     runTurn: async (payload) =>
       await (await options.getBridge()).runTurn(payload),
+    submitIncoming: async (payload) =>
+      await (await options.getBridge()).submitIncoming(payload),
     typing: async (payload) =>
       await (await options.getBridge()).typing(payload),
     react: async (payload) => await (await options.getBridge()).react(payload),
@@ -60,6 +68,8 @@ export function createChatDaemonIntegration(options: {
       success(await delivery.send(commandPayload(command))),
     chat_run_turn: async (command) =>
       success(await delivery.runTurn(commandPayload(command))),
+    chat_submit_incoming: async (command) =>
+      success(await delivery.submitIncoming(commandPayload(command))),
     chat_typing: async (command) =>
       success(await delivery.typing(commandPayload(command))),
     chat_react: async (command) =>
