@@ -20,7 +20,7 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation.
 - system prompt assembly: Rin default stance, tool guidance, configured baselines, available skill metadata, and the load-scoped chat/task binding supplied before first materialization.
 - message metadata: turn-local `sent at`, sender, trust, file, and reply context stays with the current user input.
-- frozen session runtime: the complete effective system prompt has one durable owner and remains byte-stable through ordinary turns and group-name changes. Explicit reload, successful compaction refresh, or the first prompt after 25 hours without session activity materializes and persists a fresh prompt before execution.
+- frozen session runtime: the complete effective system prompt has one durable owner and remains byte-stable through ordinary turns and group-name changes. Explicit reload and successful compaction refresh materialize and persist a fresh prompt. The first prompt after 25 hours without session activity attempts one compaction first and continues whether that attempt succeeds or fails.
 - TUI input compatibility: Rin-owned compatibility handling for interactive input.
 - todo: `todo` tool and `/todos` command.
 - task: scheduled task workflows through the local Rin Agent SDK.

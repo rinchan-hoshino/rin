@@ -651,7 +651,7 @@ const MID_TURN_THRESHOLD_COMPACTION_KEY = Symbol.for(
   "rin.midTurnThresholdCompaction",
 );
 
-const RIN_IDLE_SESSION_RELOAD_MS = 25 * 60 * 60 * 1_000;
+const RIN_IDLE_SESSION_COMPACTION_MS = 25 * 60 * 60 * 1_000;
 
 type RinSessionActivity = { marker: string; timestamp: number };
 
@@ -1047,7 +1047,6 @@ export function applyRinSessionReloadPolicy(session: any) {
   const originalReload = session.reload.bind(session);
   type ReloadKind = "explicit" | "idle";
   type ReloadOptions = {
-    activityMarker?: string;
     kind?: ReloadKind;
     reloadArgs?: any[];
     suppressErrors?: boolean;
@@ -1063,8 +1062,6 @@ export function applyRinSessionReloadPolicy(session: any) {
   let reloadInFlightKind: ReloadKind | null = null;
   let reloadScheduled = false;
   const queuedReloads: QueuedReload[] = [];
-  let lastReloadedActivityMarker = "";
-  let lastReloadCompletedAt = 0;
   let firstPromptPending = true;
   const activityBeforeSessionStart = (session as any)[
     RIN_SESSION_ACTIVITY_BEFORE_START_KEY
@@ -1087,19 +1084,10 @@ export function applyRinSessionReloadPolicy(session: any) {
   };
 
   function startReload(options: ReloadOptions = {}): Promise<any> {
-    const activityBeforeReload = latestRinSessionActivity(session);
-    const refreshedActivityMarker =
-      options.activityMarker ||
-      (firstPromptPending ? activityBeforeSessionStart?.marker : undefined) ||
-      activityBeforeReload?.marker;
-    reloadInFlightKind = options.kind || "idle";
+    reloadInFlightKind = options.kind || "explicit";
     reloadInFlight = Promise.resolve()
       .then(async () => {
         const result = await originalReload(...(options.reloadArgs || []));
-        lastReloadCompletedAt = Date.now();
-        if (refreshedActivityMarker) {
-          lastReloadedActivityMarker = refreshedActivityMarker;
-        }
         return result;
       })
       .finally(() => {
@@ -1122,11 +1110,8 @@ export function applyRinSessionReloadPolicy(session: any) {
   };
 
   const runReload = (options: ReloadOptions = {}) => {
-    const kind = options.kind || "idle";
+    const kind = options.kind || "explicit";
     if (reloadInFlight || reloadScheduled || queuedReloads.length > 0) {
-      if (kind === "idle" && reloadInFlightKind === "idle" && reloadInFlight) {
-        return exposedReloadPromise(reloadInFlight, options.suppressErrors);
-      }
       const queued = enqueueReload({ ...options, kind });
       if (!reloadInFlight && !reloadScheduled) scheduleNextReload();
       return exposedReloadPromise(queued, options.suppressErrors);
@@ -1144,8 +1129,7 @@ export function applyRinSessionReloadPolicy(session: any) {
     while (reloadInFlight || reloadScheduled || queuedReloads.length > 0) {
       if (reloadInFlight) {
         const currentReload = reloadInFlight;
-        const failPromptOnReloadError =
-          reloadInFlightKind === "idle" || reloadInFlightKind === "explicit";
+        const failPromptOnReloadError = reloadInFlightKind === "explicit";
         try {
           await currentReload;
         } catch (error) {
@@ -1168,20 +1152,13 @@ export function applyRinSessionReloadPolicy(session: any) {
         const activity = firstPromptPending
           ? activityBeforeSessionStart || latestRinSessionActivity(session)
           : latestRinSessionActivity(session);
-        const effectiveActivityAt =
-          activity?.marker === lastReloadedActivityMarker
-            ? Math.max(activity.timestamp, lastReloadCompletedAt)
-            : activity?.timestamp;
         if (
           activity &&
-          Number.isFinite(effectiveActivityAt) &&
-          Date.now() - Number(effectiveActivityAt) >= RIN_IDLE_SESSION_RELOAD_MS
+          Date.now() - activity.timestamp >= RIN_IDLE_SESSION_COMPACTION_MS
         ) {
-          await runReload({
-            activityMarker: activity.marker,
-            kind: "idle",
-          });
-          await waitForReloadBarrier();
+          try {
+            await session.compact();
+          } catch {}
         }
       }
       try {
