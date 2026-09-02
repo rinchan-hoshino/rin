@@ -15,8 +15,8 @@ const interactive = await import(
     path.join(rootDir, "dist", "core", "rin-install", "interactive.js"),
   ).href
 );
-const installerI18n = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "i18n.js")).href
+const installerCopy = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "product-copy.js")).href
 );
 
 test("installer interactive helpers describe dir state and plan text", () => {
@@ -261,21 +261,21 @@ test("promptDefaultTargetUser returns the installer choice", async () => {
   assert.equal(result, false);
 });
 
-test("createInstallerI18n exposes fixed English install and update copy", () => {
-  const i18n = installerI18n.createInstallerI18n();
+test("createInstallerCopy exposes fixed English install and update copy", () => {
+  const copy = installerCopy.createInstallerCopy();
 
-  assert.equal(i18n.targetInstallDirLabel, "Rin home");
-  assert.equal(i18n.writtenPathLabel, "Written");
-  assert.equal(i18n.serviceLabelLabel, "label");
-  assert.equal(i18n.confirmActiveLabel, "Yes");
-  assert.equal(i18n.confirmInactiveLabel, "No");
-  assert.equal(i18n.updaterIntroTitle, "Rin Updater");
+  assert.equal(copy.targetInstallDirLabel, "Rin home");
+  assert.equal(copy.writtenPathLabel, "Written");
+  assert.equal(copy.serviceLabelLabel, "label");
+  assert.equal(copy.confirmActiveLabel, "Yes");
+  assert.equal(copy.confirmInactiveLabel, "No");
+  assert.equal(copy.updaterIntroTitle, "Rin Updater");
   assert.equal(
-    i18n.updateReinstallCurrentTitle,
+    copy.updateReinstallCurrentTitle,
     "Reinstalling current version",
   );
   assert.equal(
-    i18n.fetchAndApplyUpdateConfirmMessage,
+    copy.fetchAndApplyUpdateConfirmMessage,
     "Fetch and apply this update now?",
   );
 });
@@ -338,8 +338,8 @@ test("installer and updater source expose no language controls", () => {
     path.join(rootDir, "src", "core", "rin-install", "main.ts"),
     "utf8",
   );
-  const i18nSource = readFileSync(
-    path.join(rootDir, "src", "core", "i18n.ts"),
+  const copySource = readFileSync(
+    path.join(rootDir, "src", "core", "product-copy.ts"),
     "utf8",
   );
   const updaterSource = readFileSync(
@@ -348,13 +348,13 @@ test("installer and updater source expose no language controls", () => {
   );
 
   assert.doesNotMatch(mainSource, /promptInstallerLanguage|--language/);
-  assert.doesNotMatch(i18nSource, /zh_CN|Choose installer language/);
+  assert.doesNotMatch(copySource, /zh_CN|Choose installer language/);
   assert.doesNotMatch(updaterSource, /readInstalledUpdateLanguage|--language/);
-  assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
+  assert.match(mainSource, /active: copy\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
   assert.match(updaterSource, /selectUpdateTarget/);
-  assert.match(updaterSource, /const i18n = initialI18n/);
+  assert.match(updaterSource, /const copy = initialCopy/);
   assert.match(updaterSource, /assertUpdateConfirmationAvailable/);
 });
 

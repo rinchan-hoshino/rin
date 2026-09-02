@@ -107,9 +107,9 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
     language: "zh_CN",
     currentRelease: { release: { channel: "git", branch: "owner-branch" } },
   };
-  const updateI18n = shared.createUpdateI18n();
-  assert.equal(typeof updateI18n.introTitle, "string");
-  assert.equal(Object.hasOwn(updateI18n, "displayLanguage"), false);
+  const updateCopy = shared.createUpdateCopy();
+  assert.equal(typeof updateCopy.introTitle, "string");
+  assert.equal(Object.hasOwn(updateCopy, "displayLanguage"), false);
   owner.__rinSharedOwnerPrivilegedValue = {};
   owner.__rinSharedOwnerPrivilegedValue = {
     language: "zh_CN",

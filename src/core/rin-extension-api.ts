@@ -5,17 +5,17 @@ import type {
   ExtensionUIContext,
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
-import type {
-  RinExtensionCommandResult,
-  RinMessageCatalog,
-} from "./rin-frontend-sdk/types.js";
+import type { RinExtensionCommandResult } from "./rin-frontend-sdk/types.js";
+import type { RinFrontendCommandResponses } from "./rin-frontend-sdk/command-responses.js";
 
-export type { RinExtensionCommandResult, RinMessageCatalog };
+export type { RinExtensionCommandResult, RinFrontendCommandResponses };
 
 /** Cross-frontend capabilities added by Rin where the active frontend supports them. */
 export type RinExtensionUIContext = ExtensionUIContext & {
   rinCommandResult?: (result: RinExtensionCommandResult) => void;
-  setMessageCatalog?: (catalog: RinMessageCatalog) => void;
+  setCommandResponses?: (
+    responses: Partial<RinFrontendCommandResponses>,
+  ) => void;
 };
 
 export type RinExtensionCommandContext = Omit<ExtensionCommandContext, "ui"> & {

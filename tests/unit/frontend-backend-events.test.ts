@@ -133,31 +133,31 @@ test("shared frontend translation exposes extension UI requests", () => {
   );
 });
 
-test("shared frontend translation applies a message catalog without replacing frontend chrome", () => {
+test("shared frontend events apply extension command responses without replacing frontend chrome", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator({
     commandResponses: { compactionSummaryText: "{summary}" },
   });
-  const catalog = {
-    "session.compaction.started": "Localized compacting",
-    "session.compaction.summary": "Localized {tokens}",
+  const commandResponses = {
+    compactionStart: "Configured compacting",
+    compactionSummaryLine: "Configured {tokens}",
   };
 
   assert.deepEqual(
     translator.translate({
       type: "extension_ui_request",
-      method: "setMessageCatalog",
-      catalog,
+      method: "setCommandResponses",
+      commandResponses,
     }),
     [
       {
         type: "extension_ui_request",
-        method: "setMessageCatalog",
-        catalog,
+        method: "setCommandResponses",
+        commandResponses,
       },
     ],
   );
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
-    { type: "compaction_start_notice", text: "Localized compacting" },
+    { type: "compaction_start_notice", text: "Configured compacting" },
   ]);
   assert.deepEqual(
     translator.translate({
@@ -168,7 +168,7 @@ test("shared frontend translation applies a message catalog without replacing fr
     [
       {
         type: "passive_notice",
-        text: "Localized 1,234",
+        text: "Configured 1,234",
         level: "info",
         deferDuringTurn: false,
         noticeKind: "compaction_end",
@@ -178,8 +178,8 @@ test("shared frontend translation applies a message catalog without replacing fr
 
   translator.translate({
     type: "extension_ui_request",
-    method: "setMessageCatalog",
-    catalog: {},
+    method: "setCommandResponses",
+    commandResponses: {},
   });
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
     { type: "compaction_start_notice", text: "Compacting..." },

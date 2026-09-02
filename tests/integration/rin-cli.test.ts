@@ -159,20 +159,20 @@ test("rin update --yes enables non-interactive updater confirmation", () => {
 });
 
 test("rin update pre-installer progress uses fixed English copy", () => {
-  const i18n = shared.createUpdateI18n();
+  const copy = shared.createUpdateCopy();
 
-  assert.equal(i18n.fetchingUpdateSourceMessage, "Fetching update source");
-  assert.equal(i18n.preparingUpdateSourceMessage, "Preparing update source");
+  assert.equal(copy.fetchingUpdateSourceMessage, "Fetching update source");
+  assert.equal(copy.preparingUpdateSourceMessage, "Preparing update source");
   assert.equal(
-    i18n.installingUpdateDependenciesMessage,
+    copy.installingUpdateDependenciesMessage,
     "Installing update dependencies",
   );
-  assert.equal(i18n.buildingUpdateRuntimeMessage, "Building update runtime");
+  assert.equal(copy.buildingUpdateRuntimeMessage, "Building update runtime");
   assert.equal(
-    i18n.buildUpdateCommandFailureHeader("Fetching update source"),
+    copy.buildUpdateCommandFailureHeader("Fetching update source"),
     "Fetching update source failed; recent log:",
   );
-  assert.equal(i18n.formatUpdateSourceLabel("stable latest"), "stable latest");
+  assert.equal(copy.formatUpdateSourceLabel("stable latest"), "stable latest");
 });
 
 test("rin update owns one update-job executor and one private payload", () => {

@@ -256,7 +256,9 @@ export async function load(url, context, nextLoad) {
   if (!url.endsWith(target)) return loaded;
   return {
     ...loaded,
-    source: String(loaded.source) + "\\nexport { isLegacyGeneratedLanguageTag as __rinOwnerIsLegacyGeneratedLanguageTag, isInsideMarkdownFence as __rinOwnerIsInsideMarkdownFence, historicalPromptLineValue as __rinOwnerHistoricalPromptLineValue, historicalReadmeRoot as __rinOwnerHistoricalReadmeRoot, historicalJoinedRoot as __rinOwnerHistoricalJoinedRoot, historicalAgentRoot as __rinOwnerHistoricalAgentRoot, stripLegacyConfiguredLanguagePrompt as __rinOwnerStripLegacyConfiguredLanguagePrompt, findPersistedSessionBaseSystemPrompt as __rinOwnerFindPersistedSessionBaseSystemPrompt, hasLegacyPromptLayerBoundary as __rinOwnerHasLegacyPromptLayerBoundary, };\\n",
+    source:
+      String(loaded.source) +
+      "\\nexport { findPersistedSessionBaseSystemPrompt as __rinOwnerFindPersistedSessionBaseSystemPrompt };\\n",
     shortCircuit: true,
   };
 }`;

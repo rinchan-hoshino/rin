@@ -24,7 +24,7 @@ const ownerGlobal = globalThis as any;
 const scenario = ownerGlobal.__rinUpdateWorkflowScenario as Record<string, any>;
 const events = ownerGlobal.__rinUpdateWorkflowEvents as any[];
 
-function i18n() {
+function copy() {
   return {
     fetchingUpdateSourceMessage: "fetch source",
     preparingUpdateSourceMessage: "prepare source",
@@ -568,7 +568,7 @@ test("platform bundles verify checksums and extract zip or tar without package c
       await workflow.prepareUpdateRuntimeSource({
         release: zipRelease,
         workspace,
-        i18n: i18n(),
+        copy: copy(),
       });
       assert.equal(
         await fs.readFile(
@@ -613,7 +613,7 @@ test("platform bundles verify checksums and extract zip or tar without package c
             failedDownloadRelease,
             workRoot,
           ),
-          i18n: i18n(),
+          copy: copy(),
         }),
         /rin_download_failed:503/,
       );
@@ -632,7 +632,7 @@ test("platform bundles verify checksums and extract zip or tar without package c
           missingChecksumRelease,
           workRoot,
         ),
-        i18n: i18n(),
+        copy: copy(),
       }),
       /rin_update_platform_bundle_checksum_missing/,
     );
@@ -651,7 +651,7 @@ test("platform bundles verify checksums and extract zip or tar without package c
           mismatchRelease,
           workRoot,
         ),
-        i18n: i18n(),
+        copy: copy(),
       }),
       /rin_update_platform_bundle_checksum_mismatch/,
     );
@@ -673,7 +673,7 @@ test("platform bundles verify checksums and extract zip or tar without package c
     await workflow.prepareUpdateRuntimeSource({
       release: tarRelease,
       workspace: tarWorkspace,
-      i18n: i18n(),
+      copy: copy(),
     });
     assert.equal(
       await fs.readFile(
@@ -710,7 +710,7 @@ test("source preparation runs stable, locked git, and unlocked prerelease workfl
       await workflow.prepareUpdateRuntimeSource({
         release: selected,
         workspace,
-        i18n: i18n(),
+        copy: copy(),
         env: { ...process.env, OWNER_BUILD_ENV: name },
       });
       assert.equal(

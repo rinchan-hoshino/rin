@@ -16,8 +16,8 @@ const updater = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "updater.js"))
     .href
 );
-const installerI18n = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "i18n.js")).href
+const installerCopy = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "product-copy.js")).href
 );
 
 test("updater private release readers preserve installed channel preferences", async () => {
@@ -230,7 +230,7 @@ test("startUpdater does not write language during core updates", async () => {
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n(),
+      copy: installerCopy.createInstallerCopy(),
       release: preparedRelease,
       ...requestedUpdateTarget,
       assumeYes: true,
@@ -255,7 +255,7 @@ test("startUpdater reinstalls an already-current release", async () => {
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n(),
+      copy: installerCopy.createInstallerCopy(),
       release: preparedRelease,
       ...requestedUpdateTarget,
       assumeYes: true,
@@ -293,7 +293,7 @@ test("startUpdater uses fixed English UI without writing language", async () => 
         detectCurrentUser: () => "alice",
         repoRootFromHere: () => "/src/rin",
         ensureNotCancelled: (value: unknown) => value,
-        i18n: installerI18n.createInstallerI18n(),
+        copy: installerCopy.createInstallerCopy(),
         release: preparedRelease,
         ...requestedUpdateTarget,
         async confirm(options: any) {
@@ -319,7 +319,7 @@ test("startUpdater uses fixed English UI without writing language", async () => 
     assert.equal(Object.hasOwn(capturedOptions, "language"), false);
     assert.equal(
       confirmMessage,
-      installerI18n.createInstallerI18n().publishUpdateConfirmMessage,
+      installerCopy.createInstallerCopy().publishUpdateConfirmMessage,
     );
   });
 });
@@ -333,7 +333,7 @@ test("startUpdater skips repeated plan and confirmation when preconfirmed", asyn
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n(),
+      copy: installerCopy.createInstallerCopy(),
       release: preparedRelease,
       ...requestedUpdateTarget,
       preconfirmed: true,
@@ -371,7 +371,7 @@ test("startUpdater rejects unresolved git metadata before publishing", async () 
           ref: "main",
           sourceLabel: "git branch main",
         },
-        i18n: installerI18n.createInstallerI18n(),
+        copy: installerCopy.createInstallerCopy(),
         ...requestedUpdateTarget,
         assumeYes: true,
         async runFinalizeInstallPlanInChild() {
@@ -399,7 +399,7 @@ test("startUpdater renders update notes in fixed English", async () => {
         ref: "0123456789abcdef0123456789abcdef01234567",
         sourceLabel: "git branch main @ 0123456789ab",
       },
-      i18n: installerI18n.createInstallerI18n(),
+      copy: installerCopy.createInstallerCopy(),
       ...requestedUpdateTarget,
       assumeYes: true,
       async runFinalizeInstallPlanInChild() {

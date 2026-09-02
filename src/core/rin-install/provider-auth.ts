@@ -4,7 +4,7 @@ import { select, spinner, text } from "@clack/prompts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
-import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
+import { createInstallerCopy, type InstallerCopy } from "../product-copy.js";
 import { installAuthPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 
@@ -112,7 +112,7 @@ export async function configureProviderAuth(
   deps: {
     readJsonFile: <T>(filePath: string, fallback: T) => T;
     ensureNotCancelled: <T>(value: T | symbol) => T;
-    i18n?: InstallerI18n;
+    copy?: InstallerCopy;
     createAuthStorage?: (
       installDir: string,
       readJsonFile: <T>(filePath: string, fallback: T) => T,
@@ -122,17 +122,17 @@ export async function configureProviderAuth(
     spinnerFactory?: typeof spinner;
   },
 ) {
-  const i18n = deps.i18n || createInstallerI18n();
+  const copy = deps.copy || createInstallerCopy();
   const authStorage = await runInstallerProgress(
-    i18n.loadingModelChoicesMessage,
+    copy.loadingModelChoicesMessage,
     () =>
       (deps.createAuthStorage || createInstallerAuthStorage)(
         installDir,
         deps.readJsonFile,
       ),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
   if (authStorage.hasAuth?.(provider)) {
@@ -153,26 +153,26 @@ export async function configureProviderAuth(
   if (oauthProvider) {
     const loginSpinner = (deps.spinnerFactory || spinner)();
     let lastAuthUrl = "";
-    loginSpinner.start(i18n.startingLogin(oauthProvider.name || provider));
+    loginSpinner.start(copy.startingLogin(oauthProvider.name || provider));
     try {
       await authStorage.login(provider, {
         onAuth(info: { url: string; instructions?: string }) {
           lastAuthUrl = String(info?.url || "");
           loginSpinner.stop(
-            i18n.openUrlToContinueLogin(lastAuthUrl, info?.instructions),
+            copy.openUrlToContinueLogin(lastAuthUrl, info?.instructions),
           );
         },
         onDeviceCode(info: { userCode: string; verificationUri: string }) {
           lastAuthUrl = String(info?.verificationUri || "");
           const userCode = String(info?.userCode || "").trim();
           loginSpinner.stop(
-            i18n.openUrlToContinueLogin(
+            copy.openUrlToContinueLogin(
               lastAuthUrl,
-              userCode ? i18n.deviceCodeLoginInstructions(userCode) : undefined,
+              userCode ? copy.deviceCodeLoginInstructions(userCode) : undefined,
             ),
           );
           loginSpinner.start(
-            i18n.waitingForLogin(oauthProvider.name || provider),
+            copy.waitingForLogin(oauthProvider.name || provider),
           );
         },
         async onPrompt(prompt: {
@@ -184,23 +184,23 @@ export async function configureProviderAuth(
           const value = String(
             deps.ensureNotCancelled(
               await (deps.textPrompt || text)({
-                message: prompt.message || i18n.enterLoginValueMessage,
+                message: prompt.message || copy.enterLoginValueMessage,
                 placeholder: prompt.placeholder,
                 validate(value) {
                   if (!allowEmpty && !String(value || "").trim())
-                    return i18n.valueRequired;
+                    return copy.valueRequired;
                 },
               }),
             ),
           ).trim();
           loginSpinner.start(
-            i18n.waitingForLogin(oauthProvider.name || provider),
+            copy.waitingForLogin(oauthProvider.name || provider),
           );
           return value;
         },
         onProgress(message: string) {
           loginSpinner.message(
-            message || i18n.waitingForLogin(oauthProvider.name || provider),
+            message || copy.waitingForLogin(oauthProvider.name || provider),
           );
         },
         async onSelect(prompt: {
@@ -216,17 +216,17 @@ export async function configureProviderAuth(
                 .filter((option) => option.value)
             : [];
           if (!options.length) return undefined;
-          loginSpinner.stop(prompt.message || i18n.enterLoginValueMessage);
+          loginSpinner.stop(prompt.message || copy.enterLoginValueMessage);
           const value = String(
             deps.ensureNotCancelled(
               await (deps.selectPrompt || select)({
-                message: prompt.message || i18n.enterLoginValueMessage,
+                message: prompt.message || copy.enterLoginValueMessage,
                 options,
               }),
             ),
           ).trim();
           loginSpinner.start(
-            i18n.waitingForLogin(oauthProvider.name || provider),
+            copy.waitingForLogin(oauthProvider.name || provider),
           );
           return value || undefined;
         },
@@ -234,29 +234,29 @@ export async function configureProviderAuth(
           const value = String(
             deps.ensureNotCancelled(
               await (deps.textPrompt || text)({
-                message: i18n.manualCodeInputMessage,
-                placeholder: i18n.manualCodePlaceholder(lastAuthUrl),
+                message: copy.manualCodeInputMessage,
+                placeholder: copy.manualCodePlaceholder(lastAuthUrl),
                 validate(value) {
-                  if (!String(value || "").trim()) return i18n.valueRequired;
+                  if (!String(value || "").trim()) return copy.valueRequired;
                 },
               }),
             ),
           ).trim();
           loginSpinner.start(
-            i18n.waitingForLogin(oauthProvider.name || provider),
+            copy.waitingForLogin(oauthProvider.name || provider),
           );
           return value;
         },
         signal: AbortSignal.timeout(10 * 60 * 1000),
       });
-      loginSpinner.stop(i18n.loginComplete(oauthProvider.name || provider));
+      loginSpinner.stop(copy.loginComplete(oauthProvider.name || provider));
       return {
         available: true,
         authKind: "oauth",
         authData: authStorage.getAll?.() || {},
       };
     } catch (error: any) {
-      loginSpinner.stop(i18n.loginFailed(oauthProvider.name || provider));
+      loginSpinner.stop(copy.loginFailed(oauthProvider.name || provider));
       throw error;
     }
   }
@@ -264,16 +264,16 @@ export async function configureProviderAuth(
   const token = String(
     deps.ensureNotCancelled(
       await (deps.textPrompt || text)({
-        message: i18n.enterApiKeyMessage(provider),
+        message: copy.enterApiKeyMessage(provider),
         placeholder: "token",
         validate(value) {
-          if (!String(value || "").trim()) return i18n.tokenRequired;
+          if (!String(value || "").trim()) return copy.tokenRequired;
         },
       }),
     ),
   ).trim();
   return await runInstallerProgress(
-    i18n.savingProviderAuthMessage,
+    copy.savingProviderAuthMessage,
     () => {
       authStorage.set(provider, { type: "api_key", key: token });
       return {
@@ -283,8 +283,8 @@ export async function configureProviderAuth(
       };
     },
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
 }

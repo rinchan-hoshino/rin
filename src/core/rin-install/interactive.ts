@@ -9,7 +9,7 @@ import {
   installSettingsPath,
 } from "./paths.js";
 import { configureProviderAuth, loadModelChoices } from "./provider-auth.js";
-import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
+import { createInstallerCopy, type InstallerCopy } from "../product-copy.js";
 import {
   isValidContainerImageReference,
   normalizeTargetName,
@@ -36,13 +36,13 @@ export type SystemUser = {
 
 export function buildInstallTargetOptions(
   currentUser: string,
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
   platform: NodeJS.Platform = process.platform,
 ) {
   return [
     {
       value: "current",
-      label: i18n.currentInstallTargetLabel,
+      label: copy.currentInstallTargetLabel,
       hint: currentUser,
     },
     ...(platform === "win32"
@@ -50,28 +50,28 @@ export function buildInstallTargetOptions(
       : [
           {
             value: "local-user",
-            label: i18n.localUserInstallTargetLabel,
-            hint: i18n.sameMachineHint,
+            label: copy.localUserInstallTargetLabel,
+            hint: copy.sameMachineHint,
           },
         ]),
     ...(platform === "linux"
       ? [
           {
             value: "new-local-user",
-            label: i18n.newUserLabel,
-            hint: i18n.newUserHint,
+            label: copy.newUserLabel,
+            hint: copy.newUserHint,
           },
         ]
       : []),
     {
       value: "ssh",
-      label: i18n.sshInstallTargetLabel,
-      hint: i18n.reuseSshAuthHint,
+      label: copy.sshInstallTargetLabel,
+      hint: copy.reuseSshAuthHint,
     },
     {
       value: "container",
-      label: i18n.containerInstallTargetLabel,
-      hint: i18n.containerIsolationHint,
+      label: copy.containerInstallTargetLabel,
+      hint: copy.containerIsolationHint,
     },
   ];
 }
@@ -81,12 +81,12 @@ export async function promptInstallTarget(
   currentUser: string,
   allUsers: SystemUser[],
   targetHomeForUser: (user: string) => string,
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ): Promise<InstallTargetSelection & { cancelled?: boolean }> {
   const targetMode = prompt.ensureNotCancelled(
     await prompt.select({
-      message: i18n.chooseInstallTargetMessage,
-      options: buildInstallTargetOptions(currentUser, i18n),
+      message: copy.chooseInstallTargetMessage,
+      options: buildInstallTargetOptions(currentUser, copy),
     }),
   );
 
@@ -100,7 +100,7 @@ export async function promptInstallTarget(
             (entry) => !isSameSystemUser(entry.name, currentUser),
           ),
       targetHomeForUser,
-      i18n,
+      copy,
       targetMode === "current" ? "current" : "existing",
     );
   }
@@ -111,7 +111,7 @@ export async function promptInstallTarget(
       currentUser,
       allUsers,
       targetHomeForUser,
-      i18n,
+      copy,
       "new",
     );
   }
@@ -120,15 +120,15 @@ export async function promptInstallTarget(
     const host = String(
       prompt.ensureNotCancelled(
         await prompt.text({
-          message: i18n.sshTargetMessage,
+          message: copy.sshTargetMessage,
           placeholder: "rin-box",
           validate(value: string) {
-            if (!String(value || "").trim()) return i18n.sshTargetRequired;
+            if (!String(value || "").trim()) return copy.sshTargetRequired;
           },
         }),
       ),
     ).trim();
-    const name = await promptTargetName(prompt, host, i18n);
+    const name = await promptTargetName(prompt, host, copy);
     return { kind: "ssh", name, host };
   }
 
@@ -136,7 +136,7 @@ export async function promptInstallTarget(
     const engine = String(
       prompt.ensureNotCancelled(
         await prompt.select({
-          message: i18n.containerEngineMessage,
+          message: copy.containerEngineMessage,
           options: [
             { value: "docker", label: "Docker" },
             { value: "podman", label: "Podman" },
@@ -144,16 +144,16 @@ export async function promptInstallTarget(
         }),
       ),
     ) as "docker" | "podman";
-    const name = await promptTargetName(prompt, "rin-container", i18n);
+    const name = await promptTargetName(prompt, "rin-container", copy);
     const image = String(
       prompt.ensureNotCancelled(
         await prompt.text({
-          message: i18n.containerImageMessage,
+          message: copy.containerImageMessage,
           placeholder: "node:22-bookworm",
           defaultValue: "node:22-bookworm",
           validate(value: string) {
             if (!isValidContainerImageReference(value))
-              return i18n.containerImageInvalid;
+              return copy.containerImageInvalid;
           },
         }),
       ),
@@ -167,17 +167,17 @@ export async function promptInstallTarget(
 async function promptTargetName(
   prompt: PromptApi,
   fallback: string,
-  i18n: InstallerI18n,
+  copy: InstallerCopy,
 ) {
   const defaultName = normalizeTargetName(fallback) || "rin-target";
   return String(
     prompt.ensureNotCancelled(
       await prompt.text({
-        message: i18n.targetNameMessage,
+        message: copy.targetNameMessage,
         placeholder: defaultName,
         defaultValue: defaultName,
         validate(value: string) {
-          if (!normalizeTargetName(value)) return i18n.targetNameRequired;
+          if (!normalizeTargetName(value)) return copy.targetNameRequired;
         },
       }),
     ),
@@ -189,7 +189,7 @@ export async function promptTargetInstall(
   currentUser: string,
   allUsers: SystemUser[],
   targetHomeForUser: (user: string) => string,
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
   targetMode: "current" | "existing" | "new",
 ) {
   const otherUsers = allUsers.filter(
@@ -211,7 +211,7 @@ export async function promptTargetInstall(
     }
     targetUser = prompt.ensureNotCancelled(
       await prompt.select({
-        message: i18n.chooseExistingUserMessage,
+        message: copy.chooseExistingUserMessage,
         options: existingCandidates.map((entry) => ({
           value: entry.name,
           label: entry.name,
@@ -222,12 +222,12 @@ export async function promptTargetInstall(
   } else if (targetMode === "new") {
     targetUser = prompt.ensureNotCancelled(
       await prompt.text({
-        message: i18n.enterNewUsernameMessage,
-        placeholder: i18n.usernamePlaceholder,
+        message: copy.enterNewUsernameMessage,
+        placeholder: copy.usernamePlaceholder,
         validate(value: string) {
           const next = String(value || "").trim();
-          if (!next) return i18n.usernameRequired;
-          if (!isValidNewSystemUserName(next)) return i18n.usernameInvalid;
+          if (!next) return copy.usernameRequired;
+          if (!isValidNewSystemUserName(next)) return copy.usernameInvalid;
         },
       }),
     );
@@ -251,12 +251,12 @@ export async function promptTargetInstall(
 export function describeInstallDirState(
   installDir: string,
   state: { exists: boolean; entryCount: number; sample: string[] },
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
   if (state.exists) {
     return {
-      title: i18n.existingDirectoryTitle,
-      text: i18n.existingDirectoryText(
+      title: copy.existingDirectoryTitle,
+      text: copy.existingDirectoryText(
         installDir,
         state.entryCount,
         state.sample,
@@ -264,20 +264,20 @@ export function describeInstallDirState(
     };
   }
   return {
-    title: i18n.installDirectoryTitle,
-    text: i18n.newDirectoryText(installDir),
+    title: copy.installDirectoryTitle,
+    text: copy.newDirectoryText(installDir),
   };
 }
 
 export async function promptDefaultTargetUser(
   prompt: PromptApi,
   targetUser: string,
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
   return Boolean(
     prompt.ensureNotCancelled(
       await prompt.confirm({
-        message: i18n.chooseDefaultTargetMessage(targetUser),
+        message: copy.chooseDefaultTargetMessage(targetUser),
         initialValue: true,
       }),
     ),
@@ -319,10 +319,10 @@ function modelAuthKind(model: any): "subscription" | "api" {
   return model?.authKind === "subscription" ? "subscription" : "api";
 }
 
-function providerAuthLabel(model: any, i18n: InstallerI18n) {
+function providerAuthLabel(model: any, copy: InstallerCopy) {
   return modelAuthKind(model) === "subscription"
-    ? i18n.subscriptionAuthLabel
-    : i18n.apiAuthLabel;
+    ? copy.subscriptionAuthLabel
+    : copy.apiAuthLabel;
 }
 
 function removeTrailingAuthLabel(label: string, authLabel: string) {
@@ -335,22 +335,22 @@ function removeTrailingAuthLabel(label: string, authLabel: string) {
     .trim();
 }
 
-function providerDisplayLabel(model: any, i18n: InstallerI18n) {
+function providerDisplayLabel(model: any, copy: InstallerCopy) {
   return removeTrailingAuthLabel(
     modelProviderLabel(model),
-    providerAuthLabel(model, i18n),
+    providerAuthLabel(model, copy),
   );
 }
 
 function providerHintLabel(
   model: any,
-  i18n: InstallerI18n,
+  copy: InstallerCopy,
   modelCount: number,
   readinessHint: string,
 ) {
   return [
-    providerAuthLabel(model, i18n),
-    i18n.modelCountLabel(modelCount),
+    providerAuthLabel(model, copy),
+    copy.modelCountLabel(modelCount),
     readinessHint,
   ]
     .filter(Boolean)
@@ -365,7 +365,7 @@ export async function promptProviderSetup(
     loadModelChoices?: typeof loadModelChoices;
     configureProviderAuth?: typeof configureProviderAuth;
   } = {},
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
   let provider = "";
   let modelId = "";
@@ -375,11 +375,11 @@ export async function promptProviderSetup(
   const loadChoices = deps.loadModelChoices || loadModelChoices;
   const configureAuth = deps.configureProviderAuth || configureProviderAuth;
   const models = await runInstallerProgress(
-    i18n.loadingModelChoicesMessage,
+    copy.loadingModelChoicesMessage,
     () => loadChoices(installDir, readJsonFile),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
   const providerNames = [
@@ -397,7 +397,7 @@ export async function promptProviderSetup(
       String(a).localeCompare(String(b))
     );
   });
-  if (!providerNames.length) throw new Error(i18n.noModelsAvailableError);
+  if (!providerNames.length) throw new Error(copy.noModelsAvailableError);
 
   const existingDefaults = loadExistingProviderDefaults(
     installDir,
@@ -435,7 +435,7 @@ export async function promptProviderSetup(
   provider = String(
     prompt.ensureNotCancelled(
       await prompt.select({
-        message: i18n.chooseProviderMessage,
+        message: copy.chooseProviderMessage,
         options: providerNames.map((name) => {
           const scoped = models.filter((model) => model.provider === name);
           const firstModel = scoped[0];
@@ -443,14 +443,14 @@ export async function promptProviderSetup(
             (model) => model.available,
           ).length;
           const readinessHint = availableCount
-            ? `${availableCount}/${scoped.length} ${i18n.providerReadyHint}`
-            : i18n.providerNeedsAuthHint;
+            ? `${availableCount}/${scoped.length} ${copy.providerReadyHint}`
+            : copy.providerNeedsAuthHint;
           return {
             value: name,
-            label: providerDisplayLabel(firstModel, i18n),
+            label: providerDisplayLabel(firstModel, copy),
             hint: providerHintLabel(
               firstModel,
-              i18n,
+              copy,
               scoped.length,
               readinessHint,
             ),
@@ -463,24 +463,24 @@ export async function promptProviderSetup(
   authResult = await configureAuth(String(provider), installDir, {
     readJsonFile,
     ensureNotCancelled: prompt.ensureNotCancelled,
-    i18n,
+    copy,
   });
 
   const providerModels = models.filter((model) => model.provider === provider);
   if (!providerModels.length)
-    throw new Error(i18n.noModelsForProviderError(provider));
+    throw new Error(copy.noModelsForProviderError(provider));
   modelId = String(
     prompt.ensureNotCancelled(
       await prompt.select({
-        message: i18n.chooseModelMessage,
+        message: copy.chooseModelMessage,
         options: providerModels.map((model) => ({
           value: model.id,
           label: model.id,
           hint: [
             authResult.available || model.available
-              ? i18n.providerReadyHint
-              : i18n.providerNeedsAuthHint,
-            model.reasoning ? i18n.reasoningHint : i18n.noReasoningHint,
+              ? copy.providerReadyHint
+              : copy.providerNeedsAuthHint,
+            model.reasoning ? copy.reasoningHint : copy.noReasoningHint,
           ].join(" · "),
         })),
       }),
@@ -491,7 +491,7 @@ export async function promptProviderSetup(
   thinkingLevel = String(
     prompt.ensureNotCancelled(
       await prompt.select({
-        message: i18n.chooseThinkingLevelMessage,
+        message: copy.chooseThinkingLevelMessage,
         options: getSupportedThinkingLevels(model).map((level) => ({
           value: level,
           label: level,
@@ -504,9 +504,9 @@ export async function promptProviderSetup(
 }
 
 export function buildInstallSafetyBoundaryText(
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
-  return i18n.buildInstallSafetyBoundaryText();
+  return copy.buildInstallSafetyBoundaryText();
 }
 
 export function buildInstallPlanText(
@@ -521,9 +521,9 @@ export function buildInstallPlanText(
     setDefaultTarget?: boolean;
     createSystemUser?: boolean;
   },
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
-  return i18n.buildInstallPlanText({
+  return copy.buildInstallPlanText({
     targetUser: options.targetUser,
     installDir: options.installDir,
     provider: options.provider,
@@ -662,7 +662,7 @@ export function buildInstallOutroText(
     pathValue?: string;
     installedServiceKind?: string;
   },
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
   const rinPath = String(options.rinPath || "").trim();
   const userSuffix =
@@ -670,7 +670,7 @@ export function buildInstallOutroText(
       ? ""
       : ` -u ${options.targetUser}`;
   if (!rinPath) {
-    return i18n.outroInstalled(
+    return copy.outroInstalled(
       options.targetUser,
       options.installedServiceKind,
       {
@@ -683,7 +683,7 @@ export function buildInstallOutroText(
     options.pathValue ?? process.env.PATH ?? "",
     launcherDir,
   );
-  return i18n.outroInstalled(options.targetUser, options.installedServiceKind, {
+  return copy.outroInstalled(options.targetUser, options.installedServiceKind, {
     openCommand: `rin${userSuffix}`,
     immediateCommand: `${rinPath}${userSuffix}`,
     launcherDir,
@@ -698,16 +698,16 @@ export function buildPostInstallInitExitText(
     rinPath?: string;
     pathValue?: string;
   },
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
   const rinPath = String(options.rinPath || "").trim();
-  if (!rinPath) return i18n.buildPostInstallInitExitText(options);
+  if (!rinPath) return copy.buildPostInstallInitExitText(options);
   const launcherDir = path.dirname(rinPath);
   const launcherDirOnPath = pathListIncludesDir(
     options.pathValue ?? process.env.PATH ?? "",
     launcherDir,
   );
-  return i18n.buildPostInstallInitExitText({
+  return copy.buildPostInstallInitExitText({
     ...options,
     rinCommand: launcherDirOnPath ? "rin" : rinPath,
     launcherDir,
@@ -721,7 +721,7 @@ export function buildFinalRequirements(
     needsElevatedWrite: boolean;
     needsElevatedService: boolean;
   },
-  i18n: InstallerI18n = createInstallerI18n(),
+  copy: InstallerCopy = createInstallerCopy(),
 ) {
-  return i18n.buildFinalRequirements(options);
+  return copy.buildFinalRequirements(options);
 }

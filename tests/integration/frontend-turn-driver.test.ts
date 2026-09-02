@@ -784,17 +784,17 @@ test("frontend turn driver propagates canonical run identity through terminal pr
   );
 });
 
-test("frontend message catalogs update subsequent compaction lifecycle copy", async () => {
+test("frontend command response settings update subsequent compaction lifecycle copy", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
 
   await emitDriverEvent(driver, {
     type: "extension_ui_request",
-    method: "setMessageCatalog",
-    catalog: {
-      "session.compaction.started": "Localized compacting",
-      "session.compaction.summary": "Localized {tokens}",
+    method: "setCommandResponses",
+    commandResponses: {
+      compactionStart: "Configured compacting",
+      compactionSummaryLine: "Configured {tokens}",
     },
   });
   await emitDriverEvent(driver, { type: "compaction_start" });
@@ -807,16 +807,16 @@ test("frontend message catalogs update subsequent compaction lifecycle copy", as
   assert.deepEqual(seen, [
     {
       type: "extension_ui_request",
-      method: "setMessageCatalog",
-      catalog: {
-        "session.compaction.started": "Localized compacting",
-        "session.compaction.summary": "Localized {tokens}",
+      method: "setCommandResponses",
+      commandResponses: {
+        compactionStart: "Configured compacting",
+        compactionSummaryLine: "Configured {tokens}",
       },
     },
-    { type: "compaction_start_notice", text: "Localized compacting" },
+    { type: "compaction_start_notice", text: "Configured compacting" },
     {
       type: "passive_notice",
-      text: "[compaction]\n\nLocalized 1,234",
+      text: "[compaction]\n\nConfigured 1,234",
       level: "info",
       deferDuringTurn: false,
       noticeKind: "compaction_end",

@@ -18,7 +18,7 @@ import {
   selectPlatformReleaseAsset,
   type ResolvedRelease,
 } from "../rin-lib/release.js";
-import { type InstallerI18n } from "../i18n.js";
+import { type InstallerCopy } from "../product-copy.js";
 import { restoreTerminalCursor, runInstallerProgress } from "./progress.js";
 import { readJsonFileOrDefault } from "../platform/fs.js";
 import {
@@ -309,7 +309,7 @@ async function extractZipArchive(options: {
   archivePath: string;
   sourceRoot: string;
   workspace: UpdateRuntimeSourceWorkspace;
-  i18n: InstallerI18n;
+  copy: InstallerCopy;
 }) {
   const unzip = requireTool("unzip", ["/usr/bin/unzip", "/bin/unzip"]);
   const zipRoot = path.join(options.workspace.tempRoot, "zip-extract");
@@ -318,10 +318,10 @@ async function extractZipArchive(options: {
   await runLoggedUpdateCommandSync(
     unzip,
     ["-q", options.archivePath, "-d", zipRoot],
-    options.i18n.preparingUpdateSourceMessage,
+    options.copy.preparingUpdateSourceMessage,
     options.workspace.logFile,
     {},
-    options.i18n.buildUpdateCommandFailureHeader,
+    options.copy.buildUpdateCommandFailureHeader,
   );
   const children = fs.readdirSync(zipRoot);
   const copyRoot =
@@ -341,7 +341,7 @@ async function extractUpdateArchive(options: {
   archivePath: string;
   sourceRoot: string;
   workspace: UpdateRuntimeSourceWorkspace;
-  i18n: InstallerI18n;
+  copy: InstallerCopy;
 }) {
   if (/\.zip$/i.test(options.archivePath)) {
     await extractZipArchive(options);
@@ -357,10 +357,10 @@ async function extractUpdateArchive(options: {
       options.sourceRoot,
       "--strip-components=1",
     ],
-    options.i18n.preparingUpdateSourceMessage,
+    options.copy.preparingUpdateSourceMessage,
     options.workspace.logFile,
     {},
-    options.i18n.buildUpdateCommandFailureHeader,
+    options.copy.buildUpdateCommandFailureHeader,
   );
 }
 
@@ -704,10 +704,10 @@ export function createUpdateRuntimeSourceWorkspace(
 export async function prepareUpdateRuntimeSource(options: {
   release: ResolvedRelease;
   workspace: UpdateRuntimeSourceWorkspace;
-  i18n: InstallerI18n;
+  copy: InstallerCopy;
   env?: NodeJS.ProcessEnv;
 }) {
-  const { release, workspace, i18n } = options;
+  const { release, workspace, copy } = options;
   const curl = fs.existsSync("/usr/bin/curl") ? "/usr/bin/curl" : "";
   const wget = fs.existsSync("/usr/bin/wget") ? "/usr/bin/wget" : "";
   const platformAsset = selectPlatformReleaseAsset(release);
@@ -724,19 +724,19 @@ export async function prepareUpdateRuntimeSource(options: {
       await runLoggedUpdateCommandSync(
         curl,
         ["-fsSL", url, "-o", archivePath],
-        i18n.fetchingUpdateSourceMessage,
+        copy.fetchingUpdateSourceMessage,
         workspace.logFile,
         {},
-        i18n.buildUpdateCommandFailureHeader,
+        copy.buildUpdateCommandFailureHeader,
       );
     } else if (wget) {
       await runLoggedUpdateCommandSync(
         wget,
         ["-qO", archivePath, url],
-        i18n.fetchingUpdateSourceMessage,
+        copy.fetchingUpdateSourceMessage,
         workspace.logFile,
         {},
-        i18n.buildUpdateCommandFailureHeader,
+        copy.buildUpdateCommandFailureHeader,
       );
     } else {
       await downloadFile(url, archivePath);
@@ -748,16 +748,16 @@ export async function prepareUpdateRuntimeSource(options: {
       workspace.tempRoot,
       platformAssetUrl,
     );
-    await runInstallerProgress(i18n.fetchingUpdateSourceMessage, async () => {
+    await runInstallerProgress(copy.fetchingUpdateSourceMessage, async () => {
       await downloadUpdateArchive(platformAssetUrl, workspace.archivePath);
       verifyArchiveSha256(workspace.archivePath, platformAsset?.sha256);
     });
-    await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
+    await runInstallerProgress(copy.preparingUpdateSourceMessage, () =>
       extractUpdateArchive({
         archivePath: workspace.archivePath,
         sourceRoot: workspace.sourceRoot,
         workspace,
-        i18n,
+        copy,
       }),
     );
     const npmCommand = preparedRuntimeNpmCommand(
@@ -768,30 +768,30 @@ export async function prepareUpdateRuntimeSource(options: {
     await runLoggedUpdateCommandSync(
       npmCommand.command,
       npmCommand.args,
-      i18n.preparingUpdateSourceMessage,
+      copy.preparingUpdateSourceMessage,
       workspace.logFile,
       { cwd: workspace.sourceRoot, ...npmCommand.options },
-      i18n.buildUpdateCommandFailureHeader,
+      copy.buildUpdateCommandFailureHeader,
     );
     await verifyPreparedRuntimeNativeDependencies({
       sourceRoot: workspace.sourceRoot,
       env: npmCommand.options.env,
-      label: i18n.preparingUpdateSourceMessage,
+      label: copy.preparingUpdateSourceMessage,
       logFile: workspace.logFile,
-      buildFailureHeader: i18n.buildUpdateCommandFailureHeader,
+      buildFailureHeader: copy.buildUpdateCommandFailureHeader,
     });
     return workspace;
   }
 
-  await runInstallerProgress(i18n.fetchingUpdateSourceMessage, () =>
+  await runInstallerProgress(copy.fetchingUpdateSourceMessage, () =>
     downloadUpdateArchive(release.archiveUrl, workspace.archivePath),
   );
-  await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
+  await runInstallerProgress(copy.preparingUpdateSourceMessage, () =>
     extractUpdateArchive({
       archivePath: workspace.archivePath,
       sourceRoot: workspace.sourceRoot,
       workspace,
-      i18n,
+      copy,
     }),
   );
 
@@ -808,11 +808,11 @@ export async function prepareUpdateRuntimeSource(options: {
       label,
       workspace.logFile,
       { cwd: workspace.sourceRoot, ...command.options },
-      i18n.buildUpdateCommandFailureHeader,
+      copy.buildUpdateCommandFailureHeader,
     );
   };
   await runInstallerProgress(
-    i18n.installingUpdateDependenciesMessage,
+    copy.installingUpdateDependenciesMessage,
     async () => {
       if (release.channel === "stable") {
         disablePackageRootPrepareScript(workspace.sourceRoot);
@@ -824,34 +824,34 @@ export async function prepareUpdateRuntimeSource(options: {
             "--no-audit",
             "--loglevel=error",
           ],
-          i18n.installingUpdateDependenciesMessage,
+          copy.installingUpdateDependenciesMessage,
         );
       } else if (
         fs.existsSync(path.join(workspace.sourceRoot, "package-lock.json"))
       ) {
         await runPreparedNpm(
           ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
-          i18n.installingUpdateDependenciesMessage,
+          copy.installingUpdateDependenciesMessage,
         );
       } else {
         await runPreparedNpm(
           ["install", "--no-fund", "--no-audit", "--loglevel=error"],
-          i18n.installingUpdateDependenciesMessage,
+          copy.installingUpdateDependenciesMessage,
         );
       }
     },
   );
   if (release.channel !== "stable") {
-    await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
+    await runInstallerProgress(copy.buildingUpdateRuntimeMessage, () =>
       runPreparedNpm(
         ["run", "build", "--silent"],
-        i18n.buildingUpdateRuntimeMessage,
+        copy.buildingUpdateRuntimeMessage,
       ),
     );
-    await runInstallerProgress(i18n.pruningUpdateDependenciesMessage, () =>
+    await runInstallerProgress(copy.pruningUpdateDependenciesMessage, () =>
       runPreparedNpm(
         ["prune", "--omit=dev", "--no-fund", "--no-audit", "--loglevel=error"],
-        i18n.pruningUpdateDependenciesMessage,
+        copy.pruningUpdateDependenciesMessage,
       ),
     );
   }
@@ -868,9 +868,9 @@ export async function prepareUpdateRuntimeSource(options: {
   await verifyPreparedRuntimeNativeDependencies({
     sourceRoot: workspace.sourceRoot,
     env: verificationCommand.options.env,
-    label: i18n.preparingUpdateSourceMessage,
+    label: copy.preparingUpdateSourceMessage,
     logFile: workspace.logFile,
-    buildFailureHeader: i18n.buildUpdateCommandFailureHeader,
+    buildFailureHeader: copy.buildUpdateCommandFailureHeader,
   });
 
   return workspace;

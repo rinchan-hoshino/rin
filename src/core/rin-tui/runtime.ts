@@ -24,7 +24,6 @@ import {
 } from "../presentation/error.js";
 import {
   applyFrontendBuiltinCommandText,
-  applyRinMessageCatalog,
   parseFrontendCompactCommand,
   resolveRinFrontendCommandResponses,
 } from "../rin-frontend-sdk/command-responses.js";
@@ -1348,10 +1347,10 @@ export class RpcInteractiveSession {
         if (fallbackText) ui?.notify?.(fallbackText, "info");
         return;
       }
-      case "setMessageCatalog":
-        this.commandResponses = applyRinMessageCatalog(
+      case "setCommandResponses":
+        this.commandResponses = resolveRinFrontendCommandResponses(
+          payload.commandResponses,
           this.commandResponseBaseline,
-          payload.catalog,
         );
         return;
       case "setStatus":

@@ -39,8 +39,8 @@ const replacements: Record<string, string> = {
       return { kind: "local", targetUser: scenario.targetUser || "other", installDir: scenario.installDir || "/owner/install" };
     }
   `,
-  "dist/core/i18n.js": `
-    export function createInstallerI18n(language) {
+  "dist/core/product-copy.js": `
+    export function createInstallerCopy(language) {
       const fn = (name) => (...args) => name + ":" + args.map(String).join(",");
       return new Proxy({
         installerCancelled: "installer cancelled",
@@ -98,7 +98,7 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/rin-install/updater.js": `
     export async function startUpdater(options) {
-      globalThis.__rinInstallerOwnerEvents.push(["updater", options.releaseRequest, options.requestedInstallDir, options.requestedTargetUser, options.assumeYes, options.preconfirmed, options.i18n.introTitle]);
+      globalThis.__rinInstallerOwnerEvents.push(["updater", options.releaseRequest, options.requestedInstallDir, options.requestedTargetUser, options.assumeYes, options.preconfirmed, options.copy.introTitle]);
       options.detectCurrentUser();
       await options.confirm({ message: "owner update", initialValue: true });
     }

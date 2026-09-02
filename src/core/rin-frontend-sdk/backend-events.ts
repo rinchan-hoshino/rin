@@ -13,8 +13,6 @@ import {
 } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 import {
-  applyRinMessageCatalog,
-  normalizeRinMessageCatalog,
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
@@ -323,18 +321,17 @@ export function createRinFrontendBackendEventTranslator(
 
       if (payload.type === "extension_ui_request") {
         const method = safeString(payload.method).trim();
-        if (method === "setMessageCatalog") {
-          const catalog = normalizeRinMessageCatalog(payload.catalog);
-          commandResponses = applyRinMessageCatalog(
+        if (method === "setCommandResponses") {
+          commandResponses = resolveRinFrontendCommandResponses(
+            payload.commandResponses,
             commandResponseBaseline,
-            catalog,
           );
           return [
             {
               ...payload,
               type: "extension_ui_request",
               method,
-              catalog,
+              commandResponses: payload.commandResponses,
             },
           ];
         }

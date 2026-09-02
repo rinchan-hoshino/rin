@@ -28,34 +28,34 @@ test("chat command responses resolve stable English defaults", () => {
 
 test("chat command responses accept partial extension contributions", () => {
   const responses = commandResponses.resolveChatCommandResponses({
-    new: "New localized session",
-    compactionStart: "Compacting locally",
+    new: "Configured new session",
+    compactionStart: "Configured compaction",
     abort: "   ",
   });
-  assert.equal(responses.new, "New localized session");
-  assert.equal(responses.compactionStart, "Compacting locally");
+  assert.equal(responses.new, "Configured new session");
+  assert.equal(responses.compactionStart, "Configured compaction");
   assert.equal(responses.abort, "Aborted current operation.");
 });
 
-test("chat command response presentation localizes builtin results", () => {
+test("chat command response presentation applies configured builtin text", () => {
   const responses = commandResponses.resolveChatCommandResponses({
-    new: "Localized new session",
-    newCancelled: "Localized cancellation",
+    new: "Configured new session",
+    newCancelled: "Configured cancellation",
   });
   assert.equal(
-    commandResponses.localizeChatBuiltinCommandResult(
+    commandResponses.applyChatBuiltinCommandText(
       "new",
       { text: "frontend text", cancelled: false },
       responses,
     ).text,
-    "Localized new session",
+    "Configured new session",
   );
   assert.equal(
-    commandResponses.localizeChatBuiltinCommandResult(
+    commandResponses.applyChatBuiltinCommandText(
       "new",
       { cancelled: true },
       responses,
     ).text,
-    "Localized cancellation",
+    "Configured cancellation",
   );
 });

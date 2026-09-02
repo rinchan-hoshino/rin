@@ -1431,6 +1431,29 @@ test("chat controller skips recovery bootstrap and uses configured copy for /new
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller /done exits the current worker without entering its command path", async () => {
+  const controller = await createController();
+  const replies = [];
+  let shutdowns = 0;
+  controller.deliverAssistantReply = async ({ text }) => {
+    replies.push(text);
+  };
+  controller.shutdownSession = async () => {
+    shutdowns += 1;
+  };
+  controller.connect = async () => {
+    throw new Error("/done must not reconnect a worker before exiting it");
+  };
+  controller.driver.runCommand = async () => {
+    throw new Error("/done must not enter the worker command path");
+  };
+
+  await controller.runCommand("/done");
+
+  assert.equal(shutdowns, 1);
+  assert.deepEqual(replies, ["Conversation completed; worker exited."]);
+});
+
 test("chat controller /new clears the old binding when the logical session has no file yet", async () => {
   const controller = await createController();
   const oldSessionFile = path.join(
@@ -1630,7 +1653,7 @@ test("chat controller rejects rich command results outside command execution", a
   );
 });
 
-test("chat controller keeps message catalogs separate from Pi-native Working copy", async () => {
+test("chat controller keeps command response settings separate from Pi-native Working copy", async () => {
   const workingMessages = [];
   const controller = await createController("telegram/1:2", {
     onWorkingMessage(message) {
@@ -1639,8 +1662,8 @@ test("chat controller keeps message catalogs separate from Pi-native Working cop
   });
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
-    method: "setMessageCatalog",
-    catalog: { "session.new.completed": "Localized new session" },
+    method: "setCommandResponses",
+    commandResponses: { new: "Localized new session" },
   });
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
@@ -1978,8 +2001,8 @@ test("chat controller suppresses ordinary Working for manual compaction", async 
   deliveries.length = 0;
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
-    method: "setMessageCatalog",
-    catalog: { "session.compaction.started": "Localized compacting" },
+    method: "setCommandResponses",
+    commandResponses: { compacting: "Localized compacting" },
   });
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
@@ -3784,49 +3807,6 @@ test("chat controller ignores replied session files for non-new commands", async
 
   assert.deepEqual(calls, ["ensureSessionReady", "compact"]);
   assert.equal(liveSessionFile, currentSessionFile);
-});
-
-test("chat controller uses the durable frontend session after connect for /done", async () => {
-  const controller = await createController();
-  const staleSessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "stale-chat-state.jsonl",
-  );
-  const frontendSessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "durable-frontend.jsonl",
-  );
-  await fs.mkdir(path.dirname(staleSessionFile), { recursive: true });
-  await fs.writeFile(staleSessionFile, "", "utf8");
-  await fs.writeFile(frontendSessionFile, "", "utf8");
-
-  controller.state.sessionFile = staleSessionFile;
-  controller.connect = async function () {
-    this.state.sessionFile = frontendSessionFile;
-    return true;
-  };
-  controller.driver.currentSessionFile = () => frontendSessionFile;
-  controller.driver.currentSessionId = () => "durable-frontend-session";
-  controller.driver.runCommand = async (_commandLine, options) => {
-    if (options?.restoreSessionFile !== frontendSessionFile) {
-      throw new Error("frontend_session_switch_requires_new");
-    }
-    return {
-      handled: true,
-      text: "Command done.",
-      sessionFile: frontendSessionFile,
-    };
-  };
-  controller.commitPendingDelivery = async function () {
-    this.stagedDelivery = null;
-  };
-
-  await controller.runCommand("/done", "m-done", "m-done");
-
-  assert.equal(controller.currentSessionFile(), frontendSessionFile);
-  assert.equal(controller.state.sessionFile, "durable-frontend.jsonl");
 });
 
 test("chat controller uses configured command response overrides", async () => {

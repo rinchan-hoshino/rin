@@ -32,7 +32,7 @@ import {
   promptProviderSetup,
   promptInstallTarget,
 } from "./interactive.js";
-import { createInstallerI18n } from "../i18n.js";
+import { createInstallerCopy } from "../product-copy.js";
 import { startLegacyPreparedUpdatePayload } from "./update-payload.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
@@ -56,8 +56,8 @@ import {
 
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    const i18n = createInstallerI18n();
-    cancel(i18n.installerCancelled);
+    const copy = createInstallerCopy();
+    cancel(copy.installerCancelled);
     requestProcessTermination(1);
   }
   return value as T;
@@ -168,30 +168,30 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   if (cli.quickRun) return await runQuickRun();
 
-  const i18n = createInstallerI18n();
+  const copy = createInstallerCopy();
 
   const { currentUser, allUsers } = await runInstallerProgress(
-    i18n.preparingInstallerMessage,
+    copy.preparingInstallerMessage,
     () => ({
       currentUser: detectCurrentUser(),
       allUsers: listSystemUsers(),
     }),
-    { successMessage: i18n.installStepComplete },
+    { successMessage: copy.installStepComplete },
   );
-  intro(i18n.introTitle);
-  const localizedConfirm: typeof confirm = (options) =>
+  intro(copy.introTitle);
+  const confirmWithCopy: typeof confirm = (options) =>
     confirm({
-      active: i18n.confirmActiveLabel,
-      inactive: i18n.confirmInactiveLabel,
+      active: copy.confirmActiveLabel,
+      inactive: copy.confirmInactiveLabel,
       ...options,
     });
 
   note(
     wrapInstallerNoteText(
-      buildInstallSafetyBoundaryText(i18n),
+      buildInstallSafetyBoundaryText(copy),
       process.stderr.columns,
     ),
-    i18n.safetyBoundaryTitle,
+    copy.safetyBoundaryTitle,
   );
 
   const promptApi = {
@@ -199,34 +199,34 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     select,
     text,
     multiselect,
-    confirm: localizedConfirm,
+    confirm: confirmWithCopy,
   };
   const target = await promptInstallTarget(
     promptApi,
     currentUser,
     allUsers,
     targetHomeForUser,
-    i18n,
+    copy,
   );
   if (target.cancelled) {
     note(
-      i18n.noEligibleUsersText(
+      copy.noEligibleUsersText(
         currentUser,
         allUsers.map((entry) => entry.name),
       ),
-      i18n.targetUserTitle,
+      copy.targetUserTitle,
     );
-    outro(i18n.nothingInstalled);
+    outro(copy.nothingInstalled);
     return;
   }
 
   if (target.kind === "ssh") {
     const registered = await runInstallerProgress(
-      i18n.applyingTargetSelectionMessage,
+      copy.applyingTargetSelectionMessage,
       () => installExistingSshTarget(target),
       {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
+        successMessage: copy.installStepComplete,
+        failureMessage: copy.installStepFailed,
       },
     );
     outro(
@@ -236,11 +236,11 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   }
   if (target.kind === "container") {
     const registered = await runInstallerProgress(
-      i18n.applyingTargetSelectionMessage,
+      copy.applyingTargetSelectionMessage,
       () => installContainerTarget(target),
       {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
+        successMessage: copy.installStepComplete,
+        failureMessage: copy.installStepFailed,
       },
     );
     outro(
@@ -250,15 +250,15 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   }
   const { targetUser, installDir, createSystemUser } = target;
   const installDirNote = await runInstallerProgress(
-    i18n.inspectingInstallDirectoryMessage,
+    copy.inspectingInstallDirectoryMessage,
     () =>
-      describeInstallDirState(installDir, summarizeDirState(installDir), i18n),
-    { successMessage: i18n.installStepComplete },
+      describeInstallDirState(installDir, summarizeDirState(installDir), copy),
+    { successMessage: copy.installStepComplete },
   );
   note(installDirNote.text, installDirNote.title);
   const setDefaultTarget = isSameSystemUser(targetUser, currentUser)
     ? false
-    : await promptDefaultTargetUser(promptApi, targetUser, i18n);
+    : await promptDefaultTargetUser(promptApi, targetUser, copy);
 
   const { provider, modelId, thinkingLevel, authResult } =
     await promptProviderSetup(
@@ -266,7 +266,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       installDir,
       readJsonFileOrDefault,
       {},
-      i18n,
+      copy,
     );
   note(
     wrapInstallerNoteText(
@@ -282,19 +282,19 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           setDefaultTarget,
           createSystemUser,
         },
-        i18n,
+        copy,
       ),
       process.stderr.columns,
     ),
-    i18n.installChoicesTitle,
+    copy.installChoicesTitle,
   );
 
   const ownership = describeOwnership(targetUser, installDir);
   if (!ownership.ownerMatches && ownership.targetUid >= 0) {
-    note(i18n.ownershipMismatchText(ownership), i18n.ownershipCheckTitle);
+    note(copy.ownershipMismatchText(ownership), copy.ownershipCheckTitle);
   }
   if (!ownership.writable) {
-    note(i18n.ownershipNotWritableText, i18n.ownershipCheckTitle);
+    note(copy.ownershipNotWritableText, copy.ownershipCheckTitle);
   }
 
   const installServiceNow = ["darwin", "linux", "win32"].includes(
@@ -313,25 +313,25 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       needsElevatedWrite,
       needsElevatedService,
     },
-    i18n,
+    copy,
   );
   const shouldProceed = ensureNotCancelled(
-    await localizedConfirm({
+    await confirmWithCopy({
       message: wrapInstallerNoteText(
-        i18n.finalizeInstallationMessage(finalRequirements),
+        copy.finalizeInstallationMessage(finalRequirements),
         process.stderr.columns,
       ),
       initialValue: true,
     }),
   );
   if (!shouldProceed) {
-    outro(i18n.installerFinishedWithoutWritingChanges);
+    outro(copy.installerFinishedWithoutWritingChanges);
     return;
   }
 
   const installSpinnerMessage = needsElevatedWrite
-    ? i18n.publishingRuntimeMessageElevated
-    : i18n.publishingRuntimeMessage;
+    ? copy.publishingRuntimeMessageElevated
+    : copy.publishingRuntimeMessage;
   const result = await runInstallerProgress(
     installSpinnerMessage,
     () =>
@@ -352,8 +352,8 @@ export async function startInstaller(argv = process.argv.slice(2)) {
         { writeStatus() {} },
       ),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
   const {
@@ -369,44 +369,44 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   note(
     [
-      `${i18n.targetInstallDirLabel}: ${installDir}`,
-      `${i18n.writtenPathLabel}: ${written.settingsPath}`,
-      `${i18n.writtenPathLabel}: ${written.authPath}`,
-      `${i18n.writtenPathLabel}: ${written.manifestPath}`,
+      `${copy.targetInstallDirLabel}: ${installDir}`,
+      `${copy.writtenPathLabel}: ${written.settingsPath}`,
+      `${copy.writtenPathLabel}: ${written.authPath}`,
+      `${copy.writtenPathLabel}: ${written.manifestPath}`,
       written.locatorManifestPath &&
       written.locatorManifestPath !== written.manifestPath
-        ? `${i18n.writtenPathLabel}: ${written.locatorManifestPath}`
+        ? `${copy.writtenPathLabel}: ${written.locatorManifestPath}`
         : "",
-      `${i18n.writtenPathLabel}: ${written.launcherPath}`,
-      `${i18n.writtenPathLabel}: ${written.rinPath}`,
-      `${i18n.writtenPathLabel}: ${written.rinInstallPath}`,
+      `${copy.writtenPathLabel}: ${written.launcherPath}`,
+      `${copy.writtenPathLabel}: ${written.rinPath}`,
+      `${copy.writtenPathLabel}: ${written.rinInstallPath}`,
       written.targetRinPath && written.targetRinPath !== written.rinPath
-        ? `${i18n.writtenPathLabel}: ${written.targetRinPath}`
+        ? `${copy.writtenPathLabel}: ${written.targetRinPath}`
         : "",
       written.targetRinInstallPath &&
       written.targetRinInstallPath !== written.rinInstallPath
-        ? `${i18n.writtenPathLabel}: ${written.targetRinInstallPath}`
+        ? `${copy.writtenPathLabel}: ${written.targetRinInstallPath}`
         : "",
-      `${i18n.writtenPathLabel}: ${publishedRuntime.currentLink}`,
-      `${i18n.writtenPathLabel}: ${publishedRuntime.releaseRoot}`,
-      installedDocsDir ? `${i18n.writtenPathLabel}: ${installedDocsDir}` : "",
+      `${copy.writtenPathLabel}: ${publishedRuntime.currentLink}`,
+      `${copy.writtenPathLabel}: ${publishedRuntime.releaseRoot}`,
+      installedDocsDir ? `${copy.writtenPathLabel}: ${installedDocsDir}` : "",
       ...(Array.isArray(installedDocs?.pi)
         ? installedDocs.pi.map(
-            (item: string) => `${i18n.writtenPathLabel}: ${item}`,
+            (item: string) => `${copy.writtenPathLabel}: ${item}`,
           )
         : []),
       installedService
-        ? `${i18n.writtenPathLabel}: ${installedService.servicePath}`
+        ? `${copy.writtenPathLabel}: ${installedService.servicePath}`
         : "",
       installedService
-        ? `${installedService.kind} ${i18n.serviceLabelLabel}: ${installedService.label}`
+        ? `${installedService.kind} ${copy.serviceLabelLabel}: ${installedService.label}`
         : "",
     ].join("\n"),
-    i18n.writtenPathsTitle,
+    copy.writtenPathsTitle,
   );
 
   if (daemonReady && initializationRequired) {
-    note(i18n.launchingInitText, i18n.launchingInitTitle);
+    note(copy.launchingInitText, copy.launchingInitTitle);
     await launchInstallerTui({
       rinPath: written.rinPath,
       sourceRoot: repoRootFromHere(),
@@ -414,9 +414,9 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     note(
       buildPostInstallInitExitText(
         { currentUser, targetUser, rinPath: written.rinPath },
-        i18n,
+        copy,
       ),
-      i18n.afterInitTitle,
+      copy.afterInitTitle,
     );
   }
 
@@ -429,7 +429,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
         rinPath: written.rinPath,
         installedServiceKind: installedService?.kind,
       },
-      i18n,
+      copy,
     ),
   );
 }

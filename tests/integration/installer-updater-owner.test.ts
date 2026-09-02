@@ -22,8 +22,8 @@ globalThis.__rinUpdaterOwnerEvents=[];
 globalThis.__rinUpdaterOwnerTargets=[];
 globalThis.__rinUpdaterOwnerCurrent=false;
 const updater=await import(pathToFileURL(path.resolve("dist/core/rin-install/updater.js")).href);
-const i18nModule=await import(pathToFileURL(path.resolve("dist/core/i18n.js")).href);
-const i18n=i18nModule.createInstallerI18n("en_US");
+const copyModule=await import(pathToFileURL(path.resolve("dist/core/product-copy.js")).href);
+const copy=copyModule.createInstallerCopy("en_US");
 const root=process.env.RIN_TEST_UPDATER_ROOT;
 const installDir=path.join(root,"install");
 fs.mkdirSync(installDir,{recursive:true});
@@ -37,14 +37,14 @@ assert.deepEqual(command.args,["/prepared/dist/app/rin-install/update-payload.js
 assert.equal(command.options.cwd,"/prepared");
 
 const output=[];const originalWrite=process.stdout.write;process.stdout.write=((chunk)=>{output.push(String(chunk));return true});
-const base={detectCurrentUser:()=>"alice",repoRootFromHere:()=>"/repo/owner",ensureNotCancelled:(value)=>value,i18n};
+const base={detectCurrentUser:()=>"alice",repoRootFromHere:()=>"/repo/owner",ensureNotCancelled:(value)=>value,copy};
 const stdinDescriptor=Object.getOwnPropertyDescriptor(process.stdin,"isTTY");
 const stdoutDescriptor=Object.getOwnPropertyDescriptor(process.stdout,"isTTY");
 Object.defineProperty(process.stdin,"isTTY",{configurable:true,value:true});
 Object.defineProperty(process.stdout,"isTTY",{configurable:true,value:true});
 try{
  await updater.startUpdater(base);
- assert.equal(output.join("").includes(i18n.noUpdateTargetsText),true);
+ assert.equal(output.join("").includes(copy.noUpdateTargetsText),true);
 
  globalThis.__rinUpdaterOwnerTargets=[{targetUser:"alice",installDir,ownerHome:path.join(root,"home"),source:"manifest"}];
  globalThis.__rinUpdaterOwnerCurrent=true;
@@ -52,7 +52,7 @@ try{
  assert.equal(globalThis.__rinUpdaterOwnerEvents.some(([name,request])=>name==="request"&&request.channel==="git"&&request.branch==="owner-branch"),true);
  globalThis.__rinUpdaterOwnerCurrent=false;
 
- await updater.startUpdater({...base,i18n:undefined,readInstalledRelease:()=>({channel:"stable"}),releaseRequest:{channel:"nightly",branch:"",version:"",explicitReleaseChannel:false},confirm:async()=>false});
+ await updater.startUpdater({...base,copy:undefined,readInstalledRelease:()=>({channel:"stable"}),releaseRequest:{channel:"nightly",branch:"",version:"",explicitReleaseChannel:false},confirm:async()=>false});
  globalThis.__rinUpdaterOwnerManifestWithoutRepo=true;
  await updater.startUpdater({...base,readInstalledRelease:()=>({channel:"invalid"}),releaseRequest:{channel:"stable",branch:"",version:"",explicitReleaseChannel:false},confirm:async()=>false});
  globalThis.__rinUpdaterOwnerManifestWithoutRepo=false;

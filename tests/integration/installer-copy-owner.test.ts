@@ -2,7 +2,10 @@ import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createInstallerI18n, createRinI18n } from "../../dist/core/i18n.js";
+import {
+  createInstallerCopy,
+  createProductCopy,
+} from "../../dist/core/product-copy.js";
 
 const samplePlan = {
   currentUser: "alice",
@@ -54,7 +57,7 @@ const functionArguments: Record<string, unknown[]> = {
 };
 
 function exerciseCopy(languageTag: string) {
-  const copy = createInstallerI18n(languageTag) as Record<string, unknown>;
+  const copy = createInstallerCopy(languageTag) as Record<string, unknown>;
   const called: string[] = [];
   for (const [name, value] of Object.entries(copy)) {
     if (typeof value !== "function") continue;
@@ -78,14 +81,14 @@ test("installer copy exposes one complete fixed English contract", () => {
   assert.equal("displayLanguage" in english, false);
   assert.equal("isChinese" in english, false);
 
-  const rinCopy = createRinI18n("fr_FR");
+  const rinCopy = createProductCopy("fr_FR");
   assert.equal(rinCopy.introTitle, english.introTitle);
   assert.equal("language" in rinCopy, false);
 });
 
 test("installer copy covers optional plan, update, login, and launcher branches", () => {
   for (const locale of ["en_US", "zh_CN"] as const) {
-    const copy = createInstallerI18n(locale);
+    const copy = createInstallerCopy(locale);
     assert.ok(
       copy.buildFinalRequirements({
         installServiceNow: false,

@@ -2,10 +2,10 @@ import { isJsonRecord } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
 import { formatCompactionSummaryCollapsedText } from "./compaction-summary-format.js";
 import { presentBuiltinCommandResult } from "./command-result-presentation.js";
-import type { RinMessageCatalog, RinMessageKey } from "./types.js";
 
 export type RinFrontendCommandResponses = {
   abort: string;
+  done: string;
   new: string;
   newCancelled: string;
   compact: string;
@@ -19,6 +19,7 @@ export type RinFrontendCommandResponses = {
 export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses =
   {
     abort: "Aborted current operation.",
+    done: "Conversation completed; worker exited.",
     new: "Started a new session.",
     newCancelled: "Session switch cancelled.",
     compact: "Compacted session.",
@@ -31,60 +32,18 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
 
 export function resolveRinFrontendCommandResponses(
   configured?: unknown,
+  baseline: RinFrontendCommandResponses = DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
 ): RinFrontendCommandResponses {
   const source = isJsonRecord(configured) ? configured : {};
   return Object.fromEntries(
-    Object.entries(DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES).map(
-      ([key, fallback]) => {
-        const value = source[key];
-        return [
-          key,
-          typeof value === "string" && value.trim() ? value : fallback,
-        ];
-      },
-    ),
-  ) as RinFrontendCommandResponses;
-}
-
-const MESSAGE_RESPONSE_KEYS: Record<
-  RinMessageKey,
-  keyof RinFrontendCommandResponses
-> = {
-  "command.abort.completed": "abort",
-  "session.new.completed": "new",
-  "session.new.cancelled": "newCancelled",
-  "session.compaction.completed": "compact",
-  "extensions.reload.completed": "reload",
-  "session.compaction.busy": "compactionBusy",
-  "session.compaction.started": "compactionStart",
-  "session.compaction.summary": "compactionSummaryLine",
-};
-
-export function applyRinMessageCatalog(
-  baseline: RinFrontendCommandResponses,
-  catalog?: unknown,
-): RinFrontendCommandResponses {
-  const next = { ...baseline };
-  if (!isJsonRecord(catalog)) return next;
-  for (const [messageKey, responseKey] of Object.entries(
-    MESSAGE_RESPONSE_KEYS,
-  ) as Array<[RinMessageKey, keyof RinFrontendCommandResponses]>) {
-    const value = catalog[messageKey];
-    if (typeof value === "string" && value.trim()) next[responseKey] = value;
-  }
-  return next;
-}
-
-export function normalizeRinMessageCatalog(
-  catalog?: unknown,
-): RinMessageCatalog {
-  if (!isJsonRecord(catalog)) return {};
-  return Object.fromEntries(
-    (Object.keys(MESSAGE_RESPONSE_KEYS) as RinMessageKey[]).flatMap((key) => {
-      const value = catalog[key];
-      return typeof value === "string" && value.trim() ? [[key, value]] : [];
+    Object.entries(baseline).map(([key, fallback]) => {
+      const value = source[key];
+      return [
+        key,
+        typeof value === "string" && value.trim() ? value : fallback,
+      ];
     }),
-  ) as RinMessageCatalog;
+  ) as RinFrontendCommandResponses;
 }
 
 export function frontendCommandNameFromLine(commandLine: string) {
@@ -139,6 +98,8 @@ export function applyFrontendBuiltinCommandText(
   switch (safeString(commandName).trim()) {
     case "abort":
       return { ...result, text: responses.abort };
+    case "done":
+      return { ...result, text: responses.done };
     case "new":
       return {
         ...result,

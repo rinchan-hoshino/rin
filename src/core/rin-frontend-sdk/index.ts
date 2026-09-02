@@ -1,7 +1,5 @@
 export type {
   RinExtensionCommandResult,
-  RinMessageCatalog,
-  RinMessageKey,
   RinExtensionUiMethod,
   RinExtensionUiRequest,
   RinExtensionUiResponse,
@@ -41,8 +39,6 @@ export {
 export {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   applyFrontendBuiltinCommandText,
-  applyRinMessageCatalog,
-  normalizeRinMessageCatalog,
   frontendCommandNameFromLine,
   isFrontendAbortCommand,
   isFrontendNewSessionCommand,

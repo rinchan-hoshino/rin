@@ -84,8 +84,8 @@ const sources: Record<string, string> = {
       return { plan };
     }
   `,
-  "dist/core/i18n.js": `
-    export function createInstallerI18n(language) {
+  "dist/core/product-copy.js": `
+    export function createInstallerCopy(language) {
       return {
         language,
         loadingModelChoicesMessage: "loading models",
@@ -98,8 +98,8 @@ const sources: Record<string, string> = {
     }
   `,
   "dist/core/rin-install/interactive.js": `
-    export async function promptProviderSetup(promptApi, installDir, readJsonFile, defaults, i18n) {
-      globalThis.__rinQuickRunEvents.push(["prompt-provider", installDir, defaults, i18n.language]);
+    export async function promptProviderSetup(promptApi, installDir, readJsonFile, defaults, copy) {
+      globalThis.__rinQuickRunEvents.push(["prompt-provider", installDir, defaults, copy.language]);
       promptApi.ensureNotCancelled(await promptApi.select({ message: "provider" }));
       await promptApi.text({ message: "model" });
       await promptApi.confirm({ message: "confirm", initialValue: true });

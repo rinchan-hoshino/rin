@@ -547,7 +547,7 @@
       "ownerSuite": "integration"
     },
     {
-      "source": "src/core/i18n.ts",
+      "source": "src/core/product-copy.ts",
       "ownerSuite": "integration"
     },
     {

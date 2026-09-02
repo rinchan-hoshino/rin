@@ -73,7 +73,7 @@ test("rpc builtin slash commands compose Pi commands with Rin-only overlay", () 
   );
   assert.deepEqual(
     rpc.RIN_BUILTIN_SLASH_COMMANDS.map((command) => command.name),
-    ["help", "abort", "status"],
+    ["help", "abort", "status", "done"],
   );
   assert.equal(names.includes("todos"), false);
   assert.equal(

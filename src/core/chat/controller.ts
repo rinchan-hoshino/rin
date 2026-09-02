@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   RinDaemonFrontendClient,
   RinFrontendTurnDriver,
-  applyRinMessageCatalog,
   chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
@@ -20,7 +19,7 @@ import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
-  localizeChatBuiltinCommandResult,
+  applyChatBuiltinCommandText,
   resolveChatCommandResponses,
   type ChatCommandResponses,
 } from "./command-responses.js";
@@ -2760,12 +2759,6 @@ export class ChatController {
       outboxTurnFence: outboxTurnFence || getActiveChatOutboxTurnFence(),
     });
     try {
-      const frontendReady = await this.connect({
-        restoreSession: !skipSessionRecovery,
-      });
-      const restoreSessionFile = skipSessionRecovery
-        ? ""
-        : this.getRecoverableSessionFile() || storedRestoreSessionFile;
       if (commandPolicy.acceptInboundBeforeExecution) {
         this.ensureVisibleCommandTurn();
         this.markAcceptedMessage(incomingMessageId);
@@ -2774,47 +2767,59 @@ export class ChatController {
       this.commandUiMessages = [];
       this.commandUiParts = [];
       this.collectingCommandUi = true;
-      let data: any = await this.driver.runCommand(commandLine, {
-        assumeConnected: frontendReady === true,
-        assumeSessionReady:
-          frontendReady === true &&
-          sessionFilesMatch(
-            this.agentDir,
-            this.driver.currentSessionFile(),
-            restoreSessionFile,
-          ),
-        skipSessionRecovery,
-        restoreSessionFile,
-        sessionFile: explicitSessionFile,
-        managedSessionLeaf,
-        promptContext: commandName === "reload" ? promptMeta : undefined,
-        onActiveTurnInterruptionCommitted: interruptingActiveTurn
-          ? () => {
-              activeTurnInterruptionCommitted = true;
-            }
-          : undefined,
-      });
-      const nextSessionFile =
-        commandName === "new"
-          ? this.replaceStoredSessionFile(
-              data?.sessionFile,
-              this.driver.currentSessionFile(),
-            )
-          : this.updateStoredSessionFile(
-              data?.sessionFile,
-              this.driver.currentSessionFile(),
-            );
-      if (commandName === "new" && parseChatKey(this.chatKey)) {
-        await this.advanceGenerationAfterNonterminalSends({
-          preserveInboundMessageId: incomingMessageId,
-          sessionFile: nextSessionFile,
-          turnFence:
-            this.activeCommandTurnInput?.outboxTurnFence ||
-            getActiveChatOutboxTurnFence(),
+      let data: any;
+      if (commandName === "done") {
+        await this.shutdownSession();
+        data = { text: "Conversation completed; worker exited." };
+      } else {
+        const frontendReady = await this.connect({
+          restoreSession: !skipSessionRecovery,
         });
+        const restoreSessionFile = skipSessionRecovery
+          ? ""
+          : this.getRecoverableSessionFile() || storedRestoreSessionFile;
+        data = await this.driver.runCommand(commandLine, {
+          assumeConnected: frontendReady === true,
+          assumeSessionReady:
+            frontendReady === true &&
+            sessionFilesMatch(
+              this.agentDir,
+              this.driver.currentSessionFile(),
+              restoreSessionFile,
+            ),
+          skipSessionRecovery,
+          restoreSessionFile,
+          sessionFile: explicitSessionFile,
+          managedSessionLeaf,
+          promptContext: commandName === "reload" ? promptMeta : undefined,
+          onActiveTurnInterruptionCommitted: interruptingActiveTurn
+            ? () => {
+                activeTurnInterruptionCommitted = true;
+              }
+            : undefined,
+        });
+        const nextSessionFile =
+          commandName === "new"
+            ? this.replaceStoredSessionFile(
+                data?.sessionFile,
+                this.driver.currentSessionFile(),
+              )
+            : this.updateStoredSessionFile(
+                data?.sessionFile,
+                this.driver.currentSessionFile(),
+              );
+        if (commandName === "new" && parseChatKey(this.chatKey)) {
+          await this.advanceGenerationAfterNonterminalSends({
+            preserveInboundMessageId: incomingMessageId,
+            sessionFile: nextSessionFile,
+            turnFence:
+              this.activeCommandTurnInput?.outboxTurnFence ||
+              getActiveChatOutboxTurnFence(),
+          });
+        }
+        this.saveState();
       }
-      this.saveState();
-      data = localizeChatBuiltinCommandResult(
+      data = applyChatBuiltinCommandText(
         commandName,
         data,
         this.getCommandResponses(),
@@ -3330,10 +3335,10 @@ export class ChatController {
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
     if (event.type === "extension_ui_request") {
-      if (event.method === "setMessageCatalog") {
-        this.commandResponses.current = applyRinMessageCatalog(
+      if (event.method === "setCommandResponses") {
+        this.commandResponses.current = resolveChatCommandResponses(
+          event.commandResponses,
           this.commandResponses.baseline,
-          event.catalog,
         );
         return;
       }

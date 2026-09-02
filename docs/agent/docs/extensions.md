@@ -75,20 +75,20 @@ Use `RinExtensionCommandContext`, `RinExtensionCommandResult`, and `RinExtension
 
 This is a command-result channel, not an out-of-band notification API. Local media paths must exist until Chat has accepted the result; Chat validates and copies/delivers them through its normal outbox boundary.
 
-## Message catalogs and Working copy
+## Command presentation and Working copy
 
-Pi's native `ctx.ui.setWorkingMessage(...)` owns the current Working copy. Rin adds one optional full-snapshot message-catalog setter for extensions that localize core-owned semantic notices:
+Pi's native `ctx.ui.setWorkingMessage(...)` owns the current Working copy. Rin also exposes an optional generic command-response setter:
 
 ```ts
 const ui = ctx.ui as RinExtensionUIContext;
-ui.setMessageCatalog?.({
-  "session.compaction.started": "Compacting...",
-  "session.compaction.summary": "Compacted from {tokens} tokens",
+ui.setCommandResponses?.({
+  compactionStart: "Compacting...",
+  compactionSummaryLine: "Compacted from {tokens} tokens",
 });
 ctx.ui.setWorkingMessage("Working...");
 ```
 
-Catalog keys name stable host events rather than command-response fields. Each call replaces the previous extension catalog, blank or missing values fall back to the frontend baseline, and frontend chrome such as collapsed labels is not part of the catalog. Use `RinMessageCatalog` and `RinExtensionUIContext` from `@hoshinorin/rin/extension` for canonical types. A plain Pi frontend may omit `setMessageCatalog`; `setWorkingMessage` remains Pi-native.
+Each call replaces the previous extension response settings while preserving the frontend baseline for omitted fields. This API contains no locale selection, translation keys, or catalog behavior; an extension may use it for any presentation policy. A plain Pi frontend may omit `setCommandResponses`; `setWorkingMessage` remains Pi-native.
 
 ## Browser, computer, mobile, and search operation
 

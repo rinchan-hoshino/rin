@@ -1,4 +1,4 @@
-export type InstallerI18n = ReturnType<typeof createInstallerI18n>;
+export type InstallerCopy = ReturnType<typeof createInstallerCopy>;
 
 type ChatCommandDescriptions = Record<
   "help" | "abort" | "new" | "compact" | "reload" | "status",
@@ -568,7 +568,7 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
   tokenRequired: "A token is required.",
 };
 
-export function createRinI18n() {
+export function createProductCopy() {
   return {
     ...INSTALLER_DISPLAY_COPY,
     chatCommandDescriptions: {
@@ -586,6 +586,6 @@ export function createRinI18n() {
   };
 }
 
-export function createInstallerI18n() {
-  return createRinI18n();
+export function createInstallerCopy() {
+  return createProductCopy();
 }

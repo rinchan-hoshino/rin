@@ -611,9 +611,9 @@
       "preloads": ["tests/support/register-fs-utils-owner-fixture.ts"]
     },
     {
-      "source": "src/core/i18n.ts",
+      "source": "src/core/product-copy.ts",
       "suite": "integration",
-      "tests": ["tests/integration/installer-i18n-owner.test.ts"]
+      "tests": ["tests/integration/installer-copy-owner.test.ts"]
     },
     {
       "source": "src/core/rin-install/interactive.ts",

@@ -4,7 +4,7 @@ import { cancel, confirm, isCancel, select } from "@clack/prompts";
 
 import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { repoRootFromHere, detectExecutorUser } from "./common.js";
-import { createInstallerI18n } from "../i18n.js";
+import { createInstallerCopy } from "../product-copy.js";
 import {
   releaseInfoFromFile,
   type ReleaseChannel,
@@ -118,7 +118,7 @@ export function parseUpdatePayloadArgs(argv: string[]) {
 type UpdatePayloadDependencies = {
   assertAuthorizedUpdateJob?: typeof assertAuthorizedUpdateJob;
   detectExecutorUser?: typeof detectExecutorUser;
-  createInstallerI18n?: typeof createInstallerI18n;
+  createInstallerCopy?: typeof createInstallerCopy;
   repoRootFromHere?: typeof repoRootFromHere;
   releaseInfoFromFile?: typeof releaseInfoFromFile;
   startUpdater?: typeof startUpdater;
@@ -136,7 +136,7 @@ export function resolveUpdatePayloadDependencies(
     assertAuthorizedUpdateJob:
       deps.assertAuthorizedUpdateJob ?? assertAuthorizedUpdateJob,
     detectExecutorUser: deps.detectExecutorUser ?? detectExecutorUser,
-    createInstallerI18n: deps.createInstallerI18n ?? createInstallerI18n,
+    createInstallerCopy: deps.createInstallerCopy ?? createInstallerCopy,
     repoRootFromHere: deps.repoRootFromHere ?? repoRootFromHere,
     releaseInfoFromFile: deps.releaseInfoFromFile ?? releaseInfoFromFile,
     startUpdater: deps.startUpdater ?? startUpdater,
@@ -153,18 +153,18 @@ async function runUpdatePayload(
   deps: ReturnType<typeof resolveUpdatePayloadDependencies>,
 ) {
   const currentUser = deps.detectExecutorUser();
-  const i18n = deps.createInstallerI18n();
+  const copy = deps.createInstallerCopy();
   const ensureNotCancelled = <T>(value: T | symbol): T => {
     if (deps.isCancel(value)) {
-      deps.cancel(i18n.installerCancelled);
+      deps.cancel(copy.installerCancelled);
       return deps.exit(1);
     }
     return value as T;
   };
-  const localizedConfirm: typeof confirm = (options) =>
+  const confirmWithCopy: typeof confirm = (options) =>
     deps.confirm({
-      active: i18n.confirmActiveLabel,
-      inactive: i18n.confirmInactiveLabel,
+      active: copy.confirmActiveLabel,
+      inactive: copy.confirmInactiveLabel,
       ...options,
     });
   await deps.startUpdater({
@@ -174,8 +174,8 @@ async function runUpdatePayload(
     release: deps.releaseInfoFromFile(payload.releaseFile),
     releaseRequest: payload.releaseRequest,
     select: deps.select,
-    confirm: localizedConfirm,
-    i18n,
+    confirm: confirmWithCopy,
+    copy,
     requestedInstallDir: payload.requestedInstallDir,
     requestedTargetUser: payload.requestedTargetUser,
     assumeYes: payload.assumeYes,

@@ -39,7 +39,7 @@ function fakeSpinner(log: string[]) {
   };
 }
 
-const i18n = {
+const copy = {
   loadingModelChoicesMessage: "loading models",
   installStepComplete: "step complete",
   installStepFailed: "step failed",
@@ -136,7 +136,7 @@ test("provider auth returns existing credentials through injected and default st
     {
       readJsonFile: (_path, fallback) => fallback,
       ensureNotCancelled: (value) => value,
-      i18n: i18n as any,
+      copy: copy as any,
       async createAuthStorage() {
         return {
           hasAuth: () => true,
@@ -157,7 +157,7 @@ test("provider auth returns existing credentials through injected and default st
     {
       readJsonFile: (_path, fallback) => fallback,
       ensureNotCancelled: (value) => value,
-      i18n: i18n as any,
+      copy: copy as any,
       async createAuthStorage() {
         return { hasAuth: () => true };
       },
@@ -176,7 +176,7 @@ test("provider auth returns existing credentials through injected and default st
       {
         readJsonFile: readJson,
         ensureNotCancelled: (value) => value,
-        i18n: i18n as any,
+        copy: copy as any,
       },
     );
     assert.equal(fromDefaultStorage.authKind, "existing");
@@ -196,7 +196,7 @@ test("provider auth drives the complete OAuth callback contract", async () => {
     {
       readJsonFile: (_path, fallback) => fallback,
       ensureNotCancelled: (value) => value,
-      i18n: i18n as any,
+      copy: copy as any,
       spinnerFactory: (() => fakeSpinner(spinnerLog)) as any,
       async textPrompt(options: any) {
         promptValidations.push(options.validate(""));
@@ -314,7 +314,7 @@ test("provider auth drives the complete OAuth callback contract", async () => {
     {
       readJsonFile: (_path, fallback) => fallback,
       ensureNotCancelled: (value) => value,
-      i18n: i18n as any,
+      copy: copy as any,
       spinnerFactory: (() => fakeSpinner([])) as any,
       textPrompt: async (options: any) => {
         options.validate("value");
@@ -355,7 +355,7 @@ test("provider auth reports OAuth failure and saves API keys", async () => {
         {
           readJsonFile: (_path, fallback) => fallback,
           ensureNotCancelled: (value) => value,
-          i18n: i18n as any,
+          copy: copy as any,
           async createAuthStorage() {
             return {
               hasAuth: () => false,
@@ -407,7 +407,7 @@ test("provider auth reports OAuth failure and saves API keys", async () => {
     {
       readJsonFile: (_path, fallback) => fallback,
       ensureNotCancelled: (value) => value,
-      i18n: i18n as any,
+      copy: copy as any,
       textPrompt: async () => "token",
       async createAuthStorage() {
         return {

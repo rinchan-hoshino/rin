@@ -14,7 +14,7 @@ import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { finalizeQuickRunInstall } from "./finalize.js";
-import { createInstallerI18n } from "../i18n.js";
+import { createInstallerCopy } from "../product-copy.js";
 import { promptProviderSetup } from "./interactive.js";
 import {
   defaultInstallDirForHome,
@@ -123,17 +123,17 @@ export function pickQuickRunExistingProvider(options: {
 
 async function resolveExistingQuickRunProviderSetup(
   installDir: string,
-  i18n: ReturnType<typeof createInstallerI18n>,
+  copy: ReturnType<typeof createInstallerCopy>,
 ) {
   const models = await runInstallerProgress(
-    i18n.loadingModelChoicesMessage,
+    copy.loadingModelChoicesMessage,
     () =>
       loadModelChoices(installDir, (filePath, fallback) =>
         readJsonFileOrDefault(filePath, fallback),
       ),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
   return pickQuickRunExistingProvider({
@@ -309,27 +309,27 @@ async function prepareQuickRunInstallPlan() {
   const currentUser = detectCurrentUser();
   const installDir = quickRunInstallDirForCurrentUser();
   fs.mkdirSync(installDir, { recursive: true });
-  const i18n = createInstallerI18n();
+  const copy = createInstallerCopy();
   const promptApi = {
     ensureNotCancelled,
     select,
     text,
     confirm: (options: any) =>
       confirm({
-        active: i18n.confirmActiveLabel,
-        inactive: i18n.confirmInactiveLabel,
+        active: copy.confirmActiveLabel,
+        inactive: copy.confirmInactiveLabel,
         ...options,
       }),
   };
 
   const setup =
-    (await resolveExistingQuickRunProviderSetup(installDir, i18n)) ||
+    (await resolveExistingQuickRunProviderSetup(installDir, copy)) ||
     (await promptProviderSetup(
       promptApi,
       installDir,
       readJsonFileOrDefault,
       {},
-      i18n,
+      copy,
     ));
   const { provider, modelId, thinkingLevel, authResult } = setup;
   return {
@@ -346,14 +346,14 @@ async function prepareQuickRunInstallPlan() {
 
 export async function runQuickRun() {
   const plan = await prepareQuickRunInstallPlan();
-  const i18n = createInstallerI18n();
+  const copy = createInstallerCopy();
 
   await runInstallerProgress(
-    i18n.preparingInstallerMessage,
+    copy.preparingInstallerMessage,
     () => finalizeQuickRunInstall(plan),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
 

@@ -11,7 +11,7 @@ const rpc = await importBuiltModule<
 test("rpc command catalog preserves Rin overrides and generic prompt routing", () => {
   assert.deepEqual(
     rpc.RIN_BUILTIN_SLASH_COMMANDS.map((command) => command.name),
-    ["help", "abort", "status"],
+    ["help", "abort", "status", "done"],
   );
   assert.equal(
     rpc.BUILTIN_SLASH_COMMANDS.find((command) => command.name === "abort")
@@ -26,6 +26,10 @@ test("rpc command catalog preserves Rin overrides and generic prompt routing", (
     rpc.BUILTIN_SLASH_COMMANDS.find((command) => command.name === "resume")
       ?.chat,
     false,
+  );
+  assert.equal(
+    rpc.BUILTIN_SLASH_COMMANDS.find((command) => command.name === "done")?.chat,
+    true,
   );
   assert.equal(
     rpc.isGenericPromptRunCommandBuiltinSlashCommand("resume"),

@@ -110,7 +110,7 @@ test("update payload runs only through authorized shared updater semantics", asy
         events.push(["authorized", installDir]);
       },
       detectExecutorUser: () => "executor",
-      createInstallerI18n: () => ({
+      createInstallerCopy: () => ({
         installerCancelled: "cancelled",
         confirmActiveLabel: "yes",
         confirmInactiveLabel: "no",
@@ -181,7 +181,7 @@ test("legacy prepared update handoff translates into the shared payload", async 
         events.push(["authorized"]);
       },
       detectExecutorUser: () => "owner",
-      createInstallerI18n: () => ({
+      createInstallerCopy: () => ({
         installerCancelled: "cancelled",
         confirmActiveLabel: "yes",
         confirmInactiveLabel: "no",
@@ -247,7 +247,7 @@ test("update payload preserves updater cancellation semantics", async () => {
       payload.startUpdatePayload([], {
         assertAuthorizedUpdateJob() {},
         detectExecutorUser: () => "owner",
-        createInstallerI18n: () => ({
+        createInstallerCopy: () => ({
           installerCancelled: "cancelled",
           confirmActiveLabel: "yes",
           confirmInactiveLabel: "no",

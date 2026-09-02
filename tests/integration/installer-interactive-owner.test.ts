@@ -8,15 +8,14 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const interactive = await importBuiltModule<
   typeof import("../../src/core/rin-install/interactive.js")
 >("dist/core/rin-install/interactive.js");
-const i18nModule =
-  await importBuiltModule<typeof import("../../src/core/i18n.js")>(
-    "dist/core/i18n.js",
-  );
+const copyModule = await importBuiltModule<
+  typeof import("../../src/core/product-copy.js")
+>("dist/core/product-copy.js");
 const paths = await importBuiltModule<
   typeof import("../../src/core/rin-install/paths.js")
 >("dist/core/rin-install/paths.js");
 
-const i18n = i18nModule.createInstallerI18n("en-US");
+const copy = copyModule.createInstallerCopy("en-US");
 
 function createPrompt(options: {
   selects?: any[];
@@ -74,13 +73,13 @@ const users = [
 const targetHome = (user: string) => `/srv/home/${user}`;
 
 test("install target options preserve platform capabilities", () => {
-  const linux = interactive.buildInstallTargetOptions("owner", i18n, "linux");
+  const linux = interactive.buildInstallTargetOptions("owner", copy, "linux");
   assert.deepEqual(
     linux.map((item) => item.value),
     ["current", "local-user", "new-local-user", "ssh", "container"],
   );
   assert.equal(linux[0].hint, "owner");
-  const windows = interactive.buildInstallTargetOptions("owner", i18n, "win32");
+  const windows = interactive.buildInstallTargetOptions("owner", copy, "win32");
   assert.deepEqual(
     windows.map((item) => item.value),
     ["current", "ssh", "container"],
@@ -91,7 +90,7 @@ test("removed install target modes fail explicitly without prompting for legacy 
   const prompt = createPrompt({ selects: ["cloud"] });
   await assert.rejects(
     () =>
-      interactive.promptInstallTarget(prompt, "owner", users, targetHome, i18n),
+      interactive.promptInstallTarget(prompt, "owner", users, targetHome, copy),
     /rin_target_unsupported:cloud/,
   );
   assert.equal(prompt.seen.text.length, 0);
@@ -104,7 +103,7 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     "owner",
     users,
     targetHome,
-    i18n,
+    copy,
   );
   assert.equal(current.kind, "local");
   assert.equal(current.targetUser, "owner");
@@ -119,7 +118,7 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     "owner",
     users,
     targetHome,
-    i18n,
+    copy,
   );
   assert.equal(existing.kind, "local");
   assert.equal(existing.targetUser, "rin");
@@ -138,13 +137,13 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     "owner",
     users,
     targetHome,
-    i18n,
+    copy,
   );
   assert.equal(created.targetUser, "new_owner");
   assert.equal(created.createSystemUser, true);
   const usernameValidator = newPrompt.seen.text[0].validate;
-  assert.equal(usernameValidator(""), i18n.usernameRequired);
-  assert.equal(usernameValidator("bad name"), i18n.usernameInvalid);
+  assert.equal(usernameValidator(""), copy.usernameRequired);
+  assert.equal(usernameValidator("bad name"), copy.usernameInvalid);
   assert.equal(usernameValidator("valid-user"), undefined);
 
   const unavailablePrompt = createPrompt({ selects: [] });
@@ -153,7 +152,7 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     "owner",
     [],
     targetHome,
-    i18n,
+    copy,
     "existing",
   );
   assert.deepEqual(unavailable, {
@@ -176,16 +175,16 @@ test("SSH and container prompts return validated direct targets", async () => {
     "owner",
     users,
     targetHome,
-    i18n,
+    copy,
   );
   assert.deepEqual(ssh, {
     kind: "ssh",
     name: "owner-ssh",
     host: "owner@example",
   });
-  assert.equal(sshPrompt.seen.text[0].validate(""), i18n.sshTargetRequired);
+  assert.equal(sshPrompt.seen.text[0].validate(""), copy.sshTargetRequired);
   assert.equal(sshPrompt.seen.text[0].validate("host"), undefined);
-  assert.equal(sshPrompt.seen.text[1].validate("***"), i18n.targetNameRequired);
+  assert.equal(sshPrompt.seen.text[1].validate("***"), copy.targetNameRequired);
   assert.equal(sshPrompt.seen.text[1].validate("owner-target"), undefined);
 
   const containerPrompt = createPrompt({
@@ -197,7 +196,7 @@ test("SSH and container prompts return validated direct targets", async () => {
     "owner",
     users,
     targetHome,
-    i18n,
+    copy,
   );
   assert.deepEqual(container, {
     kind: "container",
@@ -211,23 +210,23 @@ test("install directory and default-target prompts render both owner states", as
   const existing = interactive.describeInstallDirState(
     "/opt/rin",
     { exists: true, entryCount: 2, sample: ["settings.json", "data"] },
-    i18n,
+    copy,
   );
-  assert.equal(existing.title, i18n.existingDirectoryTitle);
+  assert.equal(existing.title, copy.existingDirectoryTitle);
   assert.match(existing.text, /\/opt\/rin/);
   assert.match(existing.text, /settings\.json/);
 
   const fresh = interactive.describeInstallDirState(
     "/opt/new-rin",
     { exists: false, entryCount: 0, sample: [] },
-    i18n,
+    copy,
   );
-  assert.equal(fresh.title, i18n.installDirectoryTitle);
+  assert.equal(fresh.title, copy.installDirectoryTitle);
   assert.match(fresh.text, /\/opt\/new-rin/);
 
   const prompt = createPrompt({ confirms: [1] });
   assert.equal(
-    await interactive.promptDefaultTargetUser(prompt, "rin", i18n),
+    await interactive.promptDefaultTargetUser(prompt, "rin", copy),
     true,
   );
   assert.equal(prompt.seen.confirm[0].initialValue, true);
@@ -281,7 +280,7 @@ test("provider setup reuses complete authenticated owner defaults", async () => 
       ],
       configureProviderAuth: async () => assert.fail("auth must be reused"),
     },
-    i18n,
+    copy,
   );
   assert.deepEqual(result, {
     provider: "codex",
@@ -308,12 +307,12 @@ test("provider setup orders providers, configures auth, model, and thinking", as
     {
       loadModelChoices: async () => [
         model("api-z", "plain", {
-          providerLabel: `API Z ${i18n.apiAuthLabel}`,
+          providerLabel: `API Z ${copy.apiAuthLabel}`,
           reasoning: false,
           available: false,
         }),
         model("codex", "gpt-owner", {
-          providerLabel: `Codex Plus ${i18n.subscriptionAuthLabel}`,
+          providerLabel: `Codex Plus ${copy.subscriptionAuthLabel}`,
           authKind: "subscription",
           available: true,
         }),
@@ -332,7 +331,7 @@ test("provider setup orders providers, configures auth, model, and thinking", as
         } as any;
       },
     },
-    i18n,
+    copy,
   );
   assert.deepEqual(result, {
     provider: "codex",
@@ -351,7 +350,7 @@ test("provider setup orders providers, configures auth, model, and thinking", as
   assert.match(prompt.seen.select[0].options[0].hint, /2/);
   assert.match(
     prompt.seen.select[1].options[0].hint,
-    new RegExp(i18n.reasoningHint),
+    new RegExp(copy.reasoningHint),
   );
   assert.deepEqual(
     prompt.seen.select[2].options.map((item: any) => item.value),
@@ -366,10 +365,10 @@ test("provider setup rejects absent model inventory and missing provider models"
       "/owner/rin",
       (_filePath, fallback) => fallback,
       { loadModelChoices: async () => [] },
-      i18n,
+      copy,
     ),
     new RegExp(
-      i18n.noModelsAvailableError.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      copy.noModelsAvailableError.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
     ),
   );
 
@@ -384,14 +383,14 @@ test("provider setup rejects absent model inventory and missing provider models"
         configureProviderAuth: async () =>
           ({ available: false, authData: {} }) as any,
       },
-      i18n,
+      copy,
     ),
     /missing/i,
   );
 });
 
 test("installer plan and safety copy preserve accepted owner choices", () => {
-  const safety = interactive.buildInstallSafetyBoundaryText(i18n);
+  const safety = interactive.buildInstallSafetyBoundaryText(copy);
   assert.ok(safety.length > 20);
   const plan = interactive.buildInstallPlanText(
     {
@@ -405,7 +404,7 @@ test("installer plan and safety copy preserve accepted owner choices", () => {
       language: "en-US",
       setDefaultTarget: false,
     },
-    i18n,
+    copy,
   );
   assert.match(plan, /rin/);
   assert.match(plan, /codex/);
@@ -422,7 +421,7 @@ test("installer plan and safety copy preserve accepted owner choices", () => {
       thinkingLevel: "off",
       authAvailable: false,
     },
-    i18n,
+    copy,
   );
   assert.match(defaultLanguage, /Target daemon user: owner/);
 });
@@ -469,7 +468,7 @@ test("installer notes wrap bullets and preserve readable plain and styled sectio
 test("installer outro and initialization exit choose PATH-aware launch commands", () => {
   const noPath = interactive.buildInstallOutroText(
     { currentUser: "owner", targetUser: "owner" },
-    i18n,
+    copy,
   );
   assert.match(noPath, /rin/);
 
@@ -482,7 +481,7 @@ test("installer outro and initialization exit choose PATH-aware launch commands"
       pathValue: `/usr/bin${path.delimiter}/opt/rin/bin`,
       installedServiceKind: "systemd",
     },
-    i18n,
+    copy,
   );
   assert.match(crossUser, /rin -u rin/);
   assert.match(crossUser, /systemd/i);
@@ -494,13 +493,13 @@ test("installer outro and initialization exit choose PATH-aware launch commands"
       rinPath,
       pathValue: "/usr/bin",
     },
-    i18n,
+    copy,
   );
   assert.match(notOnPath, new RegExp(rinPath.replaceAll("/", "\\/")));
 
   const plainExit = interactive.buildPostInstallInitExitText(
     { currentUser: "owner", targetUser: "owner" },
-    i18n,
+    copy,
   );
   assert.ok(plainExit.length > 10);
   const pathExit = interactive.buildPostInstallInitExitText(
@@ -510,7 +509,7 @@ test("installer outro and initialization exit choose PATH-aware launch commands"
       rinPath,
       pathValue: "/opt/rin/bin",
     },
-    i18n,
+    copy,
   );
   assert.match(pathExit, /rin/);
   const directExit = interactive.buildPostInstallInitExitText(
@@ -520,7 +519,7 @@ test("installer outro and initialization exit choose PATH-aware launch commands"
       rinPath,
       pathValue: "/usr/bin",
     },
-    i18n,
+    copy,
   );
   assert.match(directExit, new RegExp(rinPath.replaceAll("/", "\\/")));
 });
@@ -532,7 +531,7 @@ test("final requirements reflect service and privilege boundaries", () => {
       needsElevatedWrite: false,
       needsElevatedService: false,
     },
-    i18n,
+    copy,
   );
   const elevated = interactive.buildFinalRequirements(
     {
@@ -540,7 +539,7 @@ test("final requirements reflect service and privilege boundaries", () => {
       needsElevatedWrite: true,
       needsElevatedService: true,
     },
-    i18n,
+    copy,
   );
   assert.ok(Array.isArray(none));
   assert.ok(Array.isArray(elevated));

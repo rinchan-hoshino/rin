@@ -223,7 +223,7 @@ test("provider-auth forwards OAuth device-code callbacks during installer login"
         return value;
       },
       spinnerFactory: createNoopSpinner,
-      i18n: {
+      copy: {
         loadingModelChoicesMessage: "loading",
         installStepComplete: "ok",
         installStepFailed: "failed",

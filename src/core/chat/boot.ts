@@ -9,7 +9,7 @@ import {
   readChatOutboxItemById,
   writeChatOutboxItem,
 } from "./outbox.js";
-import { createRinI18n } from "../i18n.js";
+import { createProductCopy } from "../product-copy.js";
 import { parseChatKey } from "./support.js";
 import {
   isInboundChatMessageProcessed,
@@ -52,7 +52,7 @@ export function getChatCommandRows(
     chatConcurrent?: boolean;
   }>,
 ): ChatCommandRow[] {
-  const descriptions = createRinI18n().chatCommandDescriptions;
+  const descriptions = createProductCopy().chatCommandDescriptions;
   return commands
     .filter((command) => command.chat === true)
     .map((command) => ({

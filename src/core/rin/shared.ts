@@ -11,7 +11,7 @@ import {
 } from "../rin-daemon/client.js";
 import { isSameSystemUser } from "../rin-lib/system.js";
 import { repoRootFromHere, runCommand } from "../rin-install/common.js";
-import { createInstallerI18n } from "../i18n.js";
+import { createInstallerCopy } from "../product-copy.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import { assertUpdateConfirmationAvailable } from "../rin-install/update-confirmation.js";
 import {
@@ -119,8 +119,8 @@ export function readInstallerManifestForTarget<T = any>(
   );
 }
 
-export function createUpdateI18n() {
-  return createInstallerI18n();
+export function createUpdateCopy() {
+  return createInstallerCopy();
 }
 
 type TargetExecutionContextBase = ReturnType<typeof daemonControlContext>;

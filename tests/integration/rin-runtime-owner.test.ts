@@ -168,87 +168,8 @@ function makeThresholdSession(overrides: Record<string, any> = {}) {
   } as any;
 }
 
-test("runtime private compatibility guards cover locale, fence, and active-tool boundaries", () => {
+test("runtime private compatibility guard reads the latest persisted prompt", () => {
   const seam = runtime as any;
-  for (const tag of [
-    "ar_SA",
-    "de_DE",
-    "en_US",
-    "es_ES",
-    "fr_FR",
-    "hi_IN",
-    "ja_JP",
-    "ko_KR",
-    "pt_BR",
-    "ru_RU",
-    "zh_CN",
-    "nl_NL",
-  ]) {
-    assert.equal(seam.__rinOwnerIsLegacyGeneratedLanguageTag(tag), true, tag);
-  }
-  assert.equal(seam.__rinOwnerIsLegacyGeneratedLanguageTag(""), false);
-  assert.equal(seam.__rinOwnerIsLegacyGeneratedLanguageTag(null), false);
-  assert.equal(seam.__rinOwnerIsLegacyGeneratedLanguageTag("en-bad"), false);
-  assert.equal(
-    seam.__rinOwnerIsLegacyGeneratedLanguageTag("en_123456789"),
-    false,
-  );
-
-  assert.equal(seam.__rinOwnerIsInsideMarkdownFence("plain", 5), false);
-  assert.equal(seam.__rinOwnerIsInsideMarkdownFence("```ts\nowner", 11), true);
-  assert.equal(
-    seam.__rinOwnerIsInsideMarkdownFence("```ts\nowner\n```\n", 16),
-    false,
-  );
-  assert.equal(
-    seam.__rinOwnerIsInsideMarkdownFence("~~~~ts\nowner\n~~~\n", 18),
-    true,
-  );
-  assert.equal(
-    seam.__rinOwnerIsInsideMarkdownFence("~~~~ts\nowner\n~~~~\n", 18),
-    false,
-  );
-  assert.equal(
-    seam.__rinOwnerIsInsideMarkdownFence("```ts\nowner\n~~~\n", 17),
-    true,
-  );
-
-  assert.equal(seam.__rinOwnerHistoricalPromptLineValue(undefined, "- "), "");
-  assert.equal(
-    seam.__rinOwnerHistoricalPromptLineValue("- C:\\owner", "- "),
-    "C:/owner",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalReadmeRoot("docs/rin/README.md", "docs/rin"),
-    "docs/rin",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalReadmeRoot("xdocs/rin/README.md", "docs/rin"),
-    "",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalJoinedRoot(
-      "docs/rin/README.md and docs/rin/docs",
-      "docs/rin",
-    ),
-    "docs/rin",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalJoinedRoot(
-      "xdocs/rin/README.md and xdocs/rin/docs",
-      "docs/rin",
-    ),
-    "",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalAgentRoot("/a/docs/rin", "docs/rin"),
-    "/a/",
-  );
-  assert.equal(
-    seam.__rinOwnerHistoricalAgentRoot("/a/docs/pi", "docs/rin"),
-    "",
-  );
-  assert.equal(seam.__rinOwnerStripLegacyConfiguredLanguagePrompt(null), "");
   assert.equal(seam.__rinOwnerFindPersistedSessionBaseSystemPrompt(null), "");
   assert.equal(
     seam.__rinOwnerFindPersistedSessionBaseSystemPrompt([
@@ -265,24 +186,6 @@ test("runtime private compatibility guards cover locale, fence, and active-tool 
       },
     ]),
     "owner",
-  );
-
-  assert.equal(seam.__rinOwnerHasLegacyPromptLayerBoundary("abc", 0, 3), true);
-  assert.equal(
-    seam.__rinOwnerHasLegacyPromptLayerBoundary("abc\n\nnext", 0, 3),
-    true,
-  );
-  assert.equal(
-    seam.__rinOwnerHasLegacyPromptLayerBoundary(
-      "abc\nCurrent date: 2026-07-27",
-      0,
-      3,
-    ),
-    true,
-  );
-  assert.equal(
-    seam.__rinOwnerHasLegacyPromptLayerBoundary("abc\nnext", 0, 3),
-    false,
   );
 });
 

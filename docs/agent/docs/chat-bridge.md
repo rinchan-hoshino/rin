@@ -50,7 +50,7 @@ A chat bridge operation is complete when:
 
 Classify the task before acting:
 
-1. **Configuration:** adapter entries, turn policy, i18n command replies, and target daemon restart.
+1. **Configuration:** adapter entries, turn policy, optional command presentation, and target daemon restart.
 2. **Inbound message:** platform event, normalization, trust/allow state, message store, inbox, turn start.
 3. **Assistant turn:** frontend binding, controller key, active run, final delivery.
 4. **Outbound delivery:** SDK send, outbox payload, rich objects, adapter result, platform send result.
@@ -141,7 +141,7 @@ const result = await rin.chat.runTurn({
 });
 ```
 
-Each normalized frontend identity has exactly one durable current session. Initial attachment may materialize or restore that binding. Chat and SDK frontends may replace it only with `/new`; Chat does not include `/resume` in its command surface; entered `/resume` text follows the ordinary unmatched-command behavior instead of a resume-specific branch. TUI additionally permits the user's explicit `/resume` or session-picker action, which atomically replaces only the TUI binding. Ordinary prompts, SDK calls, replies, quotes, scheduled inputs, reconnects, and deliveries reuse the binding and cannot select another session. The daemon-owned frontend-session registry is authoritative across concurrent connections and daemon restarts; Chat's `chat_state` session fields are migration/bootstrap projections only.
+Each normalized frontend identity has exactly one durable current session. Initial attachment may materialize or restore that binding. Chat and SDK frontends may replace it only with `/new`; Chat does not include `/resume` in its command surface; entered `/resume` text follows the ordinary unmatched-command behavior instead of a resume-specific branch. The Chat-only `/done` command preserves that binding but exits its current worker through `shutdown_session`; the resulting `session_shutdown` remains the single producer for shutdown-owned maintenance and extension lifecycle consumers. Idle-worker GC instead uses `sleep_session`, so capacity reclamation neither completes the conversation nor emits shutdown maintenance. TUI additionally permits the user's explicit `/resume` or session-picker action, which atomically replaces only the TUI binding. Ordinary prompts, SDK calls, replies, quotes, scheduled inputs, reconnects, and deliveries reuse the binding and cannot select another session. The daemon-owned frontend-session registry is authoritative across concurrent connections and daemon restarts; Chat's `chat_state` session fields are migration/bootstrap projections only.
 
 Adapter-supported signals and active-turn control:
 
@@ -269,34 +269,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 
 ## Command acknowledgement text
 
-Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. Discord acknowledges a slash command immediately with a fixed `Working...` before the session extension starts. The optional first-party `i18n` Pi extension publishes one semantic message-catalog snapshot from `~/.rin/i18n.json`, then owns its frame list and animation timer through Pi's native `setWorkingMessage`. Rin core owns lifecycle facts and frontend chrome; catalog updates cannot replace Chat or TUI wrappers. `/compact` uses the same contributed semantic messages.
-
-Install the `i18n` extension package, then create or edit its catalog:
-
-```json
-{
-  "chat.commandResponses.abort": "Aborted current operation.",
-  "chat.commandResponses.new": "Started a new session.",
-  "chat.commandResponses.newCancelled": "Session switch cancelled.",
-  "chat.commandResponses.reload": "Reloaded extensions, prompts, skills, and themes.",
-  "chat.compaction.start": "Compacting...",
-  "chat.compaction.summaryLine": "Compacted from {tokens} tokens"
-}
-```
-
-Nested JSON is also accepted:
-
-```json
-{
-  "chat": {
-    "commandResponses": {
-      "new": "Started a new session."
-    }
-  }
-}
-```
-
-All entries are optional. Missing or blank entries fall back to the built-in English text. The extension owns catalog loading and hot reload; Rin accepts only stable semantic message keys, while each frontend retains its own layout and wrapper text.
+Routine chat command acknowledgements such as `/new`, `/done`, `/abort`, and `/reload` use stable built-in text and avoid temporary agent turns. Discord acknowledges a slash command immediately with a fixed `Working...` before the session extension starts. The optional first-party `i18n` Pi extension reads `~/.rin/i18n.json`, applies direct command-response settings through the generic extension presentation API, and owns its frame list and animation timer through Pi's native `setWorkingMessage`. Rin core contains no locale selection, translation keys, or message catalog. `/compact` uses the same direct response settings.
 
 ## Rich message delivery
 
@@ -356,7 +329,7 @@ Common boundary checks:
 
 - **Message stored but turn idle:** inspect `turnPolicy`, trust/allow rules, inbox state, active turn state, and controller errors.
 - **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
-- **Slash command mismatch:** command acknowledgements are config/i18n output. For Chat, verify that `/new` alone replaced the binding and `/resume` was neither advertised nor classified as a supported command. For TUI, `/new` and an explicit `/resume` may replace only the TUI binding. Quotes, replies, reconnects, and scheduled turns must never replace one.
+- **Slash command mismatch:** command acknowledgements are built-in or extension-provided presentation output. For Chat, verify that `/new` alone replaced the binding and `/resume` was neither advertised nor classified as a supported command. For TUI, `/new` and an explicit `/resume` may replace only the TUI binding. Quotes, replies, reconnects, and scheduled turns must never replace one.
 - **OneBot/QQ after platform relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
 - **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.

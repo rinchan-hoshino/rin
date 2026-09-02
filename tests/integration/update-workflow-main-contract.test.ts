@@ -36,7 +36,7 @@ function hasCommand(name: string) {
   }
 }
 
-function testI18n() {
+function testCopy() {
   return {
     fetchingUpdateSourceMessage: "Fetching update source",
     preparingUpdateSourceMessage: "Preparing update source",
@@ -347,7 +347,7 @@ test(
       await updateWorkflow.prepareUpdateRuntimeSource({
         release: JSON.parse(await fs.readFile(workspace.releaseFile, "utf8")),
         workspace,
-        i18n: testI18n(),
+        copy: testCopy(),
         env: {
           ...process.env,
           PATH: [hostileBin, process.env.PATH]
@@ -401,7 +401,7 @@ test(
         updateWorkflow.prepareUpdateRuntimeSource({
           release: JSON.parse(await fs.readFile(workspace.releaseFile, "utf8")),
           workspace,
-          i18n: testI18n(),
+          copy: testCopy(),
         }),
         /rin_update_platform_bundle_checksum_missing/,
       );
@@ -444,7 +444,7 @@ test(
         updateWorkflow.prepareUpdateRuntimeSource({
           release: JSON.parse(await fs.readFile(workspace.releaseFile, "utf8")),
           workspace,
-          i18n: testI18n(),
+          copy: testCopy(),
         }),
         /rin_update_platform_bundle_checksum_mismatch/,
       );
@@ -544,7 +544,7 @@ exit 0
       await updateWorkflow.prepareUpdateRuntimeSource({
         release: JSON.parse(await fs.readFile(workspace.releaseFile, "utf8")),
         workspace,
-        i18n: testI18n(),
+        copy: testCopy(),
         env: {
           ...process.env,
           RIN_UPDATE_BUNDLE_NODE_LOG: invocationLog,

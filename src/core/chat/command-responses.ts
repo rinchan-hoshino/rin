@@ -13,10 +13,11 @@ export const DEFAULT_CHAT_COMMAND_RESPONSES = {
 
 export function resolveChatCommandResponses(
   configured?: Partial<ChatCommandResponses>,
+  baseline: ChatCommandResponses = DEFAULT_CHAT_COMMAND_RESPONSES,
 ) {
   const source = configured && typeof configured === "object" ? configured : {};
   return Object.fromEntries(
-    Object.entries(DEFAULT_CHAT_COMMAND_RESPONSES).map(([key, fallback]) => {
+    Object.entries(baseline).map(([key, fallback]) => {
       const value = source[key as keyof ChatCommandResponses];
       return [
         key,
@@ -26,7 +27,7 @@ export function resolveChatCommandResponses(
   ) as ChatCommandResponses;
 }
 
-export function localizeChatBuiltinCommandResult(
+export function applyChatBuiltinCommandText(
   commandName: string,
   data: unknown,
   responses: ChatCommandResponses,

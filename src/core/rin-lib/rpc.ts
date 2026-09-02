@@ -41,6 +41,12 @@ export const RIN_BUILTIN_SLASH_COMMANDS = [
     origin: "rin",
     chat: true,
   },
+  {
+    name: "done",
+    description: "Complete this chat and exit its worker",
+    origin: "rin",
+    chat: true,
+  },
 ] satisfies BuiltinSlashCommand[];
 
 function rinizePiCommandDescription(description: string) {

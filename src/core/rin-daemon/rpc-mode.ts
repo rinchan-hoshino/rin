@@ -180,12 +180,12 @@ export async function runCustomRpcMode(
         method: "rinCommandResult",
         result,
       }),
-    setMessageCatalog: (catalog: unknown) => {
+    setCommandResponses: (commandResponses: unknown) => {
       output({
         type: "extension_ui_request",
         id: createExtensionUiRequestId(),
-        method: "setMessageCatalog",
-        catalog,
+        method: "setCommandResponses",
+        commandResponses,
       });
     },
     onTerminalInput: () => () => {},

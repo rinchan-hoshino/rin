@@ -15,7 +15,7 @@ import {
   type ResolvedRelease,
 } from "../rin-lib/release.js";
 
-import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
+import { createInstallerCopy, type InstallerCopy } from "../product-copy.js";
 import { assertUpdateConfirmationAvailable } from "./update-confirmation.js";
 import { discoverInstalledTargets } from "./update-targets.js";
 import {
@@ -60,7 +60,7 @@ function note(message?: string, title?: string) {
 async function selectUpdateTarget(
   ensureNotCancelled: <T>(value: T | symbol) => T,
   promptSelect: typeof select,
-  i18n: InstallerI18n,
+  copy: InstallerCopy,
 ) {
   const targets = discoverInstalledTargets();
   if (!targets.length) return null;
@@ -69,7 +69,7 @@ async function selectUpdateTarget(
     Number(
       ensureNotCancelled(
         await promptSelect({
-          message: i18n.chooseUpdateTargetMessage,
+          message: copy.chooseUpdateTargetMessage,
           options: targets.map((item, index) => ({
             value: index,
             label: `${item.targetUser} → ${item.installDir}`,
@@ -241,7 +241,7 @@ export async function startUpdater(deps: {
   releaseRequest?: ReleaseRequest & { explicitReleaseChannel?: boolean };
   select?: typeof select;
   confirm?: typeof confirm;
-  i18n?: InstallerI18n;
+  copy?: InstallerCopy;
   resolveUpdateRelease?: typeof resolveUpdateRelease;
   readInstalledRelease?: (target: {
     currentUser: string;
@@ -259,11 +259,11 @@ export async function startUpdater(deps: {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
-  const initialI18n = deps.i18n || createInstallerI18n();
+  const initialCopy = deps.copy || createInstallerCopy();
   const runFinalizeInstallPlanInChild =
     deps.runFinalizeInstallPlanInChild || runFinalizeInstallPlanInChildImpl;
 
-  intro(initialI18n.updaterIntroTitle);
+  intro(initialCopy.updaterIntroTitle);
 
   const requestedInstallDir = String(deps.requestedInstallDir || "").trim();
   const requestedTargetUser = String(deps.requestedTargetUser || "").trim();
@@ -278,17 +278,17 @@ export async function startUpdater(deps: {
       : await selectUpdateTarget(
           deps.ensureNotCancelled,
           promptSelect,
-          initialI18n,
+          initialCopy,
         );
   if (!target) {
-    note(initialI18n.noUpdateTargetsText, initialI18n.updateTargetsTitle);
-    outro(initialI18n.updaterNothingUpdated);
+    note(initialCopy.noUpdateTargetsText, initialCopy.updateTargetsTitle);
+    outro(initialCopy.updaterNothingUpdated);
     return;
   }
 
   const installDir = target.installDir;
   const targetUser = target.targetUser;
-  const i18n = initialI18n;
+  const copy = initialCopy;
 
   const installedRelease = (
     deps.readInstalledRelease || defaultReadInstalledRelease
@@ -312,28 +312,28 @@ export async function startUpdater(deps: {
   );
   if (reinstallCurrentRelease) {
     note(
-      i18n.buildUpdateReinstallCurrentText({
+      copy.buildUpdateReinstallCurrentText({
         installDir,
         sourceLabel: resolvedRelease.sourceLabel,
       }),
-      i18n.updateReinstallCurrentTitle,
+      copy.updateReinstallCurrentTitle,
     );
   }
 
   if (!deps.preconfirmed) {
     note(
-      i18n.buildUpdateTargetText({
+      copy.buildUpdateTargetText({
         currentUser,
         targetUser,
         installDir,
         source: target.source,
         ownerHome: target.ownerHome,
       }),
-      i18n.updateTargetsTitle,
+      copy.updateTargetsTitle,
     );
 
     note(
-      i18n.buildUpdatePlanText({
+      copy.buildUpdatePlanText({
         currentUser,
         targetUser,
         installDir,
@@ -341,7 +341,7 @@ export async function startUpdater(deps: {
         ownerHome: target.ownerHome,
         sourceLabel: resolvedRelease.sourceLabel,
       }),
-      i18n.updatePlanTitle,
+      copy.updatePlanTitle,
     );
 
     assertUpdateConfirmationAvailable({
@@ -354,13 +354,13 @@ export async function startUpdater(deps: {
       : deps.ensureNotCancelled(
           await promptConfirm({
             message: deps.release
-              ? i18n.publishUpdateConfirmMessage
-              : i18n.fetchAndApplyUpdateConfirmMessage,
+              ? copy.publishUpdateConfirmMessage
+              : copy.fetchAndApplyUpdateConfirmMessage,
             initialValue: true,
           }),
         );
     if (!shouldProceed) {
-      outro(i18n.updaterFinishedWithoutWritingChanges);
+      outro(copy.updaterFinishedWithoutWritingChanges);
       return;
     }
   }
@@ -386,7 +386,7 @@ export async function startUpdater(deps: {
       await prepareUpdateRuntimeSource({
         release: resolvedRelease,
         workspace,
-        i18n,
+        copy,
       });
       await runPreparedUpdater({
         sourceRoot: workspace.sourceRoot,
@@ -404,7 +404,7 @@ export async function startUpdater(deps: {
   }
 
   const result = await runInstallerProgress(
-    i18n.refreshingInstalledTargetMessage,
+    copy.refreshingInstalledTargetMessage,
     () =>
       runFinalizeInstallPlanInChild(
         {
@@ -417,7 +417,7 @@ export async function startUpdater(deps: {
           reinstallCurrentRelease,
           release: resolvedRelease,
         } satisfies FinalizeInstallOptions,
-        i18n.refreshingInstalledTargetMessage,
+        copy.refreshingInstalledTargetMessage,
         {
           writeStatus() {},
           entryPath: path.join(
@@ -430,8 +430,8 @@ export async function startUpdater(deps: {
         },
       ),
     {
-      successMessage: i18n.installStepComplete,
-      failureMessage: i18n.installStepFailed,
+      successMessage: copy.installStepComplete,
+      failureMessage: copy.installStepFailed,
     },
   );
 
@@ -447,7 +447,7 @@ export async function startUpdater(deps: {
   const userSuffix = currentUser === targetUser ? "" : ` -u ${targetUser}`;
 
   note(
-    i18n.buildUpdatedTargetText({
+    copy.buildUpdatedTargetText({
       installDir,
       writtenPaths: [
         written.launcherPath,
@@ -467,15 +467,15 @@ export async function startUpdater(deps: {
           }
         : {}),
     }),
-    i18n.writtenPathsTitle,
+    copy.writtenPathsTitle,
   );
 
   note(
-    i18n.buildAfterUpdateText({ serviceHint, daemonReady, userSuffix }),
-    i18n.afterInitTitle,
+    copy.buildAfterUpdateText({ serviceHint, daemonReady, userSuffix }),
+    copy.afterInitTitle,
   );
 
   outro(
-    i18n.updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix),
+    copy.updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix),
   );
 }
