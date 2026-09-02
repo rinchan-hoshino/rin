@@ -462,6 +462,47 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   new_session_session_file_unsupported: () =>
     "Could not start a new chat session because the command was bound to a replied message's old session.",
 
+  nerve_body_file_required: () =>
+    "Nerve emit needs a readable body file after --body-file.",
+  nerve_daemon_unavailable: () =>
+    "Nerve cannot reach Rin's background service.",
+  nerve_emit_failed: (detail) =>
+    withDetail("A trigger could not emit its stimulus", detail, "."),
+  nerve_owner_chat_key_invalid: () =>
+    "Nerve needs one exact owner chatKey without surrounding whitespace.",
+  nerve_owner_chat_observation_rejected: () =>
+    "The owner-channel hard reflex rejected a message it had already claimed.",
+  nerve_producer_required: () => "Nerve emit needs a producer identifier.",
+  nerve_runtime_stopped: () => "Nerve is currently stopped.",
+  nerve_runtime_unavailable: () => "Nerve has not finished starting yet.",
+  nerve_sensation_required: () => "Nerve emit needs a sensation name.",
+  nerve_stimulus_id_conflict: () =>
+    "Nerve rejected a reused stimulus identifier with different content.",
+  nerve_stimulus_id_invalid: () =>
+    "Nerve received an invalid stable stimulus identifier.",
+  nerve_stimulus_producer_required: () =>
+    "Nerve received a stimulus without a producer identifier.",
+  nerve_stimulus_sensation_required: () =>
+    "Nerve received a stimulus without a sensation name.",
+  nerve_trigger_aborted: () => "The trigger stopped because it was cancelled.",
+  nerve_trigger_failed: (detail) =>
+    withDetail("A Nerve trigger failed", detail, "."),
+  nerve_trigger_host_not_started: () =>
+    "Nerve cannot reload triggers before its trigger runtime starts.",
+  nerve_trigger_id_invalid: () =>
+    "Nerve received an invalid trigger identifier.",
+  nerve_trigger_ipc_unavailable: () =>
+    "A Nerve trigger lost its connection to the trigger runtime.",
+  nerve_trigger_sleep_duration_invalid: () =>
+    "A Nerve trigger requested an invalid wait duration.",
+  nerve_trigger_sleep_time_invalid: () =>
+    "A Nerve trigger requested an invalid absolute wait time.",
+  nerve_trigger_start_export_required: () =>
+    "A Nerve trigger must export an async start(context) function.",
+  nerve_trigger_worker_arguments_required: () =>
+    "The Nerve trigger worker started without its trigger identity.",
+  nerve_unknown_argument: (detail) =>
+    withDetail("Nerve received an unknown command option", detail, "."),
   oauth_login_failed: () => "OAuth login failed.",
   oauth_provider_id_required: () =>
     "OAuth login needs a provider id. Choose a provider.",

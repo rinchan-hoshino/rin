@@ -2,6 +2,19 @@ import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const replacements: Record<string, string> = {
+  "dist/app/rin-daemon/hosted-nerve-service.js": `
+    export function createHostedNerveService(options) {
+      let ready = false;
+      return {
+        async start() { ready = true; globalThis.__rinAppDaemonOwnerEvents.push(["nerve-start", options.agentDir]); },
+        async stop() { ready = false; globalThis.__rinAppDaemonOwnerEvents.push(["nerve-stop"]); },
+        getOwnerChatKey() { return "discord/owner:nerve"; },
+        observeChat: async () => ({ handled: true, stimulated: true }),
+        commandRouter: async () => undefined,
+        getStatus() { return { ready, working: false, queue: { queued: 0, inflight: 0, delivered: 0 }, triggers: [] }; },
+      };
+    }
+  `,
   "dist/core/chat/daemon-integration.js": `
     export function createChatDaemonIntegration(options) {
       globalThis.__rinAppDaemonOwnerEvents.push(["chat-integration", options.agentDir]);

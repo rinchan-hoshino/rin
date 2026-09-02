@@ -18,6 +18,7 @@ const RIN_COMMANDS = [
   ["doctor", "Show daemon/socket diagnostics for the target user"],
   ["status", "Show live worker and scheduled task activity"],
   ["tasks", "Operate scheduled task records"],
+  ["nerve", "Inspect and operate the sensory runtime"],
   ["self-improve", "Show recent self-improve outcomes and backend history"],
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
@@ -40,6 +41,11 @@ const INTERNAL_COMMANDS = [
     command: "self-improve",
     loadRun: async () =>
       (await import("./self-improve.js")).runSelfImproveInternal,
+  },
+  {
+    marker: "__nerve_internal",
+    command: "nerve",
+    loadRun: async () => (await import("./nerve.js")).runNerveInternal,
   },
   {
     marker: "__status_internal",
@@ -351,6 +357,10 @@ export async function startRinCli() {
   if (parsed.command === "tasks") {
     const { runTasks } = await import("./tasks.js");
     return await runTasks(parsed, process.argv.slice(2));
+  }
+  if (parsed.command === "nerve") {
+    const { runNerve } = await import("./nerve.js");
+    return await runNerve(parsed, process.argv.slice(2));
   }
   if (parsed.command === "self-improve") {
     const { runSelfImprove } = await import("./self-improve.js");

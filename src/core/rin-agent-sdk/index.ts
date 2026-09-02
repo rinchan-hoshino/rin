@@ -3,6 +3,11 @@ import type { ChatMessageRead } from "../chat/message-query.js";
 import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import type { ChatOutboxPayloadInput } from "../rin-lib/chat-outbox-contract.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import type {
+  NerveEmitResult,
+  NerveStatus,
+  NerveStimulusInput,
+} from "../nerve/contracts.js";
 
 export type RinAgentSdkOptions = {
   socketPath?: string;
@@ -182,6 +187,28 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
             type: "list_sessions",
             limit: options.limit,
             offset: options.offset,
+          },
+          override,
+        ),
+    },
+    nerve: {
+      emit: async (
+        payload: NerveStimulusInput,
+        override?: RinAgentSdkOptions,
+      ) =>
+        await request<NerveEmitResult>(
+          { type: "nerve_emit", payload },
+          override,
+        ),
+      status: async (override?: RinAgentSdkOptions) =>
+        await request<NerveStatus>({ type: "nerve_status" }, override),
+      abort: async (override?: RinAgentSdkOptions) =>
+        await request<{ aborted: boolean }>({ type: "nerve_abort" }, override),
+      reloadTrigger: async (id?: string, override?: RinAgentSdkOptions) =>
+        await request<NerveStatus>(
+          {
+            type: "nerve_reload_trigger",
+            payload: id ? { id } : {},
           },
           override,
         ),

@@ -662,6 +662,16 @@ export async function startChatBridge(
     settingsPath?: string;
     /** Explicit catalog injection for hosted and test environments. */
     commandRows?: ChatCommandRow[];
+    nerveObserver?: {
+      ownerChatKey: string;
+      observe: (input: {
+        chatKey: string;
+        messageId: string;
+        trust: string;
+        text: string;
+        context?: PromptContextMeta;
+      }) => Promise<{ handled: boolean; stimulated: boolean }>;
+    };
   } = {},
 ): Promise<ChatBridgeHandle> {
   const runtime = resolveRuntimeProfile();
@@ -1181,6 +1191,25 @@ export async function startChatBridge(
     };
   };
 
+  const handlePreparedNerveSubmission = async (input: {
+    chatKey: string;
+    messageId: string;
+    text: string;
+    promptMeta: PromptContextMeta;
+  }) => {
+    const result = await options.nerveObserver?.observe({
+      chatKey: input.chatKey,
+      messageId: input.messageId,
+      trust: "OWNER",
+      text: input.text,
+      context: input.promptMeta,
+    });
+    if (!result?.handled || !result.stimulated) {
+      throw new Error("nerve_owner_chat_observation_rejected");
+    }
+    return { disposition: "actionable" as const };
+  };
+
   const handlePreparedChatTurnSubmission = async (
     submission: FrozenChatTurnSubmission,
     options: { startupRecoveryEstimatedBytes?: number } = {},
@@ -1389,6 +1418,18 @@ export async function startChatBridge(
                 ),
               ),
           };
+        case "nerve_owner_message":
+          return {
+            run: () =>
+              runClaimedInboxJob(job, () =>
+                handlePreparedNerveSubmission({
+                  chatKey: resolved.chatKey,
+                  messageId: resolved.messageId,
+                  text: resolved.text,
+                  promptMeta: resolved.promptMeta,
+                }),
+              ),
+          };
         case "unmatched_command":
           if (recoverCommittedWork) {
             throw new Error("chat_command_recovery_requires_durable_result");
@@ -1439,6 +1480,41 @@ export async function startChatBridge(
       return {
         run: () => runClaimedInboxJob(job, async () => undefined),
       };
+    }
+
+    const nerveOwnerChatKey = safeString(options.nerveObserver?.ownerChatKey);
+    if (nerveOwnerChatKey && queuedChatKey === nerveOwnerChatKey) {
+      const nerveDecision = await shouldProcessText(
+        queuedSession,
+        queuedElements,
+        identity,
+        { chatKey: queuedChatKey, addressedToAgent: true },
+      );
+      if (nerveDecision.trust !== "OWNER") {
+        return commitAdmission({
+          state: "record_only",
+          decision: { version: 1, kind: "record_only_chat" },
+        });
+      }
+      const submission = await prepareAllowedChatTurnSubmission(
+        queuedSession,
+        queuedElements,
+        identity,
+        nerveDecision,
+        envelope.createdAt,
+      );
+      return commitAdmission({
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "nerve_owner_message",
+          chatKey: queuedChatKey,
+          messageId: envelope.messageId,
+          trust: "OWNER",
+          text: submission.text,
+          promptMeta: submission.promptMeta,
+        },
+      });
     }
 
     if (isRecordOnlyChatKey(queuedChatKey)) {

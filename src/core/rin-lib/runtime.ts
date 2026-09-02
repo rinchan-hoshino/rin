@@ -88,11 +88,16 @@ export function createRinCapabilityDefinitions(
   ];
 }
 
-export function getManagedSkillPaths(agentDir: string): string[] {
+export function getManagedSkillPaths(
+  agentDir: string,
+  options: { selfImproveEnabled?: boolean } = {},
+): string[] {
   const root =
     String(agentDir || "").trim() || resolveRuntimeProfile().agentDir;
   return [
-    path.join(root, "self_improve", "skills"),
+    ...(options.selfImproveEnabled === false
+      ? []
+      : [path.join(root, "self_improve", "skills")]),
     path.join(root, "docs", "rin", "builtin-skills"),
   ];
 }
@@ -150,6 +155,7 @@ type LazySystemPromptState = {
   ignorePersistedPrompt: boolean;
   promptContext?: unknown;
   agentDir: string;
+  selfImproveEnabled: boolean;
 };
 
 type PersistedSessionSystemPrompt = {
@@ -289,9 +295,9 @@ function materializeRinSystemPrompt(
     buildRinSystemPrompt({
       piOptions,
       agentDir: state.agentDir,
-      selfImprovePromptBlock: buildOptionalSelfImprovePromptBlock(
-        state.agentDir,
-      ),
+      selfImprovePromptBlock: state.selfImproveEnabled
+        ? buildOptionalSelfImprovePromptBlock(state.agentDir)
+        : "",
     }),
     initialPromptContext,
   );
@@ -1143,7 +1149,15 @@ export async function createConfiguredAgentSession(
     cwd: options.cwd,
     agentDir: options.agentDir,
   });
-  const managedSkillPaths = getManagedSkillPaths(agentDir);
+  const disabledRinCapabilities = new Set(
+    (options.disabledRinCapabilities || [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean),
+  );
+  const selfImproveEnabled = !disabledRinCapabilities.has("self_improve");
+  const managedSkillPaths = getManagedSkillPaths(agentDir, {
+    selfImproveEnabled,
+  });
   const additionalSkillPaths = Array.from(
     new Set([...managedSkillPaths, ...(options.additionalSkillPaths || [])]),
   );
@@ -1179,6 +1193,7 @@ export async function createConfiguredAgentSession(
       systemPrompt: "",
       ignorePersistedPrompt: false,
       agentDir: runtimeAgentDir,
+      selfImproveEnabled,
     };
     const piServiceOptions = options.piAgentSessionServicesOptions ?? {};
     const piResourceLoaderOptions =
@@ -1229,7 +1244,7 @@ export async function createConfiguredAgentSession(
       agentDir: runtimeAgentDir,
       sessionManager,
       modelRegistry: services.modelRegistry,
-      disabledNames: options.disabledRinCapabilities ?? [],
+      disabledNames: [...disabledRinCapabilities],
       definitions: createRinCapabilityDefinitions({
         cwd: runtimeCwd,
         agentDir: runtimeAgentDir,

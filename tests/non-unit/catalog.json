@@ -20,6 +20,16 @@
       "tests": ["tests/system/hosted-chat-service.test.ts"]
     },
     {
+      "source": "src/app/rin-daemon/hosted-nerve-service.ts",
+      "suite": "system",
+      "tests": ["tests/system/hosted-nerve-service.test.ts"]
+    },
+    {
+      "source": "src/app/rin-daemon/nerve-trigger-worker.ts",
+      "suite": "system",
+      "tests": ["tests/system/nerve-trigger-host.test.ts"]
+    },
+    {
       "source": "src/app/rin-daemon/self-improve-worker.ts",
       "suite": "system",
       "tests": ["tests/system/self-improve-worker-owner.test.ts"]
@@ -319,6 +329,31 @@
       "source": "src/core/memory/transcripts.ts",
       "suite": "integration",
       "tests": ["tests/integration/final-system-prompt.test.ts"]
+    },
+    {
+      "source": "src/core/nerve/config.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/nerve-runtime.test.ts"]
+    },
+    {
+      "source": "src/core/nerve/runtime.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/nerve-runtime.test.ts"]
+    },
+    {
+      "source": "src/core/nerve/store.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/nerve-store.test.ts"]
+    },
+    {
+      "source": "src/core/nerve/system-prompt.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/nerve-runtime.test.ts"]
+    },
+    {
+      "source": "src/core/nerve/trigger-host.ts",
+      "suite": "system",
+      "tests": ["tests/system/nerve-trigger-host.test.ts"]
     },
     {
       "source": "src/core/pi/compaction-policy.ts",
@@ -884,6 +919,11 @@
       "source": "src/core/rin/memory-index.ts",
       "suite": "integration",
       "tests": ["tests/integration/rin-memory-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/nerve.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-nerve-cli.test.ts"]
     },
     {
       "source": "src/core/rin/pi-command-adapter.ts",

@@ -24,6 +24,7 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - `docs/pi-overrides.md`: how Rin changes interpretation of upstream Pi docs.
 - `docs/diagnostic-commands.md`: using `doctor`, `status`, and `self-improve` frontend/backend surfaces.
 - `docs/non-interactive-cli.md`: spawning isolated delegated child runs with managed sessions.
+- `docs/nerve-runtime.md`: the single main-agent session, TypeScript trigger runtime, dedicated owner-chat reflex, and nerve CLI.
 - `docs/runtime-layout.md`: stable paths, launcher ownership, app releases, and paths safe for agents to reference.
 - `docs/capabilities.md`: compact behavior and conventions for Rin agent-facing features.
 - `docs/extensions.md`: Pi extension loading, optional Chat platform contributions, and core capability boundaries.

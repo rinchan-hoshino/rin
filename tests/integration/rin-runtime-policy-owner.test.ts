@@ -82,12 +82,18 @@ test("provider-bound pruning is the sole builtin context-transform capability", 
   assert.equal(contextCapabilities.includes("self_improve"), false);
 });
 
-test("getManagedSkillPaths includes agent memory skills and builtin skills", () => {
+test("getManagedSkillPaths can exclude only self-improve resources", () => {
   const paths = runtimeMod.getManagedSkillPaths("/tmp/rin-home");
   assert.deepEqual(paths, [
     "/tmp/rin-home/self_improve/skills",
     "/tmp/rin-home/docs/rin/builtin-skills",
   ]);
+  assert.deepEqual(
+    runtimeMod.getManagedSkillPaths("/tmp/rin-home", {
+      selfImproveEnabled: false,
+    }),
+    ["/tmp/rin-home/docs/rin/builtin-skills"],
+  );
 });
 
 test("Rin core does not register a session note capability", () => {

@@ -662,6 +662,17 @@ export class RinFrontendTurnDriver {
     return safeString(this.frontendState.sessionFile || "").trim();
   }
 
+  async abortCurrentTurn() {
+    if (!this.client?.isConnected()) return false;
+    await this.client.request({
+      type: "abort",
+      ...(this.currentSessionFile()
+        ? { sessionFile: this.currentSessionFile() }
+        : {}),
+    });
+    return true;
+  }
+
   async acknowledgeTerminal(requestTag: string, terminalId: string) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     return await this.client.request({
@@ -1577,6 +1588,7 @@ export class RinFrontendTurnDriver {
     managedSessionLeaf = "",
     toolOptions?: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+        appendSystemPrompt?: string[];
         disabledRinCapabilities?: string[];
       },
     readinessEpoch = this.lifecycleEpoch,
@@ -1622,6 +1634,9 @@ export class RinFrontendTurnDriver {
             : {}),
           ...(toolOptions?.piStartupOptions !== undefined
             ? { piStartupOptions: toolOptions.piStartupOptions }
+            : {}),
+          ...(toolOptions?.appendSystemPrompt !== undefined
+            ? { appendSystemPrompt: toolOptions.appendSystemPrompt }
             : {}),
           ...(toolOptions?.disabledRinCapabilities !== undefined
             ? { disabledRinCapabilities: toolOptions.disabledRinCapabilities }
@@ -2035,6 +2050,7 @@ export class RinFrontendTurnDriver {
       streamingBehavior?: "steer" | "followUp";
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
+      appendSystemPrompt?: string[];
       disabledRinCapabilities?: string[];
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
@@ -2138,6 +2154,7 @@ export class RinFrontendTurnDriver {
       assumeConnected?: boolean;
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
+      appendSystemPrompt?: string[];
       disabledRinCapabilities?: string[];
       commitNonterminalAcceptance?: (input: {
         requestTag: string;

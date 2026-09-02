@@ -25,6 +25,7 @@ import {
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
 import { createHostedChatService } from "./hosted-chat-service.js";
+import { createHostedNerveService } from "./hosted-nerve-service.js";
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,10 @@ async function main() {
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
   let daemonLock: DaemonInstanceLock | null = null;
   const hostedChatService = createHostedChatService({ logger: console });
+  const hostedNerveService = createHostedNerveService({
+    agentDir: runtime.agentDir,
+    logger: console,
+  });
   const getHostedChatBridge = async () => await hostedChatService.getBridge();
   const chatIntegration = createChatDaemonIntegration({
     agentDir: runtime.agentDir,
@@ -56,22 +61,30 @@ async function main() {
 
   const stopHostedServices = async () => {
     await hostedChatService.stop();
+    await hostedNerveService.stop();
   };
-  let hostedChatStartRequested = false;
-  const startHostedChat = () => {
-    if (hostedChatStartRequested) return;
-    hostedChatStartRequested = true;
-    void hostedChatService.start(
-      async () =>
-        await startChatBridge({
-          hosted: true,
-          frontendClientFactory: () =>
-            new RinDaemonFrontendClient({
-              socketPath: "inprocess://rin-daemon",
-              connectSocket: async () => (await localFrontendConnector)(),
-            }),
-        }),
-    );
+  let hostedServicesStartPromise: Promise<void> | null = null;
+  const startHostedServices = (connector: RpcSocketConnector) => {
+    if (hostedServicesStartPromise) return hostedServicesStartPromise;
+    hostedServicesStartPromise = (async () => {
+      await hostedNerveService.start(connector);
+      await hostedChatService.start(
+        async () =>
+          await startChatBridge({
+            hosted: true,
+            nerveObserver: {
+              ownerChatKey: hostedNerveService.getOwnerChatKey(),
+              observe: hostedNerveService.observeChat,
+            },
+            frontendClientFactory: () =>
+              new RinDaemonFrontendClient({
+                socketPath: "inprocess://rin-daemon",
+                connectSocket: async () => (await localFrontendConnector)(),
+              }),
+          }),
+      );
+    })();
+    return hostedServicesStartPromise;
   };
 
   try {
@@ -86,12 +99,17 @@ async function main() {
       selfImproveWorkerPath,
       workerCgroupIsolation,
       chat: chatIntegration.delivery,
-      additionalCommandRouter: chatIntegration.commandRouter,
-      getExtraStatus: () => ({ chat: hostedChatService.getStatus() }),
+      additionalCommandRouter: async (command) =>
+        (await hostedNerveService.commandRouter(command)) ||
+        (await chatIntegration.commandRouter(command)),
+      getExtraStatus: () => ({
+        chat: hostedChatService.getStatus(),
+        nerve: hostedNerveService.getStatus(),
+      }),
       registerLocalFrontendConnector: (connector) => {
         localFrontendConnectorResolver?.(connector);
         localFrontendConnectorResolver = null;
-        startHostedChat();
+        startHostedServices(connector);
       },
       onShutdown: stopHostedServices,
     });
@@ -109,6 +127,14 @@ async function main() {
     };
     process.on("SIGINT", () => void shutdown());
     process.on("SIGTERM", () => void shutdown());
+    if (hostedServicesStartPromise) {
+      try {
+        await hostedServicesStartPromise;
+      } catch (error) {
+        await daemon.shutdown().catch(() => {});
+        throw error;
+      }
+    }
   } catch (error) {
     await stopHostedServices().catch(() => {});
     await daemonLock?.release().catch(() => {});

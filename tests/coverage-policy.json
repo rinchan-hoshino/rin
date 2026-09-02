@@ -15,6 +15,14 @@
       "ownerSuite": "system"
     },
     {
+      "source": "src/app/rin-daemon/hosted-nerve-service.ts",
+      "ownerSuite": "system"
+    },
+    {
+      "source": "src/app/rin-daemon/nerve-trigger-worker.ts",
+      "ownerSuite": "system"
+    },
+    {
       "source": "src/app/rin-daemon/self-improve-worker.ts",
       "ownerSuite": "system"
     },
@@ -281,6 +289,26 @@
     {
       "source": "src/core/message-content.ts",
       "ownerSuite": "unit"
+    },
+    {
+      "source": "src/core/nerve/config.ts",
+      "ownerSuite": "integration"
+    },
+    {
+      "source": "src/core/nerve/runtime.ts",
+      "ownerSuite": "integration"
+    },
+    {
+      "source": "src/core/nerve/store.ts",
+      "ownerSuite": "integration"
+    },
+    {
+      "source": "src/core/nerve/system-prompt.ts",
+      "ownerSuite": "integration"
+    },
+    {
+      "source": "src/core/nerve/trigger-host.ts",
+      "ownerSuite": "system"
     },
     {
       "source": "src/core/pi/compaction-policy.ts",
@@ -820,6 +848,10 @@
     },
     {
       "source": "src/core/rin/memory-index.ts",
+      "ownerSuite": "integration"
+    },
+    {
+      "source": "src/core/rin/nerve.ts",
       "ownerSuite": "integration"
     },
     {

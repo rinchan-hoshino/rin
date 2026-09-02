@@ -44,12 +44,13 @@ async function runDaemon(
   );
 }
 
-test("app daemon entrypoint only assembles the typed Chat integration", async () => {
+test("app daemon entrypoint only assembles the typed Chat and nerve integrations", async () => {
   const source = await fs.readFile(entrypointSource, "utf8");
   assert.match(source, /createChatDaemonIntegration/);
+  assert.match(source, /createHostedNerveService/);
   assert.match(
     source,
-    /additionalCommandRouter:\s*chatIntegration\.commandRouter/,
+    /hostedNerveService\.commandRouter\(command\)[\s\S]*chatIntegration\.commandRouter\(command\)/,
   );
   assert.doesNotMatch(source, /handleLocalCommand/);
   assert.doesNotMatch(
@@ -59,7 +60,7 @@ test("app daemon entrypoint only assembles the typed Chat integration", async ()
   assert.doesNotMatch(source, /command\?\.type|command\.type/);
   assert.match(
     source,
-    /registerLocalFrontendConnector:[\s\S]*startHostedChat\(\)/,
+    /registerLocalFrontendConnector:[\s\S]*startHostedServices\(connector\)/,
   );
 });
 
@@ -73,9 +74,21 @@ test("app daemon assembles hosted services and failure cleanup", async () => {
     assert.equal(summary.socketPath, "/owner/explicit.sock");
     assert.deepEqual(summary.starting, {
       chat: { ready: false, status: "starting" },
+      nerve: {
+        ready: true,
+        working: false,
+        queue: { queued: 0, inflight: 0, delivered: 0 },
+        triggers: [],
+      },
     });
     assert.deepEqual(summary.ready, {
       chat: { status: "ready", owner: true },
+      nerve: {
+        ready: true,
+        working: false,
+        queue: { queued: 0, inflight: 0, delivered: 0 },
+        triggers: [],
+      },
     });
     assert.deepEqual(summary.routed, {
       data: { routed: { owner: true } },

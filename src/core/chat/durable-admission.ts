@@ -34,6 +34,15 @@ export type DurableChatAdmissionDecision =
     }
   | {
       version: 1;
+      kind: "nerve_owner_message";
+      chatKey: string;
+      messageId: string;
+      trust: "OWNER";
+      text: string;
+      promptMeta: PromptContextMeta;
+    }
+  | {
+      version: 1;
       kind: "unmatched_command";
       chatKey: string;
       messageId: string;
@@ -71,6 +80,13 @@ export type ResolvedDurableChatAdmission =
       chatKey: string;
       messageId: string;
       command: { name: string; argsText: string };
+      promptMeta: PromptContextMeta;
+    }
+  | {
+      kind: "nerve_owner_message";
+      chatKey: string;
+      messageId: string;
+      text: string;
       promptMeta: PromptContextMeta;
     }
   | {
@@ -197,6 +213,20 @@ export function durableAdmissionMatchesTurn(
       typeof admission.decision.trust === "string" &&
       admission.decision.trust === admission.decision.trust.trim() &&
       admission.decision.promptMeta?.identity === admission.decision.trust,
+    );
+  }
+  if (admission.decision.kind === "nerve_owner_message") {
+    return Boolean(
+      sameCanonicalIdentity(admission.decision.chatKey, turn.chatKey) &&
+      sameCanonicalIdentity(admission.decision.messageId, turn.messageId) &&
+      admission.decision.trust === "OWNER" &&
+      typeof admission.decision.text === "string" &&
+      admission.decision.text.length > 0 &&
+      sameCanonicalIdentity(
+        admission.decision.promptMeta?.chatKey,
+        turn.chatKey,
+      ) &&
+      admission.decision.promptMeta?.identity === "OWNER",
     );
   }
   if (admission.decision.kind === "unmatched_command") {
@@ -329,6 +359,23 @@ export function resolveDurableChatAdmission(
         name: decision.command.name,
         argsText: decision.command.argsText,
       },
+      promptMeta: currentPromptContextMeta(decision.promptMeta),
+    };
+  }
+  if (decision.kind === "nerve_owner_message") {
+    if (
+      decision.trust !== "OWNER" ||
+      typeof decision.text !== "string" ||
+      !decision.text ||
+      !promptContextMetaIsValid(decision.promptMeta, turn.chatKey, "OWNER")
+    ) {
+      return { kind: "unavailable", reason: "unsupported_admission" };
+    }
+    return {
+      kind: "nerve_owner_message",
+      chatKey: turn.chatKey,
+      messageId: turn.messageId,
+      text: decision.text,
       promptMeta: currentPromptContextMeta(decision.promptMeta),
     };
   }

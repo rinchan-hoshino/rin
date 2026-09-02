@@ -25,6 +25,7 @@ Use `createRinAgentSdk({ timeoutMs, socketPath })` instead of the singleton only
 
 - `rin.daemon`: `status()`, `activity()`.
 - `rin.sessions`: `list({ limit?, offset? })`.
+- `rin.nerve`: `emit(stimulus)`, `status()`, `abort()`, `reloadTrigger(id?)`.
 - `rin.tasks` reads: `list()`, `get(taskId)`.
 - `rin.tasks` writes: `upsert(task, defaults?)`, `delete(taskId)`, `complete(taskId, reason?)`, `pause(taskId)`, `resume(taskId)`, `rescheduleOnce(taskId, runAt)`, `run(taskId)`, `wake(taskId)`, `reload()`.
 - `rin.chat` delivery: `send({ chatKey, text })` or `send({ chatKey, parts })`, `typing(chatKey)`, `react(payload)`.
@@ -36,6 +37,7 @@ Every call accepts an optional final `{ timeoutMs, socketPath }` override.
 
 ## Read more only when needed
 
+- sensory triggers, the main-agent session, or the nerve CLI: `docs/nerve-runtime.md`;
 - recurring schedules, task schema, delivery, or lifecycle: `docs/scheduled-tasks.md`;
 - rich chat parts, attachments, quotes, reactions, or delivery verification: `docs/chat-bridge.md` and `docs/rich-text-output-format.md`;
 - bridge internals or platform actions through `evalBridge`: `docs/chat-bridge.md`;
