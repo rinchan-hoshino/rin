@@ -231,7 +231,9 @@ function resolveCronTaskFrontend(task: Pick<CronTaskRecord, "frontend">) {
     | CronTaskFrontendBinding
     | undefined;
   const kind = String(frontend?.kind || "").trim() || undefined;
-  if (kind === "tui") return { kind: "tui", key: "tui" };
+  if (kind === "tui") {
+    return { kind: "tui", key: safeString(frontend?.key).trim() || "tui" };
+  }
   const key = String(frontend?.key || "").trim();
   if (!key) return undefined;
   return {

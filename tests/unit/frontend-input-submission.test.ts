@@ -48,7 +48,7 @@ test("frontend input submission forwards normalized prompt metadata", async () =
           chatKey: "discord/owner:channel",
           messageId: "message-1",
         },
-        frontendIdentity: { kind: "tui" },
+        frontendIdentity: { kind: "tui", key: "main" },
         promptContext: { source: "tui" },
       },
     },

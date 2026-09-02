@@ -35,11 +35,11 @@ const sources: Record<string, string> = {
   "dist/core/rin-frontend-sdk/daemon-client.js": `
     export class RinDaemonFrontendClient { constructor(options) { this.options = options; globalThis.__rinTuiOwnerEvents.push(["client", options]); } }
   `,
-  "dist/core/rin-lib/frontend-identity.js": `export const TUI_FRONTEND_IDENTITY = { kind: "tui", id: "owner" };`,
+  "dist/core/rin-lib/frontend-identity.js": `export function createTuiFrontendIdentity() { const id = (globalThis.__rinTuiIdentityCounter || 0) + 1; globalThis.__rinTuiIdentityCounter = id; return { kind: "tui", key: \`owner-instance-\${id}\` }; }`,
   "dist/core/rin-frontend-sdk/runtime-wrapper.js": `export function createFrontendSdkRuntimeWrapper(runtime) { globalThis.__rinTuiOwnerEvents.push(["wrap", runtime]); return runtime; }`,
   "dist/core/rin-tui/runtime.js": `
     export class RpcInteractiveSession {
-      constructor(client, resources) { this.client = client; this.resources = resources; this.settingsManager = { getQuietStartup: () => globalThis.__rinTuiOwnerScenario.quiet }; globalThis.__rinTuiOwnerEvents.push(["rpc-session", resources]); }
+      constructor(client, resources, extensions, frontendIdentity) { this.client = client; this.resources = resources; this.frontendIdentity = frontendIdentity; this.settingsManager = { getQuietStartup: () => globalThis.__rinTuiOwnerScenario.quiet }; globalThis.__rinTuiOwnerEvents.push(["rpc-session", resources, frontendIdentity]); }
       async prepareForInteractiveStartup() { globalThis.__rinTuiOwnerEvents.push(["rpc-prepare"]); if (globalThis.__rinTuiOwnerScenario.rpcPrepareError) throw globalThis.__rinTuiOwnerScenario.rpcPrepareError; }
       async connect() { globalThis.__rinTuiOwnerEvents.push(["rpc-connect"]); if (globalThis.__rinTuiOwnerScenario.rpcConnectError) throw globalThis.__rinTuiOwnerScenario.rpcConnectError; }
       async ensureSessionReady() { globalThis.__rinTuiOwnerEvents.push(["rpc-ready"]); if (globalThis.__rinTuiOwnerScenario.rpcReadyError) throw globalThis.__rinTuiOwnerScenario.rpcReadyError; }

@@ -135,7 +135,7 @@ test("cron upsert validates trigger, target, frontend, and condition while dropp
       frontend: { kind: "tui", key: "terminal" },
       target: { kind: "shell_command", command: "owner" },
     } as any);
-    assert.deepEqual(tuiTask.frontend, { kind: "tui" });
+    assert.deepEqual(tuiTask.frontend, { kind: "tui", key: "terminal" });
     const defaulted = scheduler.upsertTask({
       id: "defaulted",
       trigger: { runAt: futureIso() },

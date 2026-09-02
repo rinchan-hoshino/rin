@@ -271,6 +271,11 @@ test("startTui owns rpc success, startup cleanup, maintenance fallback, and fata
   assert.equal(names().includes("rpc-session"), true);
   assert.equal(names().includes("runtime-dispose"), true);
   assert.equal(names().includes("configured-session"), false);
+  const clientIdentity = events.find(([name]) => name === "client")?.[1]
+    ?.frontendIdentity;
+  const sessionIdentity = events.find(([name]) => name === "rpc-session")?.[2];
+  assert.deepEqual(sessionIdentity, clientIdentity);
+  assert.match(clientIdentity?.key || "", /^owner-instance-/);
   assert.deepEqual(
     events.find(([name]) => name === "rpc-session")?.[1]
       .additionalExtensionPaths,

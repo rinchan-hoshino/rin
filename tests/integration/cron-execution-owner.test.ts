@@ -259,7 +259,7 @@ test("cron prompt context identifies chat and controller frontends", () => {
     {
       source: "scheduled-task",
       sentAt: 456,
-      frontend: { kind: "tui", key: "tui" },
+      frontend: { kind: "tui", key: "terminal" },
       taskId: "cron_owner",
       taskName: undefined,
     },
@@ -601,8 +601,8 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
     });
     assert.match(controllerShell.lastError, /Exit: 9/);
     assert.deepEqual(working.slice(2), [
-      { controllerKey: "tui", visible: true },
-      { controllerKey: "tui", visible: false },
+      { controllerKey: "terminal", visible: true },
+      { controllerKey: "terminal", visible: false },
     ]);
   });
 });

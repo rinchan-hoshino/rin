@@ -843,7 +843,7 @@ test("rpc interactive session routes follow-up intent through the ordinary promp
     source: "tui-test",
     streamingBehavior: undefined,
     requestTag: calls[0]?.requestTag,
-    frontendIdentity: { kind: "tui" },
+    frontendIdentity: session.frontendIdentity,
   });
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
 });

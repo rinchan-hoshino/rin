@@ -206,7 +206,9 @@ function frontendSessionKey(identity: RinFrontendIdentity | undefined) {
   if (!identity) return undefined;
   const kind = String(identity.kind || "").trim();
   if (!kind) return undefined;
-  return `${kind}\u0000${String(identity.key || "").trim()}`;
+  const key = String(identity.key || "").trim();
+  if (kind === "tui" && !key) return undefined;
+  return `${kind}\u0000${key}`;
 }
 
 export class WorkerPool {

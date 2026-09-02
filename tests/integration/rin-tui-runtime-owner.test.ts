@@ -151,7 +151,12 @@ function makeSession(
   client = new OwnerRpcClient(),
   options: Record<string, unknown> | string[] = {},
 ) {
-  const session = new RpcInteractiveSession(client as any, options as any);
+  const session = new RpcInteractiveSession(
+    client as any,
+    options as any,
+    undefined,
+    { kind: "tui", key: "owner-instance" },
+  );
   session.settingsManager = {
     getCompactionEnabled: () => true,
     setSteeringMode() {},
@@ -494,7 +499,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
     images: [{ type: "image", data: "owner" }],
     source: "owner-source",
     requestTag: "owner-request",
-    frontendIdentity: { kind: "tui" },
+    frontendIdentity: { kind: "tui", key: "owner-instance" },
     streamingBehavior: undefined,
   });
   assert.equal(
@@ -524,7 +529,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
       images: undefined,
       source: "owner",
       requestTag: sentOf(client, "prompt").at(-2)?.requestTag,
-      frontendIdentity: { kind: "tui" },
+      frontendIdentity: { kind: "tui", key: "owner-instance" },
       streamingBehavior: undefined,
     },
     {
@@ -533,7 +538,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
       images: undefined,
       source: undefined,
       requestTag: "follow",
-      frontendIdentity: { kind: "tui" },
+      frontendIdentity: { kind: "tui", key: "owner-instance" },
       streamingBehavior: undefined,
     },
   ]);

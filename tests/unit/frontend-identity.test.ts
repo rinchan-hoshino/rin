@@ -73,54 +73,33 @@ test("frontend identity factories normalize source and chat keys", () => {
   );
 });
 
-test("TUI frontend identities never retain address keys", () => {
+test("TUI frontend identities preserve per-instance keys", () => {
   assert.deepEqual(
     frontendIdentityMod.normalizeFrontendIdentity({
       kind: "tui",
-      key: "terminal/main",
+      key: " terminal/main ",
     }),
-    { kind: "tui" },
+    { kind: "tui", key: "terminal/main" },
   );
   assert.deepEqual(
     frontendIdentityMod.normalizeFrontendIdentity({
       kind: "tui",
       id: "terminal/main",
     }),
-    { kind: "tui" },
+    { kind: "tui", key: "terminal/main" },
   );
 });
 
-test("normalized TUI identities cannot contaminate the shared identity", () => {
-  const normalized = frontendIdentityMod.normalizeFrontendIdentity({
-    kind: "tui",
-  });
-  assert.notEqual(normalized, frontendIdentityMod.TUI_FRONTEND_IDENTITY);
-  normalized.key = "terminal/main";
-  assert.deepEqual(
-    frontendIdentityMod.normalizeFrontendIdentity({ kind: "tui" }),
-    { kind: "tui" },
-  );
-  assert.deepEqual(frontendIdentityMod.TUI_FRONTEND_IDENTITY, { kind: "tui" });
-  assert.equal(
-    Object.isFrozen(frontendIdentityMod.TUI_FRONTEND_IDENTITY),
-    true,
-  );
-});
-
-test("TUI identities cannot bind while other frontend matching stays unchanged", () => {
+test("each TUI instance gets a distinct stable frontend identity", () => {
+  const first = frontendIdentityMod.createTuiFrontendIdentity();
+  const second = frontendIdentityMod.createTuiFrontendIdentity();
+  assert.equal(first.kind, "tui");
+  assert.ok(first.key);
+  assert.notDeepEqual(first, second);
+  assert.equal(frontendIdentityMod.sameFrontendIdentity(first, first), true);
+  assert.equal(frontendIdentityMod.sameFrontendIdentity(first, second), false);
   assert.equal(
     frontendIdentityMod.sameFrontendIdentity({ kind: "tui" }, { kind: "tui" }),
     false,
-  );
-  assert.equal(
-    frontendIdentityMod.sameFrontendIdentity({ kind: "sdk" }, { kind: "sdk" }),
-    true,
-  );
-  assert.equal(
-    frontendIdentityMod.sameFrontendIdentity(
-      { kind: "sdk", key: "client/main" },
-      { kind: "sdk", key: "client/main" },
-    ),
-    true,
   );
 });

@@ -23,7 +23,7 @@ import {
 
 import { parseTuiCliOptions, type TuiResourceOptions } from "./cli-options.js";
 import { RinDaemonFrontendClient } from "../rin-frontend-sdk/daemon-client.js";
-import { TUI_FRONTEND_IDENTITY } from "../rin-lib/frontend-identity.js";
+import { createTuiFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/runtime-wrapper.js";
 import { attachLocalTuiPresentation } from "./local-session-presentation.js";
 import { RpcInteractiveSession } from "./runtime.js";
@@ -410,8 +410,9 @@ async function startRpcTui(
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
 ) {
+  const frontendIdentity = createTuiFrontendIdentity();
   const client = new RinDaemonFrontendClient({
-    frontendIdentity: TUI_FRONTEND_IDENTITY,
+    frontendIdentity,
   });
   const runtimeProfile = resolveRuntimeProfile();
   const { loadRinFrontendExtensionDefinitions } =
@@ -425,6 +426,7 @@ async function startRpcTui(
     client,
     resourceOptions,
     frontendExtensions,
+    frontendIdentity,
   );
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;

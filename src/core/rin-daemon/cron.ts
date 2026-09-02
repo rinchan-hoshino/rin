@@ -141,7 +141,10 @@ function normalizeTaskFrontend(
   if (frontend === null) return undefined;
   if (frontend === undefined) return existing?.frontend;
   const kind = safeString((frontend as any).kind).trim() || undefined;
-  if (kind === "tui") return { kind: "tui" };
+  if (kind === "tui") {
+    const key = safeString(frontend?.key).trim();
+    return key ? { kind: "tui", key } : { kind: "tui" };
+  }
   const key = requireNonEmptyString(
     (frontend as any).key,
     "cron_frontend_key_required",

@@ -1188,7 +1188,7 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   assert.ok(sentTypes.includes("new_session"));
   assert.deepEqual(
     sent.find((entry) => entry.type === "new_session")?.frontendIdentity,
-    { kind: "tui" },
+    session.frontendIdentity,
   );
   assert.deepEqual(
     sent.find((entry) => entry.type === "new_session")?.resourceOptions,
@@ -1316,7 +1316,7 @@ test("rpc runtime lets daemon admission decide ordinary steer prompt mode", asyn
       streamingBehavior: undefined,
       source: undefined,
       requestTag: "<auto>",
-      frontendIdentity: { kind: "tui" },
+      frontendIdentity: session.frontendIdentity,
     },
   );
   assert.deepEqual(session.getSteeringMessages(), []);
@@ -1853,10 +1853,13 @@ test("rpc runtime promotes a temporary worker session before the first prompt", 
     (payload) => payload.type === "new_session",
   );
   assert.ok(newSessionPayload);
-  assert.deepEqual(newSessionPayload.frontendIdentity, { kind: "tui" });
+  assert.deepEqual(
+    newSessionPayload.frontendIdentity,
+    session.frontendIdentity,
+  );
   assert.deepEqual(
     sent.find((payload) => payload.type === "prompt")?.frontendIdentity,
-    { kind: "tui" },
+    session.frontendIdentity,
   );
 });
 

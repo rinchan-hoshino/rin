@@ -1195,7 +1195,7 @@ test("cron frontend input uses the standard frontend controller and delivery", a
   }
 });
 
-test("cron scheduler accepts the singleton TUI frontend binding", () => {
+test("cron scheduler accepts a keyed TUI frontend binding", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
     cwd: process.cwd(),
@@ -1206,10 +1206,10 @@ test("cron scheduler accepts the singleton TUI frontend binding", () => {
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "hello" },
   });
-  assert.deepEqual(task.frontend, { kind: "tui" });
+  assert.deepEqual(task.frontend, { kind: "tui", key: "terminal/main" });
 });
 
-test("cron scheduler binds tasks created from the singleton TUI frontend", async () => {
+test("cron scheduler binds tasks created from a TUI instance frontend", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const scheduler = new cronMod.CronScheduler({ agentDir });
@@ -1223,9 +1223,12 @@ test("cron scheduler binds tasks created from the singleton TUI frontend", async
       },
       { frontend: { kind: "tui", key: "terminal/main" } },
     );
-    assert.deepEqual(task.frontend, { kind: "tui" });
+    assert.deepEqual(task.frontend, { kind: "tui", key: "terminal/main" });
     const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
-    assert.deepEqual(rows[0].createdFrom.frontend, { kind: "tui" });
+    assert.deepEqual(rows[0].createdFrom.frontend, {
+      kind: "tui",
+      key: "terminal/main",
+    });
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1254,6 +1257,7 @@ test("cron scheduler accepts persisted TUI frontend bindings", async () => {
     scheduler.reloadTasks();
     assert.deepEqual(scheduler.getTask("cron_tui_frontend")?.frontend, {
       kind: "tui",
+      key: "terminal/main",
     });
   } finally {
     scheduler.stop();

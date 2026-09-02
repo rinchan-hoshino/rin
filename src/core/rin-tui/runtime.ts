@@ -57,7 +57,10 @@ import {
   applyRpcSessionTree,
   getSessionBranch,
 } from "../rin-frontend-sdk/state-utils.js";
-import { TUI_FRONTEND_IDENTITY } from "../rin-lib/frontend-identity.js";
+import {
+  createTuiFrontendIdentity,
+  type RinFrontendIdentity,
+} from "../rin-lib/frontend-identity.js";
 import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
 import { getCoreToolRenderer } from "./tool-renderers/index.js";
@@ -386,6 +389,7 @@ export class RpcInteractiveSession {
     public client: RpcFrontendClient,
     extensionOptions: string[] | Partial<TuiResourceOptions> = [],
     frontendExtensions?: { extensions: any[]; runtime: any },
+    public readonly frontendIdentity: RinFrontendIdentity = createTuiFrontendIdentity(),
   ) {
     const normalizedExtensionOptions = Array.isArray(extensionOptions)
       ? { additionalExtensionPaths: extensionOptions }
@@ -652,7 +656,7 @@ export class RpcInteractiveSession {
         parentSession: options?.parentSession,
         managedSessionLeaf: options?.managedSessionLeaf,
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
-        frontendIdentity: TUI_FRONTEND_IDENTITY,
+        frontendIdentity: this.frontendIdentity,
       });
       if (!data?.cancelled) {
         this.sessionFile = safeString(data?.sessionFile).trim() || undefined;
@@ -671,7 +675,7 @@ export class RpcInteractiveSession {
       const data = await this.call("switch_session", {
         sessionPath,
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
-        frontendIdentity: TUI_FRONTEND_IDENTITY,
+        frontendIdentity: this.frontendIdentity,
       });
       if (!data?.cancelled) {
         this.sessionFile =
@@ -1601,7 +1605,7 @@ export class RpcInteractiveSession {
             streamingBehavior: undefined,
             source: operation.source,
             requestTag: operation.requestTag,
-            frontendIdentity: TUI_FRONTEND_IDENTITY,
+            frontendIdentity: this.frontendIdentity,
             gate: {
               isCompacting: () => this.isCompacting,
               onWaiting: () => this.emitFrontendStatus(true),
@@ -1818,7 +1822,7 @@ export class RpcInteractiveSession {
     if (this.sessionFile || (!options.persist && this.sessionId)) return;
     const data = await this.call("new_session", {
       resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
-      frontendIdentity: TUI_FRONTEND_IDENTITY,
+      frontendIdentity: this.frontendIdentity,
     });
     if (data && data.cancelled) throw new Error("rin_new_session_cancelled");
     await this.refreshState(REFRESH_ALL);
@@ -1835,7 +1839,7 @@ export class RpcInteractiveSession {
       "shutdown_session",
       "terminate_session",
     ].includes(type)
-      ? { frontendIdentity: TUI_FRONTEND_IDENTITY }
+      ? { frontendIdentity: this.frontendIdentity }
       : {};
     const scopedPayload: Record<string, unknown> = {
       ...frontendScoped,

@@ -13,7 +13,7 @@ type WritableTaskPatch = {
   id?: string;
   name?: string;
   enabled?: boolean;
-  frontend?: { kind: "chat" | "sdk"; key: string } | { kind: "tui" } | null;
+  frontend?: { kind: "chat" | "sdk" | "tui"; key: string } | null;
   quiet?: boolean;
   trigger?: {
     expression?: string;
@@ -214,7 +214,7 @@ Choose one delivery policy:
 - Shell task with a Chat `frontend` and `quiet: false`: display the marked command and automatically deliver its output.
 - Shell task without `frontend`: store the result without automatic delivery.
 
-An addressable `frontend` routes execution through that frontend's current session and initializes the frontend normally when no current session exists. `frontend: { kind: "chat", key: "..." }` also selects the Chat destination. TUI is the singleton `{ kind: "tui" }` identity.
+An addressable `frontend` routes execution through that frontend's current session and initializes the frontend normally when no current session exists. `frontend: { kind: "chat", key: "..." }` also selects the Chat destination. A TUI process has its own keyed `{ kind: "tui", key: "..." }` identity.
 
 For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt or shell command before Working begins. Automatic final or shell output replies to that marker where the platform supports quotes. Chat persists the provider message ID directly as an unprocessed `user` message and atomically commits its durable inbox item; it never records an assistant output and later converts it. Hidden Chat input skips platform presentation, receives a stable internal ID, and enters the same inbox/admission/turn consumer. Presentation policy changes only visibility, not execution ownership. Only `taskId` and `taskName` extend ordinary Chat prompt metadata; delivery and run identifiers stay in scheduler/outbox provenance.
 

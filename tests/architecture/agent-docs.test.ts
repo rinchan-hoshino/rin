@@ -367,7 +367,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksReference,
-    /TUI is the singleton `\{ kind: "tui" \}` identity/,
+    /A TUI process has its own keyed `\{ kind: "tui", key: "\.\.\." \}` identity/,
   );
   assert.match(
     scheduledTasksReference,

@@ -181,7 +181,7 @@ test("daemon permits only an explicit TUI switch to request another bound sessio
   const connection: any = {
     socket: { destroyed: false, write() {} },
     clientBuffer: "",
-    frontendIdentity: { kind: "tui" },
+    frontendIdentity: { kind: "tui", key: "instance-a" },
   };
 
   pool.prepareFrontendCommand(connection, {
@@ -204,6 +204,39 @@ test("daemon permits only an explicit TUI switch to request another bound sessio
     /frontend_session_switch_requires_new/,
   );
   pool.destroyAll();
+});
+
+test("daemon isolates TUI instance bindings while reconnecting the same instance", () => {
+  const pool = new WorkerPool({
+    workerPath: process.execPath,
+    cwd: process.cwd(),
+    gcIdleMs: 5000,
+  });
+  const instanceA: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "tui", key: "instance-a" },
+  };
+  pool.prepareFrontendCommand(instanceA, {
+    type: "select_session",
+    sessionFile: "/tmp/tui-a.jsonl",
+  });
+
+  const reconnectedA: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "tui", key: "instance-a" },
+  };
+  pool.prepareFrontendCommand(reconnectedA, { type: "get_state" });
+  assert.equal(reconnectedA.sessionFile, "/tmp/tui-a.jsonl");
+
+  const instanceB: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "tui", key: "instance-b" },
+  };
+  pool.prepareFrontendCommand(instanceB, { type: "get_state" });
+  assert.equal(instanceB.sessionFile, undefined);
 });
 
 test("daemon persists the single session selection for a frontend identity", async () => {
