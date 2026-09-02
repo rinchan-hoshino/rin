@@ -59,7 +59,7 @@ test("frontend command responses render abort, session, and reload states", () =
   );
   assert.equal(
     responsesModule.applyFrontendBuiltinCommandText("done", {}, responses).text,
-    "Conversation completed; worker exited.",
+    "Conversation completed.",
   );
   assert.equal(
     responsesModule.applyFrontendBuiltinCommandText("new", {}, responses).text,

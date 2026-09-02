@@ -19,7 +19,7 @@ export type RinFrontendCommandResponses = {
 export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses =
   {
     abort: "Aborted current operation.",
-    done: "Conversation completed; worker exited.",
+    done: "Conversation completed.",
     new: "Started a new session.",
     newCancelled: "Session switch cancelled.",
     compact: "Compacted session.",

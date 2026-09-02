@@ -2770,7 +2770,7 @@ export class ChatController {
       let data: any;
       if (commandName === "done") {
         await this.shutdownSession();
-        data = { text: "Conversation completed; worker exited." };
+        data = { text: "Conversation completed." };
       } else {
         const frontendReady = await this.connect({
           restoreSession: !skipSessionRecovery,

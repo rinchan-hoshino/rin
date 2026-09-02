@@ -1451,7 +1451,7 @@ test("chat controller /done exits the current worker without entering its comman
   await controller.runCommand("/done");
 
   assert.equal(shutdowns, 1);
-  assert.deepEqual(replies, ["Conversation completed; worker exited."]);
+  assert.deepEqual(replies, ["Conversation completed."]);
 });
 
 test("chat controller /new clears the old binding when the logical session has no file yet", async () => {
