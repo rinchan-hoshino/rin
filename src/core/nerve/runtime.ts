@@ -4,7 +4,6 @@ import type {
   NerveStatus,
   NerveStimulusInput,
 } from "./contracts.js";
-import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import { NERVE_SYSTEM_PROMPT } from "./system-prompt.js";
 import { openNerveStore } from "./store.js";
 import { createNerveTriggerHost } from "./trigger-host.js";
@@ -18,28 +17,11 @@ export type NerveTurnDriver = {
     streamingBehavior: "steer";
     disabledRinCapabilities: ["self_improve"];
     appendSystemPrompt: [string];
-    promptContext?: PromptContextMeta;
   }): Promise<unknown>;
   abort(): Promise<void>;
   disconnect(): Promise<void>;
   state(): Record<string, unknown>;
 };
-
-function renderStimulus(input: {
-  id: string;
-  producer: string;
-  sensation: string;
-  body: string;
-  createdAt: string;
-}) {
-  return [
-    `Stimulus ID: ${input.id}`,
-    `Producer: ${input.producer}`,
-    `Occurred at: ${input.createdAt}`,
-    `You felt “${input.sensation}”:`,
-    input.body,
-  ].join("\n");
-}
 
 export function createNerveRuntime(options: {
   agentDir: string;
@@ -93,14 +75,13 @@ export function createNerveRuntime(options: {
         if (!stimulus) break;
         try {
           await options.driver.submitTurn({
-            text: renderStimulus(stimulus),
+            text: stimulus.body,
             source: "nerve",
             requestTag: `nerve:${stimulus.id}`,
             managedSessionLeaf: "nerve-main",
             streamingBehavior: "steer",
             disabledRinCapabilities: ["self_improve"],
             appendSystemPrompt: [NERVE_SYSTEM_PROMPT],
-            promptContext: stimulus.context,
           });
           store.markDelivered(stimulus.id);
         } catch (error) {
@@ -148,8 +129,7 @@ export function createNerveRuntime(options: {
         id: `chat:${input.chatKey}:${input.messageId}`,
         producer: "owner-chat",
         sensation: "owner_message",
-        body: input.text,
-        context: input.context,
+        body: input.body,
       });
       return { handled: true, stimulated: true };
     },
@@ -160,6 +140,7 @@ export function createNerveRuntime(options: {
         working: Boolean(
           state.working || state.turnActive || state.isStreaming,
         ),
+        ...(ownerChatKey ? { ownerChatKey } : {}),
         ...(typeof state.sessionFile === "string" && state.sessionFile
           ? { sessionFile: state.sessionFile }
           : {}),

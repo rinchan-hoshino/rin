@@ -37,9 +37,7 @@ export type DurableChatAdmissionDecision =
       kind: "nerve_owner_message";
       chatKey: string;
       messageId: string;
-      trust: "OWNER";
-      text: string;
-      promptMeta: PromptContextMeta;
+      body: string;
     }
   | {
       version: 1;
@@ -86,8 +84,7 @@ export type ResolvedDurableChatAdmission =
       kind: "nerve_owner_message";
       chatKey: string;
       messageId: string;
-      text: string;
-      promptMeta: PromptContextMeta;
+      body: string;
     }
   | {
       kind: "unmatched_command";
@@ -219,14 +216,8 @@ export function durableAdmissionMatchesTurn(
     return Boolean(
       sameCanonicalIdentity(admission.decision.chatKey, turn.chatKey) &&
       sameCanonicalIdentity(admission.decision.messageId, turn.messageId) &&
-      admission.decision.trust === "OWNER" &&
-      typeof admission.decision.text === "string" &&
-      admission.decision.text.length > 0 &&
-      sameCanonicalIdentity(
-        admission.decision.promptMeta?.chatKey,
-        turn.chatKey,
-      ) &&
-      admission.decision.promptMeta?.identity === "OWNER",
+      typeof admission.decision.body === "string" &&
+      admission.decision.body.length > 0,
     );
   }
   if (admission.decision.kind === "unmatched_command") {
@@ -363,20 +354,14 @@ export function resolveDurableChatAdmission(
     };
   }
   if (decision.kind === "nerve_owner_message") {
-    if (
-      decision.trust !== "OWNER" ||
-      typeof decision.text !== "string" ||
-      !decision.text ||
-      !promptContextMetaIsValid(decision.promptMeta, turn.chatKey, "OWNER")
-    ) {
+    if (typeof decision.body !== "string" || !decision.body) {
       return { kind: "unavailable", reason: "unsupported_admission" };
     }
     return {
       kind: "nerve_owner_message",
       chatKey: turn.chatKey,
       messageId: turn.messageId,
-      text: decision.text,
-      promptMeta: currentPromptContextMeta(decision.promptMeta),
+      body: decision.body,
     };
   }
   if (decision.kind === "unmatched_command") {

@@ -38,6 +38,7 @@ export type NerveTriggerStatus = {
 export type NerveStatus = {
   ready: boolean;
   working: boolean;
+  ownerChatKey?: string;
   sessionFile?: string;
   queue: NerveQueueCounts;
   triggers: NerveTriggerStatus[];
@@ -47,6 +48,5 @@ export type NerveChatObservation = {
   chatKey: string;
   messageId: string;
   trust: string;
-  text: string;
-  context?: PromptContextMeta;
+  body: string;
 };

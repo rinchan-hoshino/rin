@@ -76,8 +76,10 @@ test("nerve runtime submits every stimulus to one managed brain with steer seman
       /~\/\.rin\/nerve\/triggers/,
     );
     assert.equal(submissions[0].requestTag, "nerve:s1");
-    assert.match(submissions[0].text, /first/);
+    assert.equal(submissions[0].text, "one");
+    assert.equal("promptContext" in submissions[0], false);
     assert.equal(submissions[1].requestTag, "nerve:s2");
+    assert.equal(submissions[1].text, "two");
 
     assert.deepEqual(runtime.status().queue, {
       queued: 0,
@@ -137,8 +139,7 @@ test("owner chat hard reflex matches one exact chatKey and ignores every non-own
         chatKey: "discord/1:8",
         messageId: "outside",
         trust: "OWNER",
-        text: "outside",
-        context: {},
+        body: "outside",
       }),
       { handled: false, stimulated: false },
     );
@@ -147,8 +148,7 @@ test("owner chat hard reflex matches one exact chatKey and ignores every non-own
         chatKey: "discord/1:9",
         messageId: "other",
         trust: "OTHER",
-        text: "other",
-        context: {},
+        body: "other",
       }),
       { handled: true, stimulated: false },
     );
@@ -157,13 +157,12 @@ test("owner chat hard reflex matches one exact chatKey and ignores every non-own
         chatKey: "discord/1:9",
         messageId: "owner",
         trust: "OWNER",
-        text: "owner text",
-        context: { chatKey: "discord/1:9" },
+        body: "Discord · owner\nowner text",
       }),
       { handled: true, stimulated: true },
     );
     await waitFor(() => submissions.length === 1);
-    assert.match(submissions[0].text, /owner text/);
+    assert.equal(submissions[0].text, "Discord · owner\nowner text");
   } finally {
     await runtime.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

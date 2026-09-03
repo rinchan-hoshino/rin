@@ -48,7 +48,7 @@ test("dedicated owner chat becomes one shallow nerve stimulus without a Chat Age
       app.bots.push({ platform: "telegram", selfId: "1", async sendMessage() { return []; } });
       const emit = (userId, messageId, content) => app.emit("message", {
         platform: "telegram", selfId: "1", channelId: "2", userId,
-        messageId, isDirect: false, content, stripped: { content },
+        author: { name: "Owner Name" }, messageId, isDirect: false, content, stripped: { content },
         elements: [chat.createChatNodes().text(content)],
       });
       emit("owner-1", "owner-message", "/help");
@@ -82,7 +82,8 @@ test("dedicated owner chat becomes one shallow nerve stimulus without a Chat Age
     assert.equal(output.observations[0].chatKey, "telegram/1:2");
     assert.equal(output.observations[0].messageId, "owner-message");
     assert.equal(output.observations[0].trust, "OWNER");
-    assert.equal(output.observations[0].text, "/help");
+    assert.equal(output.observations[0].body, "Telegram · Owner Name\n/help");
+    assert.equal("context" in output.observations[0], false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

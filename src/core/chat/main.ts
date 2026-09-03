@@ -552,6 +552,25 @@ function elementsToCommandText(elements: any[]) {
   return elementsToText(withoutChatQuoteNodes(elements));
 }
 
+function renderNerveChatSensation(promptMeta: PromptContextMeta, text: string) {
+  const platform = safeString(promptMeta.chatKey)
+    .split("/", 1)[0]
+    .toLowerCase();
+  const platformLabel =
+    platform === "discord"
+      ? "Discord"
+      : platform === "telegram"
+        ? "Telegram"
+        : platform === "onebot"
+          ? "QQ"
+          : platform || "Chat";
+  const sender =
+    safeString(promptMeta.groupNickname) ||
+    safeString(promptMeta.nickname) ||
+    "Someone";
+  return `${platformLabel} · ${sender}\n${text}`;
+}
+
 export type ChatBridgeTurnPayload = RinToolStartupOptions &
   Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
     chatKey?: string;
@@ -668,8 +687,7 @@ export async function startChatBridge(
         chatKey: string;
         messageId: string;
         trust: string;
-        text: string;
-        context?: PromptContextMeta;
+        body: string;
       }) => Promise<{ handled: boolean; stimulated: boolean }>;
     };
   } = {},
@@ -1194,15 +1212,13 @@ export async function startChatBridge(
   const handlePreparedNerveSubmission = async (input: {
     chatKey: string;
     messageId: string;
-    text: string;
-    promptMeta: PromptContextMeta;
+    body: string;
   }) => {
     const result = await options.nerveObserver?.observe({
       chatKey: input.chatKey,
       messageId: input.messageId,
       trust: "OWNER",
-      text: input.text,
-      context: input.promptMeta,
+      body: input.body,
     });
     if (!result?.handled || !result.stimulated) {
       throw new Error("nerve_owner_chat_observation_rejected");
@@ -1425,8 +1441,7 @@ export async function startChatBridge(
                 handlePreparedNerveSubmission({
                   chatKey: resolved.chatKey,
                   messageId: resolved.messageId,
-                  text: resolved.text,
-                  promptMeta: resolved.promptMeta,
+                  body: resolved.body,
                 }),
               ),
           };
@@ -1510,9 +1525,10 @@ export async function startChatBridge(
           kind: "nerve_owner_message",
           chatKey: queuedChatKey,
           messageId: envelope.messageId,
-          trust: "OWNER",
-          text: submission.text,
-          promptMeta: submission.promptMeta,
+          body: renderNerveChatSensation(
+            submission.promptMeta,
+            submission.text,
+          ),
         },
       });
     }
