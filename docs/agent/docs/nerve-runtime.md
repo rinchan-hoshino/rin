@@ -4,7 +4,7 @@ The nerve runtime owns one persistent main-agent session and an agent-writable s
 
 ## Main-agent input
 
-Every accepted stimulus enters frontend `{ kind: "nerve", key: "main" }` and managed session `nerve-main`. A stimulus received while the session is running uses steer admission; no second main-agent session is created. Ordinary assistant finals are not delivered to Chat.
+Every accepted stimulus enters frontend `{ kind: "nerve", key: "main" }` and managed session `nerve-main-v2`. A stimulus received while the session is running uses steer admission; no second main-agent session is created. Ordinary assistant finals are not delivered to Chat.
 
 The agent receives only the stimulus `body`. Queue identifiers, producer names, sensation labels, timestamps, trust decisions, and prompt-context metadata remain runtime-internal. Trigger authors therefore own the perceived form: a trigger may include full source content or emit only a cue such as `Your Discord rang.`
 

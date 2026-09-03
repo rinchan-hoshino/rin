@@ -67,7 +67,7 @@ test("nerve runtime submits every stimulus to one managed brain with steer seman
     });
     await waitFor(() => submissions.length === 2);
 
-    assert.equal(submissions[0].managedSessionLeaf, "nerve-main");
+    assert.equal(submissions[0].managedSessionLeaf, "nerve-main-v2");
     assert.equal(submissions[0].streamingBehavior, "steer");
     assert.deepEqual(submissions[0].disabledRinCapabilities, ["self_improve"]);
     assert.equal("noSkills" in submissions[0], false);
