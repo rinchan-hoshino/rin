@@ -101,7 +101,7 @@ export function createNerveTriggerHost(options: {
       const current = records.get(id);
       if (!current || current.child !== child) return;
       if (current.state === "stopped" || current.state === "failed") return;
-      if (code === 0) {
+      if (code === 0 || signal === "SIGTERM") {
         setRecord({ ...current, state: "stopped", child: undefined });
         return;
       }

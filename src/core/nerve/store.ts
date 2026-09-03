@@ -110,7 +110,7 @@ function migrateLegacySchema(db: BetterSqlite3.Database) {
       insert.run(
         row.id,
         null,
-        row.body,
+        row.state === "delivered" ? "" : row.body,
         hashBody(row.body),
         row.state,
         row.created_at,
@@ -181,7 +181,7 @@ export function openNerveStore(agentDir: string) {
 
   const markDelivered = (id: string) => {
     db.prepare(
-      "UPDATE stimuli SET state = 'delivered', delivered_at = ?, last_error = NULL WHERE id = ?",
+      "UPDATE stimuli SET state = 'delivered', body = '', delivered_at = ?, last_error = NULL WHERE id = ?",
     ).run(new Date().toISOString(), id);
   };
 

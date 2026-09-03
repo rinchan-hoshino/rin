@@ -39,10 +39,7 @@ export function createNerveRuntime(options: {
     workerPath: options.triggerWorkerPath,
     emit: async (input) => await runtime.emit(input),
     onTriggerError: ({ id, error }) => {
-      void runtime.emit({
-        dedupeKey: `trigger-error:${id}:${Date.now()}`,
-        body: `Trigger ${id} failed:\n${error}`,
-      });
+      void runtime.emit({ body: `Trigger ${id} failed:\n${error}` });
     },
   });
 

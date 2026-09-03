@@ -37,11 +37,15 @@ test("trigger host launches TypeScript triggers and reloads them without daemon 
     }\n`,
   );
   const emitted: any[] = [];
+  const errors: any[] = [];
   const host = triggerHost.createNerveTriggerHost({
     agentDir: sandbox.agentDir,
     workerPath: path.resolve("dist/app/rin-daemon/nerve-trigger-worker.js"),
     emit: async (input: any) => {
       emitted.push(input);
+    },
+    onTriggerError: (input: any) => {
+      errors.push(input);
     },
   });
   try {
@@ -62,6 +66,20 @@ test("trigger host launches TypeScript triggers and reloads them without daemon 
     await waitFor(() => emitted.length === 2);
     assert.equal(emitted[1].body, "v2");
     assert.equal(host.status().triggers[0]?.id, "clock");
+
+    await fs.writeFile(
+      triggerPath,
+      `export async function start({ sleepFor }: any) {
+        await sleepFor(60_000);
+      }\n`,
+    );
+    await host.reload("clock");
+    await waitFor(() => host.status().triggers[0]?.state === "running");
+    const pid = host.status().triggers[0]?.pid;
+    assert.equal(typeof pid, "number");
+    process.kill(pid as number, "SIGTERM");
+    await waitFor(() => host.status().triggers[0]?.state === "stopped");
+    assert.deepEqual(errors, []);
   } finally {
     await host.stop();
     await fs.rm(root, { recursive: true, force: true });

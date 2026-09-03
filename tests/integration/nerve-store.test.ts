@@ -52,6 +52,20 @@ test("nerve store durably owns opaque idempotent input and recovery", async () =
       const recovered = reopened.claimNext();
       assert.equal(recovered?.id, accepted.stimulusId);
       reopened.markDelivered(accepted.stimulusId);
+      const inspection = new BetterSqlite3(
+        path.join(agentDir, "data", "core", "nerve", "nerve.sqlite"),
+        { readonly: true },
+      );
+      try {
+        assert.equal(
+          inspection
+            .prepare("SELECT body FROM stimuli WHERE id = ?")
+            .get(accepted.stimulusId).body,
+          "",
+        );
+      } finally {
+        inspection.close();
+      }
       assert.deepEqual(reopened.counts(), {
         queued: 0,
         inflight: 0,
@@ -124,7 +138,7 @@ test("nerve store migrates legacy envelopes without retaining source semantics",
     >;
     assert.equal(row.id, "legacy-message");
     assert.equal(row.dedupe_key, null);
-    assert.equal(row.body, "old body");
+    assert.equal(row.body, "");
     assert.match(String(row.body_hash), /^[a-f0-9]{64}$/);
     assert.equal(row.state, "delivered");
     assert.equal(row.last_error, null);
