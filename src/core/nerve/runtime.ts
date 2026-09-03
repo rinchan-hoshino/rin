@@ -2,6 +2,7 @@ import type {
   NerveEmitResult,
   NerveStatus,
   NerveStimulusInput,
+  NerveStoredStimulus,
 } from "./contracts.js";
 import { NERVE_SYSTEM_PROMPT } from "./system-prompt.js";
 import { openNerveStore } from "./store.js";
@@ -31,9 +32,9 @@ export function createNerveRuntime(options: {
   const store = openNerveStore(options.agentDir);
   let started = false;
   let stopped = false;
-  let pumping = false;
-  let pumpRequested = false;
+  let pumpScheduled = false;
   let retryTimer: NodeJS.Timeout | undefined;
+  const deliveries = new Map<string, Promise<void>>();
   const triggerHost = createNerveTriggerHost({
     agentDir: options.agentDir,
     workerPath: options.triggerWorkerPath,
@@ -53,38 +54,44 @@ export function createNerveRuntime(options: {
       }, delayMs);
       return;
     }
-    pumpRequested = true;
-    queueMicrotask(() => void pump());
+    if (pumpScheduled) return;
+    pumpScheduled = true;
+    queueMicrotask(() => {
+      pumpScheduled = false;
+      pump();
+    });
   };
 
-  const pump = async () => {
-    if (pumping || !started || stopped) return;
-    pumping = true;
-    pumpRequested = false;
-    try {
-      for (;;) {
-        const stimulus = store.claimNext();
-        if (!stimulus) break;
-        try {
-          await options.driver.submitTurn({
-            text: stimulus.body,
-            source: "nerve",
-            requestTag: `nerve:${stimulus.id}`,
-            managedSessionLeaf: "nerve-main-v2",
-            streamingBehavior: "steer",
-            disabledRinCapabilities: ["self_improve"],
-            appendSystemPrompt: [NERVE_SYSTEM_PROMPT],
-          });
-          store.markDelivered(stimulus.id);
-        } catch (error) {
-          store.requeue(stimulus.id, error);
-          schedulePump(1_000);
-          break;
-        }
-      }
-    } finally {
-      pumping = false;
-      if (pumpRequested) schedulePump();
+  const launchDelivery = (stimulus: NerveStoredStimulus) => {
+    const delivery = Promise.resolve()
+      .then(async () => {
+        await options.driver.submitTurn({
+          text: stimulus.body,
+          source: "nerve",
+          requestTag: `nerve:${stimulus.id}`,
+          managedSessionLeaf: "nerve-main-v2",
+          streamingBehavior: "steer",
+          disabledRinCapabilities: ["self_improve"],
+          appendSystemPrompt: [NERVE_SYSTEM_PROMPT],
+        });
+        store.markDelivered(stimulus.id);
+      })
+      .catch((error) => {
+        store.requeue(stimulus.id, error);
+        if (!stopped) schedulePump(1_000);
+      })
+      .finally(() => {
+        deliveries.delete(stimulus.id);
+      });
+    deliveries.set(stimulus.id, delivery);
+  };
+
+  const pump = () => {
+    if (!started || stopped) return;
+    for (;;) {
+      const stimulus = store.claimNext();
+      if (!stimulus) return;
+      launchDelivery(stimulus);
     }
   };
 
@@ -114,9 +121,9 @@ export function createNerveRuntime(options: {
       const state = options.driver.state();
       return {
         ready: started && !stopped,
-        working: Boolean(
-          state.working || state.turnActive || state.isStreaming,
-        ),
+        working:
+          deliveries.size > 0 ||
+          Boolean(state.working || state.turnActive || state.isStreaming),
         ...(typeof state.sessionFile === "string" && state.sessionFile
           ? { sessionFile: state.sessionFile }
           : {}),
@@ -137,7 +144,9 @@ export function createNerveRuntime(options: {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = undefined;
       await triggerHost.stop();
+      if (deliveries.size > 0) await options.driver.abort().catch(() => {});
       await options.driver.disconnect();
+      await Promise.allSettled([...deliveries.values()]);
       store.close();
     },
   };

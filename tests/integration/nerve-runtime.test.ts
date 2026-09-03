@@ -84,3 +84,56 @@ test("nerve runtime submits every opaque input to one managed brain", async () =
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
+
+test("later stimuli steer before the current turn finishes", async () => {
+  const agentDir = await tempDir();
+  const submissions: any[] = [];
+  const completions: Array<() => void> = [];
+  const runtime = nerve.createNerveRuntime({
+    agentDir,
+    startTriggers: false,
+    triggerWorkerPath: process.execPath,
+    driver: {
+      async submitTurn(input: any) {
+        submissions.push(input);
+        return await new Promise((resolve) => {
+          completions.push(() =>
+            resolve({ outcome: "nonterminal", requestTag: input.requestTag }),
+          );
+        });
+      },
+      async abort() {},
+      async disconnect() {},
+      state() {
+        return { turnActive: submissions.length > completions.length };
+      },
+    } as any,
+  });
+
+  try {
+    await runtime.start();
+    await runtime.emit({ body: "first" });
+    await waitFor(() => submissions.length === 1);
+
+    await runtime.emit({ body: "second" });
+    await runtime.emit({ body: "third" });
+    await waitFor(() => submissions.length === 3, 100);
+
+    assert.deepEqual(
+      submissions.map((input) => input.text),
+      ["first", "second", "third"],
+    );
+    assert.deepEqual(runtime.status().queue, {
+      queued: 0,
+      inflight: 3,
+      delivered: 0,
+    });
+
+    for (const complete of completions) complete();
+    await waitFor(() => runtime.status().queue.delivered === 3);
+  } finally {
+    for (const complete of completions) complete();
+    await runtime.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});

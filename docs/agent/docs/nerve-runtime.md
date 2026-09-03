@@ -64,10 +64,12 @@ tasks or Cron.
 ## Main brain
 
 All bodies enter the single frontend identity `{ kind: "nerve", key: "main" }`
-and managed session leaf `nerve-main-v2`. Running turns receive later bodies by
-`steer`; no second main brain is created. A normal assistant final is not sent
-to a chat outbox. The brain must choose and call an external tool when it wants
-to communicate.
+and managed session leaf `nerve-main-v2`. The SQLite queue is a crash-recovery
+ledger, not an attention FIFO: Runtime dispatches every queued body without
+waiting for an earlier turn to finish. A running turn receives each later body
+through `steer`; no second main brain is created. A normal assistant final is
+not sent to a chat outbox. The brain must choose and call an external tool when
+it wants to communicate.
 
 The session disables only `self_improve`. Built-in/project skills, memory,
 transcript archival, and `recall` remain available.
