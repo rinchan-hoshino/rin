@@ -109,7 +109,7 @@ function migrateLegacySchema(db: BetterSqlite3.Database) {
     for (const row of rows) {
       insert.run(
         row.id,
-        row.id,
+        null,
         row.body,
         hashBody(row.body),
         row.state,

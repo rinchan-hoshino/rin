@@ -18,7 +18,7 @@ async function tempDir() {
 }
 
 const stimulus = {
-  dedupeKey: "discord-owner:message-1",
+  dedupeKey: "opaque-key-1",
   body: "hello",
 };
 
@@ -123,7 +123,7 @@ test("nerve store migrates legacy envelopes without retaining source semantics",
       unknown
     >;
     assert.equal(row.id, "legacy-message");
-    assert.equal(row.dedupe_key, "legacy-message");
+    assert.equal(row.dedupe_key, null);
     assert.equal(row.body, "old body");
     assert.match(String(row.body_hash), /^[a-f0-9]{64}$/);
     assert.equal(row.state, "delivered");
