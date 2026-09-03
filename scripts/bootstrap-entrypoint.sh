@@ -46,10 +46,11 @@ MANAGED_NPM_SHA512=e84875bb943e908557780f1eee5d9cfc7a67145730ae4b77ef10ccba30f96
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
+Usage: install.sh [--quick-run] [--no-start] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
 Install defaults to the stable release channel.
 `--quick-run` fetches the selected channel, prepares the current user's config, and launches the TUI without installing an app release or daemon.
+`--no-start` installs the managed service definition without starting the daemon; run `rin start` when ready.
 `--beta` installs the current weekly beta candidate.
 `--nightly` installs the current nightly build.
 `--git main` or `--git deadbeef` selects a branch or ref directly.
@@ -179,6 +180,7 @@ parse_args() {
   EXPLICIT_CHANNEL=
   EXPECT_GIT_SELECTOR=
   QUICK_RUN=
+  NO_START=
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -232,6 +234,10 @@ parse_args() {
         ;;
       --quick-run)
         QUICK_RUN=1
+        EXPECT_GIT_SELECTOR=
+        ;;
+      --no-start)
+        NO_START=1
         EXPECT_GIT_SELECTOR=
         ;;
       -h|--help)
@@ -763,6 +769,10 @@ launch_installer_entry() {
   node_command=${NODE_COMMAND:-node}
   if [ -n "$QUICK_RUN" ]; then
     "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --quick-run
+    return $?
+  fi
+  if [ -n "$NO_START" ]; then
+    "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --no-start
     return $?
   fi
   "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"

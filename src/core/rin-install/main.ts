@@ -84,6 +84,7 @@ function parseInstallerCliArgs(argv: string[]) {
       "apply-error-file": { type: "string" },
       "quick-run": { type: "boolean" },
       "release-file": { type: "string" },
+      "no-start": { type: "boolean" },
       language: { type: "string" },
     },
   });
@@ -95,6 +96,7 @@ function parseInstallerCliArgs(argv: string[]) {
     applyErrorFile: readValueArg(argv, "--apply-error-file"),
     quickRun: hasFlag("--quick-run"),
     releaseFile: readValueArg(argv, "--release-file"),
+    noStart: hasFlag("--no-start"),
   };
 }
 
@@ -347,6 +349,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           createTargetUser: createSystemUser,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),
+          startDaemonNow: !cli.noStart,
         },
         installSpinnerMessage,
         { writeStatus() {} },

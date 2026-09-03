@@ -203,6 +203,25 @@ test("installer finalization orders restart before durable persistence and retai
   });
 });
 
+test("cold installer stages a managed service without starting a daemon", async () => {
+  await withSandbox(async (root) => {
+    const result = await finalize.finalizeInstallPlan(
+      baseOptions(root, { startDaemonNow: false }),
+    );
+
+    assert.equal(result.installedService?.kind, "systemd");
+    assert.equal(result.daemonReady, false);
+    assert.equal(eventNames().includes("install-service"), true);
+    assert.deepEqual(
+      events
+        .filter(([name]) => name === "service-action")
+        .map(([, action]) => action),
+      ["stop"],
+    );
+    assert.equal(eventNames().includes("wait-socket"), false);
+  });
+});
+
 test("installer finalization surfaces service installation and readiness failures", async () => {
   await withSandbox(async (root) => {
     scenario.installServiceError = true;

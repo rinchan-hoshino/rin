@@ -23,6 +23,7 @@ export type FinalizeInstallOptions = {
   daemonReadyTimeoutMs?: number;
   coreUpdate?: boolean;
   reinstallCurrentRelease?: boolean;
+  startDaemonNow?: boolean;
 };
 
 export function writeFinalizeInstallPlanFile(

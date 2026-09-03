@@ -428,6 +428,7 @@ async function applyInstalledRuntime(
   const authData = options.authData || {};
   const publishRuntime = options.publishRuntime !== false;
   const manageDaemon = options.manageDaemon !== false;
+  const startDaemonNow = options.startDaemonNow !== false;
   if (publishRuntime && !manageDaemon) {
     throw new Error("Runtime publishing requires managed daemon control.");
   }
@@ -763,7 +764,7 @@ async function applyInstalledRuntime(
         }
       },
       restart: async () => {
-        if (manageDaemon) {
+        if (manageDaemon && startDaemonNow) {
           await tryManagedServiceAction(serviceContext, "restart", service);
         }
       },
@@ -779,18 +780,24 @@ async function applyInstalledRuntime(
       );
     }
 
-    const daemonReady = installedService
-      ? await waitForSocket(
-          daemonSocketPath,
-          daemonReadyTimeoutMs,
-          targetUser,
-          {
-            currentUser,
-            targetNodePath: executionContext.targetNodePath,
-          },
-        )
-      : false;
-    if (!daemonReady && installServiceNow && installedService) {
+    const daemonReady =
+      installedService && startDaemonNow
+        ? await waitForSocket(
+            daemonSocketPath,
+            daemonReadyTimeoutMs,
+            targetUser,
+            {
+              currentUser,
+              targetNodePath: executionContext.targetNodePath,
+            },
+          )
+        : false;
+    if (
+      !daemonReady &&
+      installServiceNow &&
+      installedService &&
+      startDaemonNow
+    ) {
       throw new Error(
         `${options.daemonFailureCode}\n${collectDaemonFailureDetails(targetUser, installDir, { findSystemUser, targetHomeForUser })}`,
       );
@@ -815,11 +822,15 @@ async function applyInstalledRuntime(
       serviceHint:
         process.platform === "darwin"
           ? installServiceNow
-            ? "A macOS launchd LaunchAgent will be installed and started for this daemon."
+            ? startDaemonNow
+              ? "A macOS launchd LaunchAgent will be installed and started for this daemon."
+              : "A macOS launchd LaunchAgent is installed but stopped; run rin start when ready."
             : "You skipped launchd installation for now; start the daemon explicitly when needed."
           : process.platform === "linux"
             ? installServiceNow
-              ? "A Linux user service will be installed and started for this daemon when supported."
+              ? startDaemonNow
+                ? "A Linux user service will be installed and started for this daemon when supported."
+                : "A Linux user service is installed but stopped; run rin start when ready."
               : "You skipped dedicated Linux service installation for now; start the daemon explicitly when needed."
             : process.platform === "win32"
               ? "A Windows Startup launcher will be installed for this daemon."
