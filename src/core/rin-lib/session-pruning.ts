@@ -4,8 +4,7 @@ import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 export const RIN_SESSION_PRUNING_TOOL_CALL_BUCKET_SIZE = 16;
 export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS = 4;
 export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS = 8;
-export const RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT = "old tool input omitted";
-export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT = "pruned";
+export const RIN_SESSION_PRUNING_PLACEHOLDER = "[pruned]";
 
 export type ToolHistoryExchange = {
   toolName: string;
@@ -23,21 +22,11 @@ export type ToolHistoryPolicyContext = {
   protectedToolCallStart: number;
 };
 
-export type ToolHistoryProtection = {
-  call?: boolean;
-  result?: boolean;
-};
-
 export type ToolHistoryPolicy = {
-  protect?: (
+  protectResult?: (
     exchange: ToolHistoryExchange,
     context: ToolHistoryPolicyContext,
-  ) => ToolHistoryProtection | undefined;
-  compactCallArguments?: (
-    argumentsValue: any,
-    exchange: ToolHistoryExchange,
-    context: ToolHistoryPolicyContext,
-  ) => any;
+  ) => boolean;
   compactResultContent?: (
     content: any,
     exchange: ToolHistoryExchange,
@@ -150,63 +139,17 @@ function collectToolExchanges(messages: any[]) {
   return exchanges;
 }
 
-function writeHistoryPolicy(): ToolHistoryPolicy {
-  return {
-    protect: (exchange) =>
-      exchange.result?.isError ? { call: true, result: true } : undefined,
-    compactCallArguments: (value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return value;
-      }
-      if (value.content === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT)
-        return value;
-      if (typeof value.content !== "string") return value;
-      return {
-        ...value,
-        content: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-      };
-    },
-  };
-}
-
-function editHistoryPolicy(): ToolHistoryPolicy {
-  return {
-    protect: (exchange) =>
-      exchange.result?.isError ? { call: true, result: true } : undefined,
-    compactCallArguments: (value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return value;
-      }
-      if (!Array.isArray(value.edits) || value.edits.length === 0) return value;
-      if (
-        value.edits.length === 1 &&
-        value.edits[0]?.oldText === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT &&
-        value.edits[0]?.newText === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT
-      ) {
-        return value;
-      }
-      return {
-        ...value,
-        edits: [
-          {
-            oldText: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-            newText: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-          },
-        ],
-      };
-    },
-  };
+function protectFailedResult(exchange: ToolHistoryExchange) {
+  return Boolean(exchange.result?.isError);
 }
 
 const BUILTIN_TOOL_HISTORY_POLICIES: Record<string, ToolHistoryPolicy> = {
   read: {
-    protect: (exchange, context) =>
-      isPiCompactSkillReadCall(exchange.call?.arguments, context.cwd)
-        ? { call: true, result: true }
-        : undefined,
+    protectResult: (exchange, context) =>
+      isPiCompactSkillReadCall(exchange.call?.arguments, context.cwd),
   },
-  write: writeHistoryPolicy(),
-  edit: editHistoryPolicy(),
+  write: { protectResult: protectFailedResult },
+  edit: { protectResult: protectFailedResult },
 };
 
 function resolveToolHistoryPolicy(
@@ -266,7 +209,7 @@ export function findProtectedToolCallBucketStart(
 
 function isAlreadyOmitted(content: any) {
   if (typeof content === "string") {
-    return content === RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
+    return content === RIN_SESSION_PRUNING_PLACEHOLDER;
   }
   if (!Array.isArray(content) || content.length !== 1) return false;
   const item = content[0];
@@ -274,15 +217,15 @@ function isAlreadyOmitted(content: any) {
     item &&
     typeof item === "object" &&
     item.type === "text" &&
-    item.text === RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT
+    item.text === RIN_SESSION_PRUNING_PLACEHOLDER
   );
 }
 
 function omittedContentFor(content: any) {
   if (Array.isArray(content)) {
-    return [{ type: "text", text: RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT }];
+    return [{ type: "text", text: RIN_SESSION_PRUNING_PLACEHOLDER }];
   }
-  return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
+  return RIN_SESSION_PRUNING_PLACEHOLDER;
 }
 
 function sameJsonValue(left: any, right: any) {
@@ -313,7 +256,6 @@ export function pruneSessionContextMessages(
   };
   const exchanges = collectToolExchanges(input);
   const oldExchangeIds = new Set<string>();
-  const callArguments = new Map<string, any>();
   const resultContent = new Map<string, any>();
   const protectedResults = new Set<string>();
 
@@ -324,20 +266,9 @@ export function pruneSessionContextMessages(
       exchange.toolName,
       options.toolHistoryPolicies,
     );
-    const protection = policy.protect?.(exchange, context) || {};
-    if (protection.result) protectedResults.add(exchange.toolCallId);
-    if (!protection.call && policy.compactCallArguments) {
-      const currentArguments = exchange.call?.arguments;
-      const compacted = policy.compactCallArguments(
-        currentArguments,
-        exchange,
-        context,
-      );
-      if (!sameJsonValue(compacted, currentArguments)) {
-        callArguments.set(exchange.toolCallId, compacted);
-      }
-    }
-    if (!protection.result && policy.compactResultContent) {
+    const protectsResult = policy.protectResult?.(exchange, context) ?? false;
+    if (protectsResult) protectedResults.add(exchange.toolCallId);
+    if (!protectsResult && policy.compactResultContent) {
       const compacted = policy.compactResultContent(
         exchange.result?.content,
         exchange,
@@ -351,30 +282,6 @@ export function pruneSessionContextMessages(
 
   let changed = false;
   const pruned = input.map((message) => {
-    if (String(message?.role || "").trim() === "assistant") {
-      if (!Array.isArray(message?.content) || callArguments.size === 0) {
-        return message;
-      }
-      let contentChanged = false;
-      const content = message.content.map((part: any) => {
-        if (
-          String(part?.type || "")
-            .trim()
-            .toLowerCase() !== "toolcall"
-        ) {
-          return part;
-        }
-        const replacement = callArguments.get(
-          toolCallId(part?.id ?? part?.toolCallId),
-        );
-        if (replacement === undefined) return part;
-        contentChanged = true;
-        return { ...part, arguments: replacement };
-      });
-      if (!contentChanged) return message;
-      changed = true;
-      return { ...message, content };
-    }
     if (!isToolResultMessage(message)) return message;
     const id = toolCallId(message?.toolCallId);
     if (!oldExchangeIds.has(id) || protectedResults.has(id)) return message;

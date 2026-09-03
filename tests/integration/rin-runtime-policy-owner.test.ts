@@ -900,7 +900,7 @@ test("Rin post-compaction provider context keeps the user and only eight Hermes 
       tokens:
         nextMessages.filter(
           (message) =>
-            message.role === "toolResult" && message.content !== "pruned",
+            message.role === "toolResult" && message.content !== "[pruned]",
         ).length * 100,
     }),
   });
@@ -916,7 +916,7 @@ test("Rin post-compaction provider context keeps the user and only eight Hermes 
   assert.equal(providerMessages[1], messages[1]);
   assert.deepEqual(
     results.slice(0, 2).map((message: any) => message.content),
-    Array(2).fill("pruned"),
+    Array(2).fill("[pruned]"),
   );
   assert.deepEqual(
     results.slice(2).map((message: any) => message.content),

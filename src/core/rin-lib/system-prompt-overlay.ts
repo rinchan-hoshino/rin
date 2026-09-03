@@ -5,12 +5,13 @@ import {
   type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 
+import { RIN_SESSION_PRUNING_PLACEHOLDER } from "./session-pruning.js";
+
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
 const FACTUAL_GROUNDING_REQUIREMENT =
   "Factual claims require evidence, not model knowledge alone. Check Rin memory for historical events; search current authoritative web sources for facts not established by authoritative local evidence.";
-const PRUNED_TOOL_RESULT_GUIDANCE =
-  "Tool results marked `pruned` are absent from context. If a result is needed, obtain it again instead of guessing; otherwise ignore it.";
+const PRUNED_TOOL_RESULT_GUIDANCE = `Tool results marked \`${RIN_SESSION_PRUNING_PLACEHOLDER}\` are absent from context. If a result is needed, obtain it again instead of guessing; otherwise ignore it.`;
 
 const RIN_GENERAL_GUIDELINES = [
   "Show file paths clearly when working with files",

@@ -131,14 +131,8 @@ test("session pruning omits the oldest tool-call bucket when the fourth fills", 
   const result = pruning.pruneSessionContextMessages(messages);
 
   assert.notEqual(result, messages);
-  assert.equal(
-    result[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
-  assert.equal(
-    result[31].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(result[1].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
+  assert.equal(result[31].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(result[33], messages[33]);
 });
 
@@ -154,20 +148,11 @@ test("session pruning keeps a stable tool-call boundary inside a bucket", () => 
   const resultFive = pruning.pruneSessionContextMessages(atFive, options);
   const resultSix = pruning.pruneSessionContextMessages(atSix, options);
 
-  assert.equal(
-    resultFour[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(resultFour[1].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(resultFour[5], atFour[5]);
-  assert.equal(
-    resultFive[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(resultFive[1].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(resultFive[5], atFive[5]);
-  assert.equal(
-    resultSix[5].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(resultSix[5].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
 });
 
 test("session pruning reconstructs the same generation deterministically and resets after compaction", () => {
@@ -180,7 +165,7 @@ test("session pruning reconstructs the same generation deterministically and res
   assert.deepEqual(reconstructed, first);
   assert.equal(
     reconstructed[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+    pruning.RIN_SESSION_PRUNING_PLACEHOLDER,
   );
 
   const compactedMessages = [
@@ -218,14 +203,8 @@ test("session pruning counts parallel tool calls separately inside one user turn
     retainedToolCallBuckets: 4,
   });
 
-  assert.equal(
-    result[2].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
-  assert.equal(
-    result[3].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(result[2].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
+  assert.equal(result[3].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(messages[2].content.length, 25_000);
 });
 
@@ -262,7 +241,7 @@ test("session pruning keeps only the newest eight Hermes lean tool rounds", () =
 
   assert.deepEqual(
     toolResults.slice(0, 3).map((message: any) => message.content),
-    Array(3).fill(pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT),
+    Array(3).fill(pruning.RIN_SESSION_PRUNING_PLACEHOLDER),
   );
   assert.deepEqual(
     toolResults.slice(3).map((message: any) => message.content),
@@ -286,10 +265,7 @@ test("session pruning supports small custom tool-call buckets", () => {
     retainedToolCallBuckets: 2,
   });
 
-  assert.equal(
-    result[21].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(result[21].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(result[25], messages[25]);
 });
 
@@ -307,10 +283,7 @@ test("session pruning handles snake-case tool-result roles outside retained buck
 
   const result = pruning.pruneSessionContextMessages(messages);
 
-  assert.equal(
-    result[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(result[1].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
 });
 
 test("session pruning changes only old tool-result content", () => {
@@ -354,7 +327,7 @@ test("session pruning keeps tool-result content shape stable and is idempotent",
 
   const once = pruning.pruneSessionContextMessages(messages);
   assert.deepEqual(once[1].content, [
-    { type: "text", text: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT },
+    { type: "text", text: pruning.RIN_SESSION_PRUNING_PLACEHOLDER },
   ]);
   assert.equal(pruning.pruneSessionContextMessages(once), once);
 });
@@ -399,14 +372,11 @@ test("session pruning preserves old Pi-classified skill read results", () => {
   const result = pruning.pruneSessionContextMessages(messages);
 
   assert.equal(result[1], skillReadResult);
-  assert.equal(
-    result[2].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(result[2].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
   assert.equal(ordinaryReadResult.content, "old read output");
 });
 
-test("session pruning keeps canonical result omission while allowing per-tool history overrides", () => {
+test("session pruning keeps canonical result omission while allowing per-tool result overrides", () => {
   const call = {
     type: "toolCall",
     id: "call-custom",
@@ -426,28 +396,22 @@ test("session pruning keeps canonical result omission while allowing per-tool hi
 
   const canonical = pruning.pruneSessionContextMessages(messages);
   assert.equal(canonical[0], messages[0]);
-  assert.equal(
-    canonical[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(canonical[1].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
 
   const customized = pruning.pruneSessionContextMessages(messages, {
     toolHistoryPolicies: {
       custom: {
-        compactCallArguments: () => ({ payload: "custom input form" }),
-        protect: () => ({ result: true }),
+        protectResult: () => true,
       },
     },
   });
-  assert.deepEqual(customized[0].content[0].arguments, {
-    payload: "custom input form",
-  });
+  assert.equal(customized[0], messages[0]);
   assert.equal(customized[1], result);
   assert.equal(customized.length, messages.length);
   assert.equal(customized[0].content[0].id, "call-custom");
 });
 
-test("session pruning compacts old write and edit inputs with stable built-in forms", () => {
+test("session pruning preserves old write and edit inputs while omitting their results", () => {
   const messages = padding(129);
   messages[0] = {
     role: "assistant",
@@ -487,27 +451,20 @@ test("session pruning compacts old write and edit inputs with stable built-in fo
   messages.push(...toolCallPadding(127, 10_000));
 
   const once = pruning.pruneSessionContextMessages(messages);
+  assert.equal(once[0], messages[0]);
   assert.deepEqual(once[0].content[0].arguments, {
     path: "/tmp/a",
-    content: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+    content: "large file body",
   });
   assert.deepEqual(once[0].content[1].arguments, {
     path: "/tmp/b",
     edits: [
-      {
-        oldText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-        newText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-      },
+      { oldText: "large old text", newText: "large new text" },
+      { oldText: "second old text", newText: "second new text" },
     ],
   });
-  assert.equal(
-    once[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
-  assert.equal(
-    once[2].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(once[1].content, "[pruned]");
+  assert.equal(once[2].content, "[pruned]");
   assert.equal(pruning.pruneSessionContextMessages(once), once);
 });
 
@@ -573,7 +530,7 @@ test("session pruning protects failed built-in exchanges and ignores malformed h
   assert.equal(pruned[4], messages[4]);
 });
 
-test("session pruning leaves already compact or unsupported built-in inputs stable", () => {
+test("session pruning preserves every built-in input while omitting old results", () => {
   const calls = [
     {
       type: "toolCall",
@@ -583,17 +540,15 @@ test("session pruning leaves already compact or unsupported built-in inputs stab
     },
     {
       type: "toolCall",
-      id: "write-omitted",
+      id: "write-pruned-literal",
       name: "write",
-      arguments: {
-        content: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-      },
+      arguments: { content: "[pruned]" },
     },
     {
       type: "toolCall",
-      id: "write-non-string",
+      id: "write-source",
       name: "write",
-      arguments: { content: 7 },
+      arguments: { content: "user-authored source" },
     },
     {
       type: "toolCall",
@@ -609,15 +564,10 @@ test("session pruning leaves already compact or unsupported built-in inputs stab
     },
     {
       type: "toolCall",
-      id: "edit-omitted",
+      id: "edit-pruned-literal",
       name: "edit",
       arguments: {
-        edits: [
-          {
-            oldText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-            newText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
-          },
-        ],
+        edits: [{ oldText: "[pruned]", newText: "[pruned]" }],
       },
     },
   ];
@@ -638,17 +588,17 @@ test("session pruning leaves already compact or unsupported built-in inputs stab
   for (let index = 1; index <= calls.length; index += 1) {
     assert.equal(
       pruned[index].content,
-      pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+      pruning.RIN_SESSION_PRUNING_PLACEHOLDER,
     );
   }
 });
 
-test("session pruning composes custom call and result policies at old boundaries", () => {
+test("session pruning composes custom result policies at old boundaries", () => {
   const calls = [
     ["compact", { value: "large" }],
-    ["protect-call", { value: "keep-call" }],
-    ["protect-result", { value: "compact-call" }],
+    ["protect-result", { value: "keep-result" }],
     ["same", { value: "same" }],
+    ["default", { value: "default" }],
   ].map(([id, argumentsValue]) => ({
     type: "toolCall",
     id,
@@ -671,26 +621,20 @@ test("session pruning composes custom call and result policies at old boundaries
     cwd: "/workspace/owner",
     toolHistoryPolicies: {
       custom: {
-        protect(exchange, policyContext) {
+        protectResult(exchange, policyContext) {
           observedContexts.push(policyContext);
-          if (exchange.toolCallId === "protect-call") return { call: true };
-          if (exchange.toolCallId === "protect-result") {
-            return { result: true };
-          }
-          return undefined;
-        },
-        compactCallArguments(value, exchange) {
-          if (exchange.toolCallId === "same") return value;
-          return { compacted: exchange.toolCallId };
+          return exchange.toolCallId === "protect-result";
         },
         compactResultContent(content, exchange) {
           if (exchange.toolCallId === "same") return content;
+          if (exchange.toolCallId === "default") return undefined;
           return `compact-result-${exchange.toolCallId}`;
         },
       },
     },
   });
 
+  assert.equal(observedContexts.length, 4);
   assert.ok(
     observedContexts.every(
       (policyContext) =>
@@ -698,19 +642,11 @@ test("session pruning composes custom call and result policies at old boundaries
         policyContext.protectedToolCallStart === 16,
     ),
   );
-  assert.deepEqual(pruned[0].content[0].arguments, { compacted: "compact" });
+  assert.equal(pruned[0], messages[0]);
   assert.equal(pruned[1].content, "compact-result-compact");
-  assert.equal(pruned[0].content[1], calls[1]);
-  assert.equal(pruned[2].content, "compact-result-protect-call");
-  assert.deepEqual(pruned[0].content[2].arguments, {
-    compacted: "protect-result",
-  });
-  assert.equal(pruned[3], messages[3]);
-  assert.equal(pruned[0].content[3], calls[3]);
-  assert.equal(
-    pruned[4].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
+  assert.equal(pruned[2], messages[2]);
+  assert.equal(pruned[3].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
+  assert.equal(pruned[4].content, pruning.RIN_SESSION_PRUNING_PLACEHOLDER);
 
   const retainedCall = {
     type: "toolCall",
@@ -731,7 +667,6 @@ test("session pruning composes custom call and result policies at old boundaries
   const retainedPruned = pruning.pruneSessionContextMessages(retained, {
     toolHistoryPolicies: {
       custom: {
-        compactCallArguments: () => ({ compacted: true }),
         compactResultContent: () => "compacted output",
       },
     },
