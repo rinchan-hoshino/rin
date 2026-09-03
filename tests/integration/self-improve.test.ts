@@ -475,6 +475,41 @@ test("self-improve queues one review after Pi persists each shared turn window f
   assert.equal(definition.hooks.context, undefined);
 });
 
+test("nerve sessions do not enqueue automatic self-improve reviews", async () => {
+  const queued = [];
+  const definition = selfImproveIndex.default({
+    enqueueSelfImproveMaintenanceJob(job) {
+      queued.push(job);
+      return Promise.resolve();
+    },
+  });
+  const ctx = {
+    frontend: { kind: "nerve", key: "main" },
+    promptContext: {
+      source: "nerve",
+      selfImproveEligible: true,
+      selfImproveTrigger: "nerve",
+    },
+    sessionManager: {
+      getSessionFile: () => "/tmp/nerve-main.jsonl",
+    },
+    session: {
+      getBranch: () => [
+        { type: "message", message: { role: "user" } },
+        { type: "message", message: { role: "assistant" } },
+        { type: "message", message: { role: "user" } },
+        { type: "message", message: { role: "assistant" } },
+      ],
+    },
+  };
+
+  await definition.hooks.message_end[0]({}, ctx);
+  await definition.hooks.session_shutdown[0]({}, ctx);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(queued.length, 0);
+});
+
 test("turn-window completion followed by shutdown queues only one review", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "session.jsonl");

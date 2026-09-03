@@ -15,7 +15,6 @@ export type NerveTurnDriver = {
     requestTag: string;
     managedSessionLeaf: "nerve-main-v2";
     streamingBehavior: "steer";
-    disabledRinCapabilities: ["self_improve"];
     appendSystemPrompt: [string];
   }): Promise<unknown>;
   abort(): Promise<void>;
@@ -71,7 +70,6 @@ export function createNerveRuntime(options: {
           requestTag: `nerve:${stimulus.id}`,
           managedSessionLeaf: "nerve-main-v2",
           streamingBehavior: "steer",
-          disabledRinCapabilities: ["self_improve"],
           appendSystemPrompt: [NERVE_SYSTEM_PROMPT],
         });
         store.markDelivered(stimulus.id);

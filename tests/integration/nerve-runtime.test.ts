@@ -73,7 +73,7 @@ test("nerve runtime submits every opaque input to one managed brain", async () =
 
     assert.equal(submissions[0].managedSessionLeaf, "nerve-main-v2");
     assert.equal(submissions[0].streamingBehavior, "steer");
-    assert.deepEqual(submissions[0].disabledRinCapabilities, ["self_improve"]);
+    assert.equal("disabledRinCapabilities" in submissions[0], false);
     assert.equal("noSkills" in submissions[0], false);
     assert.equal(submissions[0].appendSystemPrompt[0], expectedSystemPrompt);
     assert.equal(submissions[0].requestTag, `nerve:${first.stimulusId}`);
