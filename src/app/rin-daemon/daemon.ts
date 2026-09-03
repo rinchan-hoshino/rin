@@ -72,10 +72,6 @@ async function main() {
         async () =>
           await startChatBridge({
             hosted: true,
-            nerveObserver: {
-              ownerChatKey: hostedNerveService.getOwnerChatKey(),
-              observe: hostedNerveService.observeChat,
-            },
             frontendClientFactory: () =>
               new RinDaemonFrontendClient({
                 socketPath: "inprocess://rin-daemon",

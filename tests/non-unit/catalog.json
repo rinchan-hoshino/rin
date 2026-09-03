@@ -331,11 +331,6 @@
       "tests": ["tests/integration/final-system-prompt.test.ts"]
     },
     {
-      "source": "src/core/nerve/config.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/nerve-runtime.test.ts"]
-    },
-    {
       "source": "src/core/nerve/runtime.ts",
       "suite": "integration",
       "tests": ["tests/integration/nerve-runtime.test.ts"]

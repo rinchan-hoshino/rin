@@ -8,8 +8,6 @@ const replacements: Record<string, string> = {
       return {
         async start() { ready = true; globalThis.__rinAppDaemonOwnerEvents.push(["nerve-start", options.agentDir]); },
         async stop() { ready = false; globalThis.__rinAppDaemonOwnerEvents.push(["nerve-stop"]); },
-        getOwnerChatKey() { return "discord/owner:nerve"; },
-        observeChat: async () => ({ handled: true, stimulated: true }),
         commandRouter: async () => undefined,
         getStatus() { return { ready, working: false, queue: { queued: 0, inflight: 0, delivered: 0 }, triggers: [] }; },
       };

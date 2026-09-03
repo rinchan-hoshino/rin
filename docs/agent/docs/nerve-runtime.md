@@ -1,66 +1,84 @@
 # Nerve runtime
 
-The nerve runtime owns one persistent main-agent session and an agent-writable set of TypeScript stimulus triggers. It is independent of scheduled tasks.
+Rin's Nerve runtime keeps one serial main-brain session dormant until a trigger
+emits an opaque sensation body. It does not classify the source or poll a model.
 
-## Main-agent input
-
-Every accepted stimulus enters frontend `{ kind: "nerve", key: "main" }` and managed session `nerve-main-v2`. A stimulus received while the session is running uses steer admission; no second main-agent session is created. Ordinary assistant finals are not delivered to Chat.
-
-The agent receives only the stimulus `body`. Queue identifiers, producer names, sensation labels, timestamps, trust decisions, and prompt-context metadata remain runtime-internal. Trigger authors therefore own the perceived form: a trigger may include full source content or emit only a cue such as `Your Discord rang.`
-
-The dedicated owner-chat hard reflex is configured in `~/.rin/settings.json`:
-
-```json
-{
-  "nerve": {
-    "ownerChatKey": "discord/<bot-id>:<channel-id>"
-  }
-}
-```
-
-Only an `OWNER` message in that exact chat becomes a stimulus. Other messages in that dedicated chat are recorded without entering an ordinary Chat turn. The accepted message is presented as `<Platform> · <visible sender>\n<message body>`; the `OWNER` authorization label and account identifiers are not shown to the agent. `rin nerve status` exposes `ownerChatKey` so the agent can deliberately inspect or reply through the Chat SDK when needed.
-
-## Trigger contract
-
-Mutable triggers live at `~/.rin/nerve/triggers/*.ts`. The daemon starts each trigger in an isolated child process and gives it this structural interface:
+## Stimulus contract
 
 ```ts
-export async function start({
-  triggerId,
-  stateDir,
-  signal,
-  emit,
-  sleepFor,
-  sleepUntil,
-}) {
-  // Subscribe, wait, or inspect a source. Emit only when the condition holds.
+await ctx.emit({
+  dedupeKey: "optional-source-event-id",
+  body: "the complete sensation presented to the main brain",
+});
+```
+
+`body` is the only field presented to the model. `dedupeKey` is an optional
+transport key used only to prevent duplicate delivery after a trigger restart.
+The runtime does not own producer names, sensation classes, account identity,
+trust, chat keys, or source-specific policy.
+
+The queue is stored at `~/.rin/data/core/nerve/nerve.sqlite`. Its final schema
+contains only the internal row ID, optional dedupe key, body, body hash,
+delivery state, timestamps, and the last transport error.
+
+## TypeScript triggers
+
+Mutable triggers live at:
+
+```text
+~/.rin/nerve/triggers/*.ts
+```
+
+Each file exports one function:
+
+```ts
+export async function start(ctx: NerveTriggerContext): Promise<void> {
+  // Subscribe to or inspect the source here.
 }
 ```
 
-- `stateDir` is `~/.rin/nerve/state/<trigger-id>/`.
-- `signal` aborts on reload or daemon shutdown.
-- `sleepFor(milliseconds)` and `sleepUntil(time)` are abortable and task-independent.
-- `emit({ id?, sensation, body })` enters the durable stimulus queue. Reuse a stable event id for retries.
+The trigger—not NerveRuntime—owns source access, authentication, cursors,
+filtering, interpretation, and the exact body the brain experiences. Runtime
+starts each file in an isolated child process and provides:
 
-After editing a trigger, run:
+```ts
+type NerveTriggerContext = {
+  triggerId: string;
+  stateDir: string;
+  signal: AbortSignal;
+  emit(input: { dedupeKey?: string; body: string }): Promise<void>;
+  sleepFor(milliseconds: number): Promise<void>;
+  sleepUntil(time: string | Date): Promise<void>;
+};
+```
+
+After changing a trigger, reload it without restarting the daemon:
 
 ```bash
 rin nerve reload <trigger-id>
 ```
 
-A failed trigger does not restart in a loop. The main agent receives one `trigger_error` stimulus and may repair then reload it.
+Trigger waiting is implemented by TriggerRuntime and does not use scheduled
+tasks or Cron.
 
-## CLI
+## Main brain
+
+All bodies enter the single frontend identity `{ kind: "nerve", key: "main" }`
+and managed session leaf `nerve-main-v2`. Running turns receive later bodies by
+`steer`; no second main brain is created. A normal assistant final is not sent
+to a chat outbox. The brain must choose and call an external tool when it wants
+to communicate.
+
+The session disables only `self_improve`. Built-in/project skills, memory,
+transcript archival, and `recall` remain available.
+
+## CLI and SDK
 
 ```bash
-rin nerve status
-rin nerve reload [trigger-id]
-rin nerve abort
-rin nerve emit --producer <id> --sensation <name> --body <text>
+rin nerve status --json
+rin nerve emit --body "your Discord rang" --dedupe-key event-123 --json
+rin nerve abort --json
+rin nerve reload [trigger-id] --json
 ```
 
-Use `--id` for idempotent external retries and `--body-file` for multiline input.
-
-## Session profile
-
-The nerve session disables the `self_improve` source: its prompt block, managed self-improve skills, capability hooks, and distillation jobs are absent. Ordinary builtin/project skills and the memory/recall capability remain available.
+The Agent SDK exposes the same operations under `rinAgentSdk.nerve`.

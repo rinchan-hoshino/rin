@@ -466,24 +466,15 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Nerve emit needs a readable body file after --body-file.",
   nerve_daemon_unavailable: () =>
     "Nerve cannot reach Rin's background service.",
+  nerve_body_required: () => "Nerve emit needs a sensation body.",
+  nerve_dedupe_key_conflict: () =>
+    "Nerve rejected a reused dedupe key with different content.",
+  nerve_dedupe_key_invalid: () =>
+    "Nerve received an invalid opaque dedupe key.",
   nerve_emit_failed: (detail) =>
-    withDetail("A trigger could not emit its stimulus", detail, "."),
-  nerve_owner_chat_key_invalid: () =>
-    "Nerve needs one exact owner chatKey without surrounding whitespace.",
-  nerve_owner_chat_observation_rejected: () =>
-    "The owner-channel hard reflex rejected a message it had already claimed.",
-  nerve_producer_required: () => "Nerve emit needs a producer identifier.",
+    withDetail("A trigger could not emit its sensation", detail, "."),
   nerve_runtime_stopped: () => "Nerve is currently stopped.",
   nerve_runtime_unavailable: () => "Nerve has not finished starting yet.",
-  nerve_sensation_required: () => "Nerve emit needs a sensation name.",
-  nerve_stimulus_id_conflict: () =>
-    "Nerve rejected a reused stimulus identifier with different content.",
-  nerve_stimulus_id_invalid: () =>
-    "Nerve received an invalid stable stimulus identifier.",
-  nerve_stimulus_producer_required: () =>
-    "Nerve received a stimulus without a producer identifier.",
-  nerve_stimulus_sensation_required: () =>
-    "Nerve received a stimulus without a sensation name.",
   nerve_trigger_aborted: () => "The trigger stopped because it was cancelled.",
   nerve_trigger_failed: (detail) =>
     withDetail("A Nerve trigger failed", detail, "."),

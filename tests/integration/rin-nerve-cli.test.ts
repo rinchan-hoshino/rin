@@ -55,18 +55,7 @@ test("nerve CLI exposes status, emit, abort, and trigger reload", async () => {
   try {
     for (const args of [
       ["nerve", "status"],
-      [
-        "nerve",
-        "emit",
-        "--id",
-        "event-1",
-        "--producer",
-        "cli-test",
-        "--sensation",
-        "test",
-        "--body",
-        "payload",
-      ],
+      ["nerve", "emit", "--dedupe-key", "event-1", "--body", "payload"],
       ["nerve", "abort"],
       ["nerve", "reload", "clock"],
     ]) {
@@ -90,9 +79,7 @@ test("nerve CLI exposes status, emit, abort, and trigger reload", async () => {
     ["nerve_status", "nerve_emit", "nerve_abort", "nerve_reload_trigger"],
   );
   assert.deepEqual(commands[1].payload, {
-    id: "event-1",
-    producer: "cli-test",
-    sensation: "test",
+    dedupeKey: "event-1",
     body: "payload",
   });
   assert.deepEqual(commands[3].payload, { id: "clock" });

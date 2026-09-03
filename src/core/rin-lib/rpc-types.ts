@@ -79,7 +79,6 @@ export type RinDaemonRpcCommandType =
   | "nerve_status"
   | "nerve_abort"
   | "nerve_reload_trigger"
-  | "nerve_observe_chat"
   | "cron_list_tasks"
   | "cron_reload_tasks"
   | "cron_get_task"

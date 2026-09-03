@@ -1,5 +1,4 @@
 import type {
-  NerveChatObservation,
   NerveEmitResult,
   NerveStatus,
   NerveStimulusInput,
@@ -26,12 +25,10 @@ export type NerveTurnDriver = {
 export function createNerveRuntime(options: {
   agentDir: string;
   driver: NerveTurnDriver;
-  ownerChatKey?: string;
   startTriggers?: boolean;
   triggerWorkerPath: string;
 }) {
   const store = openNerveStore(options.agentDir);
-  const ownerChatKey = String(options.ownerChatKey || "");
   let started = false;
   let stopped = false;
   let pumping = false;
@@ -43,9 +40,7 @@ export function createNerveRuntime(options: {
     emit: async (input) => await runtime.emit(input),
     onTriggerError: ({ id, error }) => {
       void runtime.emit({
-        id: `trigger-error:${id}:${Date.now()}`,
-        producer: "nerve-runtime",
-        sensation: "trigger_error",
+        dedupeKey: `trigger-error:${id}:${Date.now()}`,
         body: `Trigger ${id} failed:\n${error}`,
       });
     },
@@ -118,21 +113,6 @@ export function createNerveRuntime(options: {
       schedulePump();
       return result;
     },
-    async observeChat(input: NerveChatObservation) {
-      if (!ownerChatKey || input.chatKey !== ownerChatKey) {
-        return { handled: false, stimulated: false };
-      }
-      if (String(input.trust || "").toUpperCase() !== "OWNER") {
-        return { handled: true, stimulated: false };
-      }
-      await runtime.emit({
-        id: `chat:${input.chatKey}:${input.messageId}`,
-        producer: "owner-chat",
-        sensation: "owner_message",
-        body: input.body,
-      });
-      return { handled: true, stimulated: true };
-    },
     status(): NerveStatus {
       const state = options.driver.state();
       return {
@@ -140,7 +120,6 @@ export function createNerveRuntime(options: {
         working: Boolean(
           state.working || state.turnActive || state.isStreaming,
         ),
-        ...(ownerChatKey ? { ownerChatKey } : {}),
         ...(typeof state.sessionFile === "string" && state.sessionFile
           ? { sessionFile: state.sessionFile }
           : {}),

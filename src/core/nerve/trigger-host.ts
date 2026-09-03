@@ -84,10 +84,7 @@ export function createNerveTriggerHost(options: {
       const requestId = String(message.requestId || "");
       const input = message.input || {};
       void options
-        .emit({
-          ...input,
-          producer: id,
-        })
+        .emit(input)
         .then(() => {
           child.send?.({ type: "emit_result", requestId, success: true });
         })

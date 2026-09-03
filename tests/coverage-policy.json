@@ -291,10 +291,6 @@
       "ownerSuite": "unit"
     },
     {
-      "source": "src/core/nerve/config.ts",
-      "ownerSuite": "integration"
-    },
-    {
       "source": "src/core/nerve/runtime.ts",
       "ownerSuite": "integration"
     },

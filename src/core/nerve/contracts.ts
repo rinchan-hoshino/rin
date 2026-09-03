@@ -1,30 +1,24 @@
-import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
-
 export type NerveStimulusInput = {
-  id?: string;
-  producer: string;
-  sensation: string;
+  dedupeKey?: string;
   body: string;
-  context?: PromptContextMeta;
 };
 
-export type NerveStoredStimulus = Required<
-  Pick<NerveStimulusInput, "id" | "producer" | "sensation" | "body">
-> & {
-  context?: PromptContextMeta;
+export type NerveStimulusState = "queued" | "inflight" | "delivered";
+
+export type NerveStoredStimulus = {
+  id: string;
+  dedupeKey?: string;
+  body: string;
+  bodyHash: string;
+  state: NerveStimulusState;
   createdAt: string;
-  state: "queued" | "inflight" | "delivered";
+  deliveredAt?: string;
+  lastError?: string;
 };
 
 export type NerveEmitResult = {
   stimulusId: string;
   status: "queued" | "duplicate";
-};
-
-export type NerveQueueCounts = {
-  queued: number;
-  inflight: number;
-  delivered: number;
 };
 
 export type NerveTriggerStatus = {
@@ -38,15 +32,20 @@ export type NerveTriggerStatus = {
 export type NerveStatus = {
   ready: boolean;
   working: boolean;
-  ownerChatKey?: string;
   sessionFile?: string;
-  queue: NerveQueueCounts;
+  queue: {
+    queued: number;
+    inflight: number;
+    delivered: number;
+  };
   triggers: NerveTriggerStatus[];
 };
 
-export type NerveChatObservation = {
-  chatKey: string;
-  messageId: string;
-  trust: string;
-  body: string;
+export type NerveTriggerContext = {
+  triggerId: string;
+  stateDir: string;
+  signal: AbortSignal;
+  emit(input: NerveStimulusInput): Promise<NerveEmitResult>;
+  sleepFor(milliseconds: number): Promise<void>;
+  sleepUntil(time: string | Date): Promise<void>;
 };

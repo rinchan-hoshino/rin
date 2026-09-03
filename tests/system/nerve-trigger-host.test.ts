@@ -33,7 +33,7 @@ test("trigger host launches TypeScript triggers and reloads them without daemon 
     triggerPath,
     `export async function start({ emit, sleepFor }: any) {
       await sleepFor(5);
-      await emit({ id: "clock-v1", sensation: "clock", body: "v1" });
+      await emit({ dedupeKey: "clock-v1", body: "v1" });
     }\n`,
   );
   const emitted: any[] = [];
@@ -48,16 +48,14 @@ test("trigger host launches TypeScript triggers and reloads them without daemon 
     await host.start();
     await waitFor(() => emitted.length === 1);
     assert.deepEqual(emitted[0], {
-      id: "clock-v1",
-      producer: "clock",
-      sensation: "clock",
+      dedupeKey: "clock-v1",
       body: "v1",
     });
 
     await fs.writeFile(
       triggerPath,
       `export async function start({ emit }: any) {
-        await emit({ id: "clock-v2", sensation: "clock", body: "v2" });
+        await emit({ dedupeKey: "clock-v2", body: "v2" });
       }\n`,
     );
     await host.reload("clock");

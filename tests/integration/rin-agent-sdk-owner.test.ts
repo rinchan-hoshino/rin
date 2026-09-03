@@ -122,9 +122,7 @@ test("Rin Agent SDK owns every daemon command shape and override path", async ()
     await sdk.chat.messages.list({ chatKey: "telegram/1:2", limit: NaN });
 
     await sdk.nerve.emit({
-      id: "stimulus-1",
-      producer: "sdk-test",
-      sensation: "test",
+      dedupeKey: "stimulus-1",
       body: "payload",
     });
     await sdk.nerve.status();
@@ -188,10 +186,9 @@ test("Rin Agent SDK owns every daemon command shape and override path", async ()
     assert.equal(commands[21].payload.chatKey, "telegram/1:2");
     assert.deepEqual(commands[24].payload, { controllerKey: "controller-1" });
     assert.deepEqual(commands[25].payload, { chatKey: "telegram/1:2" });
-    assert.equal(
-      commands.find((command) => command.type === "nerve_emit")?.payload
-        .producer,
-      "sdk-test",
+    assert.deepEqual(
+      commands.find((command) => command.type === "nerve_emit")?.payload,
+      { dedupeKey: "stimulus-1", body: "payload" },
     );
     assert.equal(
       commands.find((command) => command.type === "nerve_reload_trigger")

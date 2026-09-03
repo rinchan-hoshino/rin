@@ -15,8 +15,7 @@ import {
 type NerveCliOptions = {
   action: "status" | "abort" | "reload" | "emit";
   id: string;
-  producer: string;
-  sensation: string;
+  dedupeKey: string;
   body: string;
   json: boolean;
   help: boolean;
@@ -30,12 +29,11 @@ function printHelp() {
       "  status                         show brain, queue, and trigger state",
       "  abort                          abort the active main-agent turn",
       "  reload [trigger-id]            reload one trigger or all triggers",
-      "  emit --producer <id> --sensation <name> --body <text>",
-      "                                 enqueue one arbitrary stimulus",
+      "  emit --body <text>             enqueue one opaque sensation",
       "",
       "Options:",
-      "  --id <id>                      stable event id for idempotent retries",
-      "  --body-file <path>             read stimulus body from a file",
+      "  --dedupe-key <key>             opaque key for idempotent retries",
+      "  --body-file <path>             read the sensation from a file",
       "  --json                         print JSON",
     ].join("\n"),
   );
@@ -53,8 +51,7 @@ function parseArgs(rawArgv: string[]): NerveCliOptions {
   const options: NerveCliOptions = {
     action,
     id: "",
-    producer: "",
-    sensation: "",
+    dedupeKey: "",
     body: "",
     json: false,
     help:
@@ -69,11 +66,8 @@ function parseArgs(rawArgv: string[]): NerveCliOptions {
     const arg = args[index];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--json") options.json = true;
-    else if (arg === "--id") options.id = safeString(args[++index]).trim();
-    else if (arg === "--producer") {
-      options.producer = safeString(args[++index]).trim();
-    } else if (arg === "--sensation") {
-      options.sensation = safeString(args[++index]).trim();
+    else if (arg === "--dedupe-key") {
+      options.dedupeKey = safeString(args[++index]);
     } else if (arg === "--body") {
       options.body = safeString(args[++index]);
     } else if (arg === "--body-file") {
@@ -83,10 +77,6 @@ function parseArgs(rawArgv: string[]): NerveCliOptions {
     } else {
       throw new Error(`nerve_unknown_argument:${arg}`);
     }
-  }
-  if (action === "emit") {
-    if (!options.producer) throw new Error("nerve_producer_required");
-    if (!options.sensation) throw new Error("nerve_sensation_required");
   }
   return options;
 }
@@ -117,9 +107,7 @@ async function runCommand(options: NerveCliOptions, socketPath?: string) {
     {
       type: "nerve_emit",
       payload: {
-        ...(options.id ? { id: options.id } : {}),
-        producer: options.producer,
-        sensation: options.sensation,
+        ...(options.dedupeKey ? { dedupeKey: options.dedupeKey } : {}),
         body: options.body,
       },
     },

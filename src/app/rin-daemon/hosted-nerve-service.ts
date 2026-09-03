@@ -9,11 +9,7 @@ import type {
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
 import { RinFrontendTurnDriver } from "../../core/rin-frontend-sdk/turn-driver.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
-import { loadNerveConfig } from "../../core/nerve/config.js";
-import type {
-  NerveChatObservation,
-  NerveStimulusInput,
-} from "../../core/nerve/contracts.js";
+import type { NerveStimulusInput } from "../../core/nerve/contracts.js";
 import {
   createNerveRuntime,
   type NerveRuntime,
@@ -32,7 +28,6 @@ export function createHostedNerveService(options: {
   logger?: Pick<Console, "warn" | "error">;
 }) {
   let runtime: NerveRuntime | null = null;
-  let ownerChatKey = "";
   let startPromise: Promise<void> | null = null;
 
   const requireRuntime = async () => {
@@ -58,12 +53,6 @@ export function createHostedNerveService(options: {
       await (await requireRuntime()).reloadTrigger(input.id);
       return success((await requireRuntime()).status());
     },
-    nerve_observe_chat: async (command) =>
-      success(
-        await (
-          await requireRuntime()
-        ).observeChat(payload<NerveChatObservation>(command)),
-      ),
   } satisfies Partial<
     Record<
       RinRpcCommandType,
@@ -97,11 +86,8 @@ export function createHostedNerveService(options: {
               connectSocket,
             }),
         });
-        const config = loadNerveConfig(options.agentDir);
-        ownerChatKey = config.ownerChatKey;
         runtime = createNerveRuntime({
           agentDir: options.agentDir,
-          ownerChatKey: config.ownerChatKey,
           triggerWorkerPath: fileURLToPath(
             new URL("./nerve-trigger-worker.js", import.meta.url),
           ),
@@ -128,12 +114,6 @@ export function createHostedNerveService(options: {
         throw error;
       });
       await startPromise;
-    },
-    async observeChat(input: NerveChatObservation) {
-      return await (await requireRuntime()).observeChat(input);
-    },
-    getOwnerChatKey() {
-      return ownerChatKey;
     },
     getStatus() {
       return runtime

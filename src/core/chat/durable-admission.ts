@@ -34,13 +34,6 @@ export type DurableChatAdmissionDecision =
     }
   | {
       version: 1;
-      kind: "nerve_owner_message";
-      chatKey: string;
-      messageId: string;
-      body: string;
-    }
-  | {
-      version: 1;
       kind: "unmatched_command";
       chatKey: string;
       messageId: string;
@@ -79,12 +72,6 @@ export type ResolvedDurableChatAdmission =
       messageId: string;
       command: { name: string; argsText: string };
       promptMeta: PromptContextMeta;
-    }
-  | {
-      kind: "nerve_owner_message";
-      chatKey: string;
-      messageId: string;
-      body: string;
     }
   | {
       kind: "unmatched_command";
@@ -210,14 +197,6 @@ export function durableAdmissionMatchesTurn(
       typeof admission.decision.trust === "string" &&
       admission.decision.trust === admission.decision.trust.trim() &&
       admission.decision.promptMeta?.identity === admission.decision.trust,
-    );
-  }
-  if (admission.decision.kind === "nerve_owner_message") {
-    return Boolean(
-      sameCanonicalIdentity(admission.decision.chatKey, turn.chatKey) &&
-      sameCanonicalIdentity(admission.decision.messageId, turn.messageId) &&
-      typeof admission.decision.body === "string" &&
-      admission.decision.body.length > 0,
     );
   }
   if (admission.decision.kind === "unmatched_command") {
@@ -351,17 +330,6 @@ export function resolveDurableChatAdmission(
         argsText: decision.command.argsText,
       },
       promptMeta: currentPromptContextMeta(decision.promptMeta),
-    };
-  }
-  if (decision.kind === "nerve_owner_message") {
-    if (typeof decision.body !== "string" || !decision.body) {
-      return { kind: "unavailable", reason: "unsupported_admission" };
-    }
-    return {
-      kind: "nerve_owner_message",
-      chatKey: turn.chatKey,
-      messageId: turn.messageId,
-      body: decision.body,
     };
   }
   if (decision.kind === "unmatched_command") {
