@@ -927,8 +927,8 @@ test("chat controller daemon shutdown detach preserves visible turn state", asyn
   controller.clearWorkingReaction = async () => {
     calls.push("clearWorkingReaction");
   };
-  controller.clearCompactionWorkingReaction = async () => {
-    calls.push("clearCompactionWorkingReaction");
+  controller.clearCompactionWorkingIndicators = async () => {
+    calls.push("clearCompactionWorkingIndicators");
   };
 
   await controller.detachForDaemonShutdown();
@@ -2157,7 +2157,7 @@ test("chat command retry adopts its already delivered legacy error outbox", asyn
   assert.equal(sends, 0);
 });
 
-test("chat controller sends compaction notices as interim progress and reacts on that notice", async () => {
+test("chat controller sends compaction progress without a compaction-specific reaction", async () => {
   const controller = await createController("telegram/1:2");
   const sessionFile = path.join(
     controller.agentDir,
@@ -2175,7 +2175,15 @@ test("chat controller sends compaction notices as interim progress and reacts on
   const deliveries = [];
   let nextMessageId = 1;
   controller.app.bots[0].workingIndicators = [
-    testPollingIndicator(actions, reactions),
+    {
+      type: "polling",
+      presentation: "typing",
+      async tick({ chatId }) {
+        actions.push({ chat_id: chatId, action: "typing" });
+        return true;
+      },
+    },
+    testReactionPollingIndicator(reactions),
   ];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
@@ -2208,7 +2216,7 @@ test("chat controller sends compaction notices as interim progress and reacts on
     },
   ]);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
+  assert.deepEqual(reactions, []);
 
   await controller.handleClientEvent({
     type: "ui",
@@ -2223,10 +2231,7 @@ test("chat controller sends compaction notices as interim progress and reacts on
 
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.compactionTurn, null);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-out-1", "🤔"],
-    ["delete", "2", "m-out-1", "🤔", "1"],
-  ]);
+  assert.deepEqual(reactions, []);
   assert.deepEqual(deliveries, [
     {
       text: "Compacting...",
@@ -2443,7 +2448,15 @@ test("chat controller coalesces automatic compaction completion into the active 
   const deliveries = [];
   let nextMessageId = 1;
   controller.app.bots[0].workingIndicators = [
-    testPollingIndicator(actions, reactions),
+    {
+      type: "polling",
+      presentation: "typing",
+      async tick({ chatId }) {
+        actions.push({ chat_id: chatId, action: "typing" });
+        return true;
+      },
+    },
+    testReactionPollingIndicator(reactions),
   ];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
@@ -2475,7 +2488,7 @@ test("chat controller coalesces automatic compaction completion into the active 
 
   assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
   assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
-  assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
+  assert.deepEqual(reactions, []);
 
   await controller.handleClientEvent({
     type: "ui",
@@ -2490,10 +2503,7 @@ test("chat controller coalesces automatic compaction completion into the active 
 
   assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
   assert.equal(controller.compactionTurn, null);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-out-1", "🤔"],
-    ["delete", "2", "m-out-1", "🤔", "1"],
-  ]);
+  assert.deepEqual(reactions, []);
   assert.deepEqual(deliveries, [
     {
       text: "Compacting...",
@@ -9258,8 +9268,8 @@ test("chat controller internal ownership helpers normalize durable and display s
   variants[0].rememberPromptChatType({ chatType: "private" });
   variants[0].rememberPromptChatType(undefined);
   assert.equal(await variants[0].startWorkingMarker(), false);
-  assert.equal(await variants[0].startCompactionWorkingMarker(), false);
-  assert.equal(await variants[0].pollCompactionTyping(), false);
+  assert.equal(await variants[0].startCompactionWorkingIndicators(), false);
+  assert.equal(await variants[0].pollCompactionWorkingIndicators(), false);
   assert.equal(await variants[0].refreshEditableWorkingNotice(), false);
   assert.equal(await variants[0].showAssistantSummary(""), false);
   assert.equal(await variants[0].pollTyping(), false);
@@ -9728,7 +9738,7 @@ test("chat controller internal ownership helpers normalize durable and display s
     workingNoticeSent: false,
   };
   controller.app.bots[0].workingIndicators = [editable, polling];
-  assert.equal(await controller.pollCompactionTyping(), true);
+  assert.equal(await controller.pollCompactionWorkingIndicators(), true);
   controller.setCurrentTurn({ incomingMessageId: "summary-message" });
   controller.awaitingTurnSettle = true;
   assert.equal(await controller.showAssistantSummary(""), false);
@@ -9761,8 +9771,8 @@ test("chat controller internal ownership helpers normalize durable and display s
     true,
   );
   controller.app.bots[0].workingIndicators = [marker];
-  assert.equal(await controller.startCompactionWorkingMarker(), true);
-  assert.equal(await controller.clearCompactionWorkingReaction(), true);
+  assert.equal(await controller.startCompactionWorkingIndicators(), true);
+  assert.equal(await controller.clearCompactionWorkingIndicators(), true);
   assert.ok(markerEvents.length >= 3);
 
   const originalStageAssistantDelivery =

@@ -339,7 +339,7 @@ export class ChatController {
   dispose() {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
-    void this.clearCompactionWorkingReaction().catch(() => {});
+    void this.clearCompactionWorkingIndicators().catch(() => {});
     void this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
     this.presentationIncomingMessageId = "";
@@ -374,7 +374,7 @@ export class ChatController {
     this.awaitingTurnSettle = false;
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
-    await this.clearCompactionWorkingReaction().catch(() => {});
+    await this.clearCompactionWorkingIndicators().catch(() => {});
     await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
     this.presentationIncomingMessageId = "";
@@ -1225,7 +1225,13 @@ export class ChatController {
     return results.some(Boolean);
   }
 
-  private async clearCompactionWorkingReaction(
+  private getCompactionWorkingIndicators() {
+    return this.getWorkingIndicators().filter(
+      (indicator) => workingIndicatorPresentation(indicator) !== "reaction",
+    );
+  }
+
+  private async clearCompactionWorkingIndicators(
     options: {
       endReason?: "presentation_transferred";
     } = {},
@@ -1247,9 +1253,9 @@ export class ChatController {
     return results.some(Boolean);
   }
 
-  private async startCompactionWorkingMarker() {
+  private async startCompactionWorkingIndicators() {
     if (!this.canDeliverReplies()) return false;
-    const indicators = this.getWorkingIndicators();
+    const indicators = this.getCompactionWorkingIndicators();
     const selected = selectWorkingIndicatorsForKind(indicators, "marker");
     this.compactionWorkingIndicators = selected;
     const context = this.compactionWorkingIndicatorContext({ event: "start" });
@@ -1263,9 +1269,9 @@ export class ChatController {
     return results.some(Boolean);
   }
 
-  private async pollCompactionTyping() {
+  private async pollCompactionWorkingIndicators() {
     if (!this.canDeliverReplies() || !this.compactionTurn) return false;
-    const indicators = this.getWorkingIndicators();
+    const indicators = this.getCompactionWorkingIndicators();
     const now = Date.now();
     const typingIndicators = selectTypingIndicatorsForKind(
       indicators,
@@ -2469,7 +2475,7 @@ export class ChatController {
       endReason?: "presentation_transferred";
     } = {},
   ) {
-    await this.clearCompactionWorkingReaction(options).catch(() => false);
+    await this.clearCompactionWorkingIndicators(options).catch(() => false);
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.lastCompactionIndicatorAt = 0;
@@ -2613,8 +2619,12 @@ export class ChatController {
           workingNoticeSent: false,
         };
         if (!manualCompaction) {
-          const marker = this.startCompactionWorkingMarker().catch(() => false);
-          const poll = this.pollCompactionTyping().catch(() => false);
+          const marker = this.startCompactionWorkingIndicators().catch(
+            () => false,
+          );
+          const poll = this.pollCompactionWorkingIndicators().catch(
+            () => false,
+          );
           await Promise.race([
             Promise.all([marker, poll]),
             new Promise((resolve) => setImmediate(resolve)),
@@ -3310,7 +3320,7 @@ export class ChatController {
 
   async housekeep() {
     await this.pollTyping().catch(() => {});
-    await this.pollCompactionTyping().catch(() => {});
+    await this.pollCompactionWorkingIndicators().catch(() => {});
     await this.sleepIfIdle().catch(() => false);
   }
 
