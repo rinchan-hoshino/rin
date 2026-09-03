@@ -72,6 +72,36 @@ test("session factory rejects a selected session file that no longer exists", as
   });
 });
 
+test("session factory does not read the persisted Pi cwd when opening a Rin session", async () => {
+  await withTempRoot(async (root) => {
+    const agentDir = path.join(root, "agent");
+    const sessionFile = path.join(root, "migrated.jsonl");
+    await fs.mkdir(agentDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "migrated-session",
+        timestamp: "2026-09-03T00:00:00.000Z",
+        cwd: path.join(root, "missing-old-home"),
+      })}\n`,
+    );
+
+    const configured = await factory.openBoundSession({
+      cwd: root,
+      agentDir,
+      sessionFile,
+    });
+    try {
+      assert.equal(configured.session.sessionManager.getCwd(), root);
+    } finally {
+      await configured.session.abort().catch(() => {});
+      await configured.runtime.dispose();
+    }
+  });
+});
+
 test("session factory lists exact sessions, normalizes failures, and routes pages", async () => {
   await withTempRoot(async (root) => {
     const listedCalls: Array<[string, string]> = [];

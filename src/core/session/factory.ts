@@ -38,7 +38,11 @@ export async function openBoundSession(options: {
   const sessionManager =
     options.sessionManager ||
     (sessionFile
-      ? SessionManager.open(requireExistingSessionFile(sessionFile), sessionDir)
+      ? SessionManager.open(
+          requireExistingSessionFile(sessionFile),
+          sessionDir,
+          options.cwd,
+        )
       : SessionManager.create(options.cwd, sessionDir));
   return await createConfiguredAgentSession({
     cwd: options.cwd,
@@ -118,7 +122,11 @@ export async function renameBoundSession(
   const { SessionManager } = options.SessionManager
     ? { SessionManager: options.SessionManager }
     : await loadRinSessionManagerModule();
-  const manager = SessionManager.open(sessionFile);
+  const manager = SessionManager.open(
+    sessionFile,
+    undefined,
+    resolveRuntimeProfile().cwd,
+  );
   manager.appendSessionInfo(nextName);
   updateSessionCatalogFromSessionManagerSync(manager);
 }

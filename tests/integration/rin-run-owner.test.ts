@@ -278,9 +278,14 @@ test("non-interactive Rin run owns argument normalization, standalone session li
         "--mode=json",
       ]),
     );
-    assert.equal(
-      owner.__rinRunOwnerEvents.some(([name]: string[]) => name === "open"),
-      true,
+    assert.deepEqual(
+      owner.__rinRunOwnerEvents.find(([name]: string[]) => name === "open"),
+      [
+        "open",
+        openSession,
+        path.join(root, "sessions", "runtime"),
+        "/cwd/owner",
+      ],
     );
     assert.equal(JSON.parse(openLogs[0]).sessionFile, openSession);
 

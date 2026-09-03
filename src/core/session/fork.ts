@@ -73,7 +73,7 @@ function createEphemeralForkManager(
     throw new Error("session_fork_unsupported:ephemeral");
   }
 
-  const sourceManager = SessionManager.open(sourcePath, sessionDir, undefined);
+  const sourceManager = SessionManager.open(sourcePath, sessionDir, targetCwd);
   const sourceHeader = sourceManager.getHeader?.() || {};
   const sourceSessionId = String(
     sourceHeader?.id || sourceManager.getSessionId?.() || "",

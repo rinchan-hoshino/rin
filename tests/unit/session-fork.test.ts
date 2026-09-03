@@ -72,9 +72,10 @@ test("session fork compat rebuilds ephemeral forks from the selected branch", ()
       this.flushed = true;
     }
 
-    static open(sourcePath, sessionDir) {
+    static open(sourcePath, sessionDir, runtimeHome) {
       assert.equal(sourcePath, "/tmp/source.jsonl");
       assert.equal(sessionDir, "/tmp/sessions");
+      assert.equal(runtimeHome, "/tmp/cwd");
       return {
         getHeader() {
           return { version: "5", title: "source" };

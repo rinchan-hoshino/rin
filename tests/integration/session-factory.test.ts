@@ -1036,8 +1036,8 @@ test("renameBoundSession delegates to SessionManager.open once", async () => {
     "Renamed",
     {
       SessionManager: {
-        open(sessionPath) {
-          renamed.push(["open", sessionPath]);
+        open(sessionPath, sessionDir, runtimeHome) {
+          renamed.push(["open", sessionPath, sessionDir, runtimeHome]);
           return {
             appendSessionInfo(name) {
               renamed.push(["rename", name]);
@@ -1049,7 +1049,7 @@ test("renameBoundSession delegates to SessionManager.open once", async () => {
   );
 
   assert.deepEqual(renamed, [
-    ["open", "/tmp/demo.jsonl"],
+    ["open", "/tmp/demo.jsonl", undefined, os.homedir()],
     ["rename", "Renamed"],
   ]);
 });

@@ -20,9 +20,9 @@ const replacements = {
             globalThis.__rinWorkerCoreOwnerEvents.push(["inMemory", cwd]);
             return make("memory", [cwd]);
           },
-          open(sessionFile, sessionDir) {
-            globalThis.__rinWorkerCoreOwnerEvents.push(["open", sessionFile, sessionDir]);
-            return make("open", [sessionFile, sessionDir]);
+          open(sessionFile, sessionDir, runtimeHome) {
+            globalThis.__rinWorkerCoreOwnerEvents.push(["open", sessionFile, sessionDir, runtimeHome]);
+            return make("open", [sessionFile, sessionDir, runtimeHome]);
           },
           create(cwd, sessionDir) {
             globalThis.__rinWorkerCoreOwnerEvents.push(["create", cwd, sessionDir]);

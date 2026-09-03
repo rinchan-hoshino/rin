@@ -7,9 +7,9 @@ class OwnerSessionManager {
     Object.assign(this, values);
     this.branch = [];
   }
-  static open(sessionFile, sessionDir) {
-    globalThis.__rinRunOwnerEvents.push(["open", sessionFile, sessionDir]);
-    return new OwnerSessionManager({ kind: "open", sessionFile, sessionDir });
+  static open(sessionFile, sessionDir, runtimeHome) {
+    globalThis.__rinRunOwnerEvents.push(["open", sessionFile, sessionDir, runtimeHome]);
+    return new OwnerSessionManager({ kind: "open", sessionFile, sessionDir, runtimeHome });
   }
   static create(cwd, sessionDir) {
     globalThis.__rinRunOwnerEvents.push(["create", cwd, sessionDir]);

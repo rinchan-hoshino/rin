@@ -138,6 +138,11 @@ assert.deepEqual(configured[0][1].extensionFlagValues, new Map([["file-flag", tr
 assert.deepEqual(configured[0][1].tools, ["read"]);
 assert.deepEqual(configured[0][1].excludeTools, ["bash"]);
 assert.equal(configured[1][1].sessionManager.kind, "open");
+assert.deepEqual(configured[1][1].sessionManager.values, [
+  "/sessions/open.jsonl",
+  "/agent/owner/sessions/runtime",
+  "/workspace/owner",
+]);
 assert.equal(configured[2][1].sessionManager.kind, "create");
 assert.equal(configured[3][1].sessionManager.kind, "create");
 assert.equal(configured[4][1].sessionManager.kind, "memory");

@@ -365,6 +365,7 @@ function createStandaloneRunSessionManager(
     return SessionManager.open(
       requireExistingSessionFile(sessionFile),
       getRuntimeSessionDir(options.cwd, options.agentDir),
+      options.cwd,
     );
   }
 

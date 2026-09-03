@@ -85,7 +85,11 @@ function createInitialWorkerSessionManager(
     });
   }
   if (initial.kind === "open") {
-    return SessionManager.open(initial.sessionFile, runtimeSessionDir);
+    return SessionManager.open(
+      initial.sessionFile,
+      runtimeSessionDir,
+      options.cwd,
+    );
   }
   const sessionDir =
     initial.kind === "managed"
