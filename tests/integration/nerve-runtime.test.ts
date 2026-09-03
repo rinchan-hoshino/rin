@@ -11,6 +11,18 @@ const nerve = await importBuiltModule<
   typeof import("../../src/core/nerve/runtime.js")
 >("dist/core/nerve/runtime.js");
 
+const expectedSystemPrompt = `This is a persistent agent session driven by event triggers.
+
+Each user message is the exact payload emitted by a trigger. It reports something that occurred and is not necessarily a request. Decide what it means and whether or when to act. More events may arrive while a turn is active.
+
+A normal assistant response in this session is not delivered externally. Use an appropriate tool to communicate or affect external state.
+
+Trigger files live at ~/.rin/nerve/triggers/*.ts and export:
+
+export async function start(ctx) {}
+
+ctx provides triggerId, stateDir, signal, emit({ dedupeKey?, body }), sleepFor(), and sleepUntil(). After changing or deleting a trigger, run rin nerve reload <triggerId>.`;
+
 async function tempDir() {
   return await fs.mkdtemp(path.join(os.tmpdir(), "rin-nerve-runtime-"));
 }
@@ -63,10 +75,7 @@ test("nerve runtime submits every opaque input to one managed brain", async () =
     assert.equal(submissions[0].streamingBehavior, "steer");
     assert.deepEqual(submissions[0].disabledRinCapabilities, ["self_improve"]);
     assert.equal("noSkills" in submissions[0], false);
-    assert.match(
-      submissions[0].appendSystemPrompt[0],
-      /~\/\.rin\/nerve\/triggers/,
-    );
+    assert.equal(submissions[0].appendSystemPrompt[0], expectedSystemPrompt);
     assert.equal(submissions[0].requestTag, `nerve:${first.stimulusId}`);
     assert.equal(submissions[0].text, "one");
     assert.equal("promptContext" in submissions[0], false);
