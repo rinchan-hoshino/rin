@@ -665,6 +665,15 @@ export class ChatController {
     return Boolean(this.pendingTurnPresentations.get(actual)?.backendAccepted);
   }
 
+  private acceptsOwnedProgressEvent(requestTag?: string) {
+    if (!this.currentTurn) return false;
+    const actual = safeString(requestTag).trim();
+    if (!actual) return true;
+    const expected = safeString(this.currentTurn.requestTag).trim();
+    if (expected && expected === actual) return true;
+    return Boolean(this.pendingTurnPresentations.get(actual)?.backendAccepted);
+  }
+
   claimsInboundMessage(messageId?: string) {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return false;
@@ -3530,12 +3539,12 @@ export class ChatController {
         await this.deliverCompactionStartNotice(event.text);
         return;
       case "assistant_summary":
-        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+        if (this.acceptsOwnedProgressEvent(event.requestTag)) {
           await this.showAssistantSummary(event.text);
         }
         return;
       case "assistant_interim":
-        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+        if (this.acceptsOwnedProgressEvent(event.requestTag)) {
           await this.deliverAssistantInterim(event.text);
         }
         return;

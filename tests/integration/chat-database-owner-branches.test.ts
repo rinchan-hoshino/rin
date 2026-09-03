@@ -701,6 +701,24 @@ test("chat database settles joined presentations and empty completions transacti
       timestamp,
       3,
     );
+    insertMessage.run(
+      "recovered-older-message",
+      "recovered-older-record",
+      chatKey,
+      "recovered-older-provider",
+      timestamp,
+      timestamp,
+      4,
+    );
+    insertMessage.run(
+      "new-owner-message",
+      "new-owner-record",
+      chatKey,
+      "new-owner-provider",
+      timestamp,
+      timestamp,
+      5,
+    );
     const insertTurn = db.prepare(`INSERT INTO inbox_jobs (
       turn_id, inbound_message_id, chat_key, generation, sequence, state,
       terminal_kind, owner_epoch, attempt, admission_json, created_at, updated_at
@@ -744,6 +762,32 @@ test("chat database settles joined presentations and empty completions transacti
       timestamp,
       timestamp,
     );
+    insertTurn.run(
+      "recovered-older-turn",
+      "recovered-older-message",
+      chatKey,
+      4,
+      "running",
+      null,
+      "recovered-older-owner",
+      2,
+      JSON.stringify({ joinedTurnId: "new-owner-turn" }),
+      timestamp,
+      timestamp,
+    );
+    insertTurn.run(
+      "new-owner-turn",
+      "new-owner-message",
+      chatKey,
+      5,
+      "running",
+      null,
+      "new-owner",
+      1,
+      null,
+      timestamp,
+      timestamp,
+    );
     db.prepare(
       `INSERT INTO outbox (
       outbox_id, turn_id, chat_key, delivery_kind, state, payload_json,
@@ -774,6 +818,10 @@ test("chat database settles joined presentations and empty completions transacti
     );
     assert.equal(
       database.readLatestJoinedChatPresentation(agentDir, "missing-turn"),
+      null,
+    );
+    assert.equal(
+      database.readLatestJoinedChatPresentation(agentDir, "new-owner-turn"),
       null,
     );
     assert.deepEqual(

@@ -279,6 +279,7 @@ Delivery contract:
 
 - quote replies use a structured quote part with the exact platform `messageId`; quote is not a separate payload metadata field;
 - reply ids in storage indexes and delivery routing are derived projections of that quote node, while legacy records are migrated at read boundaries;
+- Working, interim, and final turn output require a current presentation owner; only a joined input newer than that owner may replace its quote target, and stale ownerless frontend events are not delivered;
 - native mentions use the exact platform user id;
 - files/images use local paths or recipient-accessible URLs;
 - generated image/file delivery uses rich-object syntax such as `[image: preview](local-path)` or structured SDK `parts`;

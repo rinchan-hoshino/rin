@@ -978,17 +978,30 @@ export function readLatestJoinedChatPresentation(
   return (
     (db
       .prepare(
-        `SELECT inbox_jobs.turn_id AS turnId,
+        `WITH owner AS (
+           SELECT owner_inbox.chat_key AS chatKey,
+                  owner_inbox.generation AS generation,
+                  owner_message.sequence AS sequence
+             FROM inbox_jobs AS owner_inbox
+             JOIN messages AS owner_message
+               ON owner_message.id = owner_inbox.inbound_message_id
+            WHERE owner_inbox.turn_id = ?
+         )
+         SELECT inbox_jobs.turn_id AS turnId,
                 inbox_jobs.chat_key AS chatKey,
                 messages.message_id AS messageId
            FROM inbox_jobs
+           JOIN owner
+             ON owner.chatKey = inbox_jobs.chat_key
+            AND owner.generation = inbox_jobs.generation
            JOIN messages ON messages.id = inbox_jobs.inbound_message_id
           WHERE json_extract(inbox_jobs.admission_json, '$.joinedTurnId') = ?
+            AND messages.sequence > owner.sequence
             AND messages.accepted_at IS NOT NULL
           ORDER BY messages.sequence DESC
           LIMIT 1`,
       )
-      .get(ownerTurnId) as
+      .get(ownerTurnId, ownerTurnId) as
       | { turnId: string; chatKey: string; messageId: string }
       | undefined) || null
   );

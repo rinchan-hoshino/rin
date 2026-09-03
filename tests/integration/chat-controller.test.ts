@@ -3551,10 +3551,12 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   await quietController.runTurn({
     text: "hello",
     attachments: [],
-    deliverFinal: false,
+    deliverFinal: true,
     quietMode: true,
+    incomingMessageId: "quiet-input",
+    replyToMessageId: "quiet-input",
   });
-  assert.deepEqual(quietDeliveries, []);
+  assert.deepEqual(quietDeliveries, [{ text: "final", kind: "final" }]);
   assert.deepEqual(quietController.pendingPassiveNotices, []);
   assert.equal(quietController.compactionTurn, null);
 
@@ -3591,11 +3593,14 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   await loudController.runTurn({
     text: "hello",
     attachments: [],
-    deliverFinal: false,
+    deliverFinal: true,
     quietMode: false,
+    incomingMessageId: "loud-input",
+    replyToMessageId: "loud-input",
   });
   assert.deepEqual(loudDeliveries, [
     { text: "... visible interim", kind: "interim" },
+    { text: "final", kind: "final" },
   ]);
 });
 
@@ -6235,6 +6240,17 @@ test("chat controller rejects stale tagged assistant progress after turn replace
     "current interim",
   ]);
   assert.deepEqual(accepted, ["replacement"]);
+
+  controller.clearCurrentTurn();
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
+    text: "orphaned after fence loss",
+    requestTag: "replacement-tag",
+  });
+  assert.deepEqual(delivered, [
+    "Pi-native untagged interim",
+    "current interim",
+  ]);
 });
 
 test("chat controller does not deliver text-only assistant messages as interim", async () => {
@@ -9326,6 +9342,16 @@ test("chat controller internal ownership helpers normalize durable and display s
   assert.equal(controller.claimsInboundMessage(""), false);
   assert.equal(controller.hasBackendAcceptedInboundMessage(""), false);
   assert.equal(controller.acceptsScopedTurnEvent("anything"), true);
+  assert.equal(controller.acceptsOwnedProgressEvent("anything"), false);
+
+  controller.setCurrentTurn({
+    incomingMessageId: "unfenced-message",
+    replyToMessageId: "unfenced-message",
+    requestTag: "unfenced-request",
+  });
+  assert.equal(controller.acceptsOwnedProgressEvent("unfenced-request"), true);
+  assert.equal(controller.acceptsOwnedProgressEvent("stale-request"), false);
+  controller.clearCurrentTurn();
 
   controller.setCurrentTurn({
     incomingMessageId: " message-1 ",
