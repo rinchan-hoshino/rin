@@ -29,6 +29,8 @@ export const RPC_MODE_COMMAND_REGISTRY: RpcCommandRegistry = {
   resume_interrupted_turn: (handlers, command) =>
     handlers.turn.resume_interrupted_turn(command),
   clear_queue: (handlers, command) => handlers.turn.clear_queue(command),
+  replace_queued_steer: (handlers, command) =>
+    handlers.turn.replace_queued_steer(command),
   abort_interrupted_turn: (handlers, command) =>
     handlers.turn.abort_interrupted_turn(command),
   abort: (handlers, command) => handlers.turn.abort(command),

@@ -103,7 +103,7 @@ test("RPC mode owns lifecycle while one dispatcher owns command registration", (
       return [];
     },
   );
-  assert.equal(commandNames.length, 60);
+  assert.equal(commandNames.length, 61);
   assert.equal(new Set(commandNames).size, commandNames.length);
 
   for (const relativePath of handlerFiles) {

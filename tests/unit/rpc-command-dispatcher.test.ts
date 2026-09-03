@@ -57,7 +57,10 @@ test("RPC command dispatcher routes every registered command exactly once", asyn
   };
   const dispatch = dispatcherModule.createRpcCommandDispatcher(handlers);
 
-  assert.equal(dispatcherModule.RPC_MODE_COMMAND_TYPES.length, 60);
+  assert.equal(dispatcherModule.RPC_MODE_COMMAND_TYPES.length, 61);
+  assert.ok(
+    dispatcherModule.RPC_MODE_COMMAND_TYPES.includes("replace_queued_steer"),
+  );
   assert.equal(
     new Set(dispatcherModule.RPC_MODE_COMMAND_TYPES).size,
     dispatcherModule.RPC_MODE_COMMAND_TYPES.length,
