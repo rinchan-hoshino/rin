@@ -290,7 +290,7 @@ test("rpc client applies configured frontend identity to scoped frontend command
     [
       { type: "prompt", frontendIdentity: { kind: "sdk" } },
       { type: "new_session", frontendIdentity: { kind: "sdk" } },
-      { type: "select_session", frontendIdentity: { kind: "sdk" } },
+      { type: "switch_session", frontendIdentity: { kind: "sdk" } },
       { type: "shutdown_session", frontendIdentity: { kind: "sdk" } },
       { type: "terminate_session", frontendIdentity: { kind: "sdk" } },
     ],

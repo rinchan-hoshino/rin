@@ -391,16 +391,14 @@ export class WorkerPool {
     if (commandType === "new_session") return;
     const bound = this.frontendSessionSelections.get(key);
     const requested = this.getSessionSelector(command);
-    const explicitTuiResume =
-      commandType === "switch_session" &&
-      connection.frontendIdentity?.kind === "tui";
+    const explicitSessionSwitch = commandType === "switch_session";
     if (bound && hasSessionSelector(requested)) {
       if (!sessionMatchesSelector(bound, requested)) {
-        if (explicitTuiResume) return;
+        if (explicitSessionSwitch) return;
         throw new Error("frontend_session_switch_requires_new");
       }
     } else if (!bound && hasSessionSelector(requested)) {
-      if (explicitTuiResume) return;
+      if (explicitSessionSwitch) return;
       this.frontendSessionSelections.set(key, requested);
       this.persistFrontendSessionSelections();
     }

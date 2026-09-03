@@ -172,7 +172,7 @@ test("daemon enforces one session selection for every frontend identity", () => 
   );
 });
 
-test("daemon permits only an explicit TUI switch to request another bound session", () => {
+test("daemon permits an explicit session switch for every frontend", () => {
   const pool = new WorkerPool({
     workerPath: process.execPath,
     cwd: process.cwd(),
@@ -181,25 +181,25 @@ test("daemon permits only an explicit TUI switch to request another bound sessio
   const connection: any = {
     socket: { destroyed: false, write() {} },
     clientBuffer: "",
-    frontendIdentity: { kind: "tui", key: "instance-a" },
+    frontendIdentity: { kind: "nerve", key: "main" },
   };
 
   pool.prepareFrontendCommand(connection, {
     type: "select_session",
-    sessionFile: "/tmp/tui-current.jsonl",
+    sessionFile: "/tmp/nerve-current.jsonl",
   });
   assert.doesNotThrow(() =>
     pool.prepareFrontendCommand(connection, {
       type: "switch_session",
-      sessionFile: "/tmp/tui-resumed.jsonl",
+      sessionFile: "/tmp/nerve-resumed.jsonl",
     }),
   );
-  assert.equal(connection.sessionFile, "/tmp/tui-current.jsonl");
+  assert.equal(connection.sessionFile, "/tmp/nerve-current.jsonl");
   assert.throws(
     () =>
       pool.prepareFrontendCommand(connection, {
         type: "select_session",
-        sessionFile: "/tmp/tui-other.jsonl",
+        sessionFile: "/tmp/nerve-other.jsonl",
       }),
     /frontend_session_switch_requires_new/,
   );

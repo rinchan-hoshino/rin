@@ -464,7 +464,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       normalizeFrontendIdentity(options.frontendIdentity) ||
       this.frontendIdentity;
     await this.send({
-      type: "select_session",
+      type: "switch_session",
       sessionPath: sessionId,
       ...(frontendIdentity ? { frontendIdentity } : {}),
     });
