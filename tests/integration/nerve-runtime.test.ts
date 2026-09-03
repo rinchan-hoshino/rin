@@ -13,7 +13,7 @@ const nerve = await importBuiltModule<
 
 const expectedSystemPrompt = `This is a persistent agent session driven by event triggers.
 
-Each user message is the exact payload emitted by a trigger. It reports something that occurred and is not necessarily a request. Decide what it means and whether or when to act. More events may arrive while a turn is active.
+Each user message contains one or more exact payloads emitted by triggers. Multiple payloads are encoded as a JSON array in arrival order. A payload reports something that occurred and is not necessarily a request. Decide what the batch means and whether or when to act. More events may arrive while a turn is active.
 
 A normal assistant response in this session is not delivered externally. Use an appropriate tool to communicate or affect external state.
 
@@ -42,15 +42,21 @@ test("nerve runtime submits every opaque input to one managed brain", async () =
     async submitTurn(input: any) {
       submissions.push(input);
       return {
-        outcome: submissions.length === 1 ? "terminalOwner" : "nonterminal",
+        outcome: "terminalOwner",
         requestTag: input.requestTag,
         sessionFile: "/tmp/nerve-main.jsonl",
       };
     },
+    async replacePendingSteer() {
+      return false;
+    },
+    subscribe() {
+      return () => {};
+    },
     async abort() {},
     async disconnect() {},
     state() {
-      return { sessionFile: "/tmp/nerve-main.jsonl", turnActive: true };
+      return { sessionFile: "/tmp/nerve-main.jsonl", turnActive: false };
     },
   };
   const runtime = nerve.createNerveRuntime({
@@ -94,54 +100,77 @@ test("nerve runtime submits every opaque input to one managed brain", async () =
   }
 });
 
-test("later stimuli steer before the current turn finishes", async () => {
+test("later pending stimuli replace one queued steer with one merged batch", async () => {
   const agentDir = await tempDir();
   const submissions: any[] = [];
-  const completions: Array<() => void> = [];
+  const replacements: any[] = [];
+  const listeners = new Set<(event: any) => void>();
+  let finishFirst: (() => void) | undefined;
+  const first = new Promise<void>((resolve) => {
+    finishFirst = resolve;
+  });
+  const driver: any = {
+    async submitTurn(input: any) {
+      submissions.push(input);
+      if (input.text === "first") return await first;
+      return { outcome: "nonterminal", superseded: true };
+    },
+    async replacePendingSteer(input: any) {
+      replacements.push(input);
+      return true;
+    },
+    subscribe(listener: (event: any) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    async abort() {},
+    async disconnect() {},
+    state() {
+      return { working: true };
+    },
+  };
   const runtime = nerve.createNerveRuntime({
     agentDir,
-    startTriggers: false,
     triggerWorkerPath: process.execPath,
-    driver: {
-      async submitTurn(input: any) {
-        submissions.push(input);
-        return await new Promise((resolve) => {
-          completions.push(() =>
-            resolve({ outcome: "nonterminal", requestTag: input.requestTag }),
-          );
-        });
-      },
-      async abort() {},
-      async disconnect() {},
-      state() {
-        return { turnActive: submissions.length > completions.length };
-      },
-    } as any,
+    driver,
+    startTriggers: false,
   });
 
   try {
     await runtime.start();
     await runtime.emit({ body: "first" });
     await waitFor(() => submissions.length === 1);
-
     await runtime.emit({ body: "second" });
+    await waitFor(() => submissions.length === 2);
     await runtime.emit({ body: "third" });
-    await waitFor(() => submissions.length === 3, 100);
+    await waitFor(() => replacements.length === 1);
 
     assert.deepEqual(
-      submissions.map((input) => input.text),
-      ["first", "second", "third"],
+      submissions.map((item) => item.text),
+      ["first", "second"],
     );
+    assert.deepEqual(replacements[0], {
+      expectedText: "second",
+      text: JSON.stringify(["second", "third"]),
+    });
     assert.deepEqual(runtime.status().queue, {
       queued: 0,
       inflight: 3,
       delivered: 0,
     });
 
-    for (const complete of completions) complete();
+    for (const listener of listeners) {
+      await listener({ type: "worker_exit" });
+    }
+    assert.equal(runtime.status().queue.delivered, 0);
+
+    for (const listener of listeners) {
+      await listener({ type: "turn_complete" });
+    }
+    finishFirst?.();
     await waitFor(() => runtime.status().queue.delivered === 3);
   } finally {
-    for (const complete of completions) complete();
+    finishFirst?.();
     await runtime.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }

@@ -251,6 +251,18 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     await this.request({ type: "abort" });
   }
 
+  async replaceQueuedSteer(
+    expectedText: string,
+    text: string,
+  ): Promise<boolean> {
+    const result = await this.request<{ replaced?: boolean }>({
+      type: "replace_queued_steer",
+      expectedText,
+      text,
+    });
+    return result.replaced === true;
+  }
+
   async abortRetry() {
     await this.request({ type: "abort_retry" });
   }

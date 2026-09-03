@@ -673,6 +673,14 @@ export class RinFrontendTurnDriver {
     return true;
   }
 
+  async replacePendingSteer(input: {
+    expectedText: string;
+    text: string;
+  }): Promise<boolean> {
+    if (!this.client?.isConnected()) return false;
+    return await this.client.replaceQueuedSteer(input.expectedText, input.text);
+  }
+
   async acknowledgeTerminal(requestTag: string, terminalId: string) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     return await this.client.request({

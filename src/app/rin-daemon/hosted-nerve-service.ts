@@ -93,6 +93,9 @@ export function createHostedNerveService(options: {
           ),
           driver: {
             submitTurn: async (input) => await driver.submitTurn(input),
+            replacePendingSteer: async (input) =>
+              await driver.replacePendingSteer(input),
+            subscribe: (listener) => driver.subscribe(listener),
             abort: async () => {
               await driver.abortCurrentTurn();
             },

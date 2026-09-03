@@ -64,15 +64,17 @@ tasks or Cron.
 ## Main brain
 
 All bodies enter the single frontend identity `{ kind: "nerve", key: "main" }`
-and managed session leaf `nerve-main-v2`. The SQLite queue is a crash-recovery
-ledger, not an attention FIFO: Runtime dispatches every queued body without
-waiting for an earlier turn to finish. A running turn receives each later body
-through `steer`; no second main brain is created. A normal assistant final is
-not sent to a chat outbox. The brain must choose and call an external tool when
-it wants to communicate.
+and managed session leaf `nerve-main-v2`. The SQLite queue remains a per-event
+crash-recovery ledger. Runtime coalesces events that are still pending behind an
+active turn into one ordered JSON-array batch by replacing the queued `steer`;
+it never waits for an earlier task to finish before admitting new input. Once a
+batch has been consumed, later events form the next batch. No second main brain
+is created. A normal assistant final is not sent to a chat outbox. The brain
+must choose and call an external tool when it wants to communicate.
 
-The session disables only `self_improve`. Built-in/project skills, memory,
-transcript archival, and `recall` remain available.
+The session retains the normal instance profile, skills, memory, transcript
+archive, and `recall`. Automatic self-improve extraction remains limited to its
+user-facing frontend policy and does not run for the Nerve frontend.
 
 ## CLI and SDK
 

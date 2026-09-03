@@ -293,6 +293,7 @@ export interface RinFrontendClient {
     options?: RinPromptOptions,
   ): Promise<RinInputSubmissionOutcome | void>;
   abort(): Promise<void>;
+  replaceQueuedSteer(expectedText: string, text: string): Promise<boolean>;
   getState(): Promise<RinSessionState>;
   getMessages(): Promise<unknown[]>;
   getCommands(): Promise<RinFrontendCommandItem[]>;

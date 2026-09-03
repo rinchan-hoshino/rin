@@ -284,6 +284,14 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     }
   }
 
+  clearPendingAdmissions(): void {
+    for (const admission of this.pendingAdmissions) {
+      this.cancelAdmission(admission);
+      if (admission.requestTag) this.admittedByTag.delete(admission.requestTag);
+    }
+    this.pendingAdmissions.length = 0;
+  }
+
   clearTrackedAdmissions(): void {
     this.clearAdmissions();
     this.admittedByTag.clear();

@@ -22,6 +22,21 @@ import {
 } from "./worker-helpers.js";
 import { getSessionEntries } from "./rpc-session-command-handler.js";
 
+function queuedMessageText(message: unknown): string | undefined {
+  const content = (message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  const textParts = content.map((part) => {
+    if (!part || typeof part !== "object") return undefined;
+    const value = part as { type?: unknown; text?: unknown };
+    return value.type === "text" && typeof value.text === "string"
+      ? value.text
+      : undefined;
+  });
+  if (textParts.some((part) => part === undefined)) return undefined;
+  return textParts.join("");
+}
+
 export function stableJson(value: any) {
   try {
     return JSON.stringify(value);
@@ -713,6 +728,27 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
         );
         return done(id, type, { resumed: true, requestTag });
       }
+    },
+    async replace_queued_steer({ command, id, type }: RpcCommandRequest) {
+      const expectedText = safeString(command.expectedText);
+      const text = safeString(command.text);
+      if (!expectedText || !text) {
+        return done(id, type, { replaced: false });
+      }
+      const session = getSession();
+      const steering = session.getSteeringMessages();
+      const followUp = session.getFollowUpMessages();
+      if (
+        steering.length !== 1 ||
+        followUp.length !== 0 ||
+        queuedMessageText(steering[0]) !== expectedText
+      ) {
+        return done(id, type, { replaced: false });
+      }
+      turnCoordinator.clearPendingAdmissions();
+      session.clearQueue();
+      await session.steer(text);
+      return done(id, type, { replaced: true });
     },
     async clear_queue({ command, id, type }: RpcCommandRequest) {
       const session = getSession();

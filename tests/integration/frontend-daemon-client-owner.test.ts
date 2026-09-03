@@ -87,6 +87,7 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
     const payloads: Record<string, unknown> = {
       prompt: { finalText: "done" },
       abort: { aborted: true },
+      replace_queued_steer: { replaced: true },
       get_commands: {
         commands: [
           {
@@ -164,6 +165,7 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
       finalText: "done",
     });
     await client.abort();
+    assert.equal(await client.replaceQueuedSteer("old", "merged"), true);
 
     assert.deepEqual(await client.getCommands(), [
       {

@@ -694,6 +694,46 @@ test("RPC turn owner persists receipts and repairs interrupted tool continuation
   assert.equal(aborted, true);
 });
 
+test("RPC replaces exactly one matching queued steer without touching consumed input", async () => {
+  const calls: string[] = [];
+  let queued = [{ content: [{ type: "text", text: "second" }] }];
+  const session = fakeSession({
+    getSteeringMessages: () => queued,
+    getFollowUpMessages: () => [],
+    clearQueue: () => {
+      calls.push("clear");
+      queued = [];
+      return { steering: [], followUp: [] };
+    },
+    steer: async (text: string) => {
+      calls.push(`steer:${text}`);
+      queued = [{ content: [{ type: "text", text }] }];
+    },
+  });
+  const handlers = turnModule.createRpcTurnCommandHandlers(
+    createTurnContext(session),
+  );
+
+  const replaced = await handlers.replace_queued_steer(
+    request("replace_queued_steer", {
+      expectedText: "second",
+      text: '["second","third"]',
+    }),
+  );
+  assert.equal(replaced.data.replaced, true);
+  assert.deepEqual(calls, ["clear", 'steer:["second","third"]']);
+
+  queued = [];
+  const consumed = await handlers.replace_queued_steer(
+    request("replace_queued_steer", {
+      expectedText: '["second","third"]',
+      text: '["second","third","fourth"]',
+    }),
+  );
+  assert.equal(consumed.data.replaced, false);
+  assert.deepEqual(calls, ["clear", 'steer:["second","third"]']);
+});
+
 test("RPC abort clears queued Pi input and acknowledges independently of turn projection", async () => {
   const calls: string[] = [];
   let queuedInput = true;
