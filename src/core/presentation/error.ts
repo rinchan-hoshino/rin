@@ -718,6 +718,28 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin update recovery failed and the background-service maintenance fence could not be released cleanly.",
   rin_update_installed_release_channel_missing: () =>
     "Rin update could not find the installed release channel. Repair the installed release metadata before updating.",
+  rin_independent_job_child_failed: (detail) =>
+    withDetail("Rin's independent lifecycle job failed", detail),
+  rin_independent_job_invalid: (detail) =>
+    withDetail("Rin found an invalid independent lifecycle job", detail),
+  rin_independent_job_kind_invalid: () =>
+    "Rin found a lifecycle job without a valid operation owner.",
+  rin_independent_job_kind_mismatch: (detail) =>
+    withDetail("Rin found a lifecycle job owned by another operation", detail),
+  rin_independent_job_launcher_failed: (detail) =>
+    withDetail("Rin could not start the independent lifecycle job", detail),
+  rin_independent_job_parent_exit_timeout: (detail) =>
+    withDetail(
+      "Rin's lifecycle job could not take ownership from its caller",
+      detail,
+    ),
+  rin_independent_job_platform_unsupported: (detail) =>
+    withDetail(
+      "Rin cannot start an independent lifecycle job on this platform",
+      detail,
+    ),
+  rin_independent_job_uid_unavailable: () =>
+    "Rin could not identify the macOS user for the independent lifecycle job.",
   rin_update_job_authorization_required: () =>
     "Rin's internal update payload requires an authorized update job. Run `rin update` instead.",
   rin_update_job_invalid: () =>

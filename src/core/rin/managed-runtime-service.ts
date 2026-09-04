@@ -169,6 +169,7 @@ export async function runManagedLaunchdServiceAction(
     context.capture(["launchctl", "bootstrap", domain, service.path], {
       stdio: "ignore",
     });
+    context.exec(["launchctl", "kickstart", serviceTarget]);
     return service.label;
   }
   if (action === "stop") {
@@ -185,16 +186,14 @@ export async function runManagedLaunchdServiceAction(
     }
     return service.label;
   }
-  let bootstrapped = false;
   try {
     context.capture(["launchctl", "bootstrap", domain, service.path], {
       stdio: "ignore",
     });
-    bootstrapped = true;
-  } catch {}
-  if (!bootstrapped) {
-    context.exec(["launchctl", "kickstart", serviceTarget]);
+  } catch {
+    // The service may already be bootstrapped.
   }
+  context.exec(["launchctl", "kickstart", serviceTarget]);
   return service.label;
 }
 

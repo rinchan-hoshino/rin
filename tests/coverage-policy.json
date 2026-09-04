@@ -59,6 +59,10 @@
       "ownerSuite": "system"
     },
     {
+      "source": "src/app/rin/restart-job.ts",
+      "ownerSuite": "system"
+    },
+    {
       "source": "src/core/chat-bridge/eval.ts",
       "ownerSuite": "integration"
     },
@@ -827,6 +831,10 @@
       "ownerSuite": "integration"
     },
     {
+      "source": "src/core/rin/independent-job.ts",
+      "ownerSuite": "integration"
+    },
+    {
       "source": "src/core/rin/interactive-list.ts",
       "ownerSuite": "integration"
     },
@@ -857,6 +865,10 @@
     {
       "source": "src/core/rin/report-format.ts",
       "ownerSuite": "unit"
+    },
+    {
+      "source": "src/core/rin/restart-job.ts",
+      "ownerSuite": "integration"
     },
     {
       "source": "src/core/rin/run-lite.ts",

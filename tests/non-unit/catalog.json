@@ -81,6 +81,11 @@
       "tests": ["tests/system/rin-cli-entrypoint-owner.test.ts"]
     },
     {
+      "source": "src/app/rin/restart-job.ts",
+      "suite": "system",
+      "tests": ["tests/system/restart-job-entrypoint-owner.test.ts"]
+    },
+    {
       "source": "src/core/chat-bridge/eval.ts",
       "suite": "integration",
       "tests": ["tests/integration/chat-bridge-eval-owner.test.ts"]
@@ -891,6 +896,11 @@
       "suite": "integration"
     },
     {
+      "source": "src/core/rin/independent-job.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/restart-job.test.ts"]
+    },
+    {
       "source": "src/core/rin/interactive-list.ts",
       "suite": "integration",
       "tests": ["tests/integration/rin-interactive-list-owner.test.ts"]
@@ -924,6 +934,11 @@
       "source": "src/core/rin/pi-command-adapter.ts",
       "suite": "integration",
       "tests": ["tests/integration/rin-cli-pi-superset.test.ts"]
+    },
+    {
+      "source": "src/core/rin/restart-job.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/restart-job.test.ts"]
     },
     {
       "source": "src/core/rin/run.ts",

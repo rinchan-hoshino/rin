@@ -178,7 +178,10 @@ test("managed runtime launchd covers bootstrap, kickstart, bootout, and stop fen
       ),
       service.label,
     );
-    assert.ok(JSON.stringify(first.events).includes("bootstrap"));
+    assert.deepEqual(first.events, [
+      ["capture", ["launchctl", "bootstrap", "gui/501", servicePath]],
+      ["exec", ["launchctl", "kickstart", "gui/501/com.owner.rin"]],
+    ]);
 
     let bootstrapFailed = false;
     const second = actionContext(path.dirname(sandbox.home), {
@@ -213,6 +216,13 @@ test("managed runtime launchd covers bootstrap, kickstart, bootout, and stop fen
         ),
         service.label,
       );
+      if (action === "restart") {
+        assert.deepEqual(stopped.events, [
+          ["capture", ["launchctl", "bootout", "gui/501/com.owner.rin"]],
+          ["capture", ["launchctl", "bootstrap", "gui/501", servicePath]],
+          ["exec", ["launchctl", "kickstart", "gui/501/com.owner.rin"]],
+        ]);
+      }
     }
     for (const action of ["stop", "restart"] as const) {
       const defaultWait = actionContext(path.dirname(sandbox.home));

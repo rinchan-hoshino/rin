@@ -158,8 +158,11 @@ test("macOS update launches a separate LaunchAgent", async () => {
       },
     );
     assert.equal(launched?.launcher, "launchd");
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].command, "/bin/launchctl");
     assert.deepEqual(calls[0].args.slice(0, 2), ["bootstrap", "gui/501"]);
+    assert.equal(calls[1].command, "/bin/launchctl");
+    assert.deepEqual(calls[1].args, ["kickstart", `gui/501/${launched.id}`]);
     const plistPath = calls[0].args[2];
     const plist = await fs.readFile(plistPath, "utf8");
     assert.match(plist, /<string>\/runtime\/node<\/string>/);

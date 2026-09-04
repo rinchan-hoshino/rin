@@ -4,8 +4,10 @@ import { sleep } from "../platform/process.js";
 import { assertNoDaemonUpdateInProgress } from "../rin-daemon/lock.js";
 import { managedNodeExecutablePath } from "../rin-install/paths.js";
 import { tryManagedServiceAction } from "./managed-runtime-service.js";
-export { readManagedRuntimeService } from "./managed-runtime-service.js";
+import { launchIndependentRestartJob } from "./restart-job.js";
 import { createTargetExecutionContext, ParsedArgs } from "./shared.js";
+
+export { readManagedRuntimeService } from "./managed-runtime-service.js";
 
 async function waitForDaemonAvailable(
   context: ReturnType<typeof createTargetExecutionContext>,
@@ -84,6 +86,28 @@ export async function runStop(parsed: ParsedArgs) {
 
 export async function runRestart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
+  const repoRoot = context.repoRoot;
+  const restartJob = await launchIndependentRestartJob({
+    targetUser: context.targetUser,
+    installDir: context.installDir,
+    nodePath: process.execPath,
+    rinEntryPath: path.join(repoRoot, "dist", "app", "rin", "main.js"),
+    executorEntryPath: path.join(
+      repoRoot,
+      "dist",
+      "app",
+      "rin",
+      "restart-job.js",
+    ),
+    restartArgs: ["restart", "--user", context.targetUser],
+    cwd: repoRoot,
+  });
+  if (restartJob.detached) {
+    console.log(
+      `rin restart job accepted: ${restartJob.id} (${restartJob.jobPath})`,
+    );
+    return;
+  }
   await assertLifecycleUpdateFence(context);
   const unit = await tryManagedServiceAction(context, "restart");
   if (!(await waitForDaemonAvailable(context, 30_000))) {

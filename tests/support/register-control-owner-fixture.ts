@@ -3,6 +3,7 @@ import { register } from "node:module";
 
 const controlTarget = "dist/core/rin/control.js";
 const managedTarget = "dist/core/rin/managed-runtime-service.js";
+const restartJobTarget = "dist/core/rin/restart-job.js";
 const replacement = `
   export function readManagedRuntimeService() {
     return { kind: "systemd", label: "rin-daemon.service" };
@@ -14,15 +15,28 @@ const replacement = `
     return "rin-daemon.service";
   }
 `;
+const restartJobReplacement = `
+  export function launchIndependentRestartJob(options) {
+    const handler = globalThis.__rinControlOwnerRestartLaunch;
+    if (typeof handler !== "function") return { detached: false, launcher: "foreground" };
+    return handler(options);
+  }
+`;
 const replacementUrl = `data:text/javascript,${encodeURIComponent(replacement)}`;
+const restartJobReplacementUrl = `data:text/javascript,${encodeURIComponent(restartJobReplacement)}`;
 const hookSource = `
 const controlTarget = ${JSON.stringify(controlTarget)};
 const managedTarget = ${JSON.stringify(managedTarget)};
+const restartJobTarget = ${JSON.stringify(restartJobTarget)};
 const replacementUrl = ${JSON.stringify(replacementUrl)};
+const restartJobReplacementUrl = ${JSON.stringify(restartJobReplacementUrl)};
 export async function resolve(specifier, context, nextResolve) {
   const resolved = await nextResolve(specifier, context);
   if (resolved.url.endsWith(managedTarget)) {
     return { url: replacementUrl, shortCircuit: true };
+  }
+  if (resolved.url.endsWith(restartJobTarget)) {
+    return { url: restartJobReplacementUrl, shortCircuit: true };
   }
   return resolved;
 }

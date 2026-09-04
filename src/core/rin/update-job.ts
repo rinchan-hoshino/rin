@@ -276,6 +276,11 @@ export function launchIndependentUpdateJob(
         stdio: ["ignore", "pipe", "pipe"],
         env,
       });
+      run(launchctlPath, ["kickstart", `${domain}/${id}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+      });
     } catch (error) {
       cleanupLaunchFailure([jobPath, plistPath, logPath]);
       throw error;

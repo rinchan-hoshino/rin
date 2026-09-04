@@ -43,7 +43,7 @@ async function stopSocket() {
   await new Promise((resolve) => current.close(resolve));
 }
 const actions = [];
-globalThis.__rinControlOwnerAction = async (action, context) => {
+const healthyAction = async (action, context) => {
   actions.push({ action, socketPath: context.socketPath, targetUser: context.targetUser });
   if (action === "start") {
     setTimeout(() => void startSocket(), 10);
@@ -53,6 +53,7 @@ globalThis.__rinControlOwnerAction = async (action, context) => {
     await startSocket();
   }
 };
+globalThis.__rinControlOwnerAction = healthyAction;
 const control = await import(pathToFileURL(path.resolve("dist/core/rin/control.js")).href);
 const fenceExec = [];
 await control.__rinOwnerAssertLifecycleUpdateFence({
@@ -92,6 +93,23 @@ try {
   await control.runRestart({ ...parsed, command: "restart" });
   await control.runStop({ ...parsed, command: "stop" });
 
+  globalThis.__rinControlOwnerRestartLaunch = (options) => {
+    assert.equal(options.targetUser, os.userInfo().username);
+    return {
+      detached: true,
+      launcher: "launchd",
+      id: "rin-restart-rin-owner-test",
+      jobPath: "/tmp/restart-job.json",
+      logHint: "/tmp/restart-job.log",
+    };
+  };
+  globalThis.__rinControlOwnerAction = async () => {
+    assert.fail("daemon-owned caller must not restart its own service");
+  };
+  await control.runRestart({ ...parsed, command: "restart" });
+  delete globalThis.__rinControlOwnerRestartLaunch;
+  globalThis.__rinControlOwnerAction = healthyAction;
+
   globalThis.__rinControlOwnerAction = async (action, context) => {
     actions.push({ action: "failed-" + action, socketPath: context.socketPath, targetUser: context.targetUser });
   };
@@ -128,6 +146,7 @@ assert.deepEqual(logs, [
   "rin start complete: rin-daemon.service",
   "rin restart complete: rin-daemon.service",
   "rin stop complete: rin-daemon.service",
+  "rin restart job accepted: rin-restart-rin-owner-test (/tmp/restart-job.json)",
 ]);
 console.log(JSON.stringify({ actions: actions.map((entry) => entry.action), logs }));
 `;
