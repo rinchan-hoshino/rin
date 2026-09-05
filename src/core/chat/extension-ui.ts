@@ -7,6 +7,7 @@ import type {
 export type ChatExtensionUiProjection = {
   text?: string;
   parts?: ChatMessagePart[];
+  silent?: boolean;
   response?: RinExtensionUiResponse;
 };
 
@@ -27,6 +28,7 @@ export function projectChatExtensionUiRequest(
     return {
       ...(text ? { text } : {}),
       ...(parts.length ? { parts } : {}),
+      ...(result?.silent === true ? { silent: true } : {}),
     };
   }
 

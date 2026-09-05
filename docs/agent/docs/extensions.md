@@ -71,7 +71,7 @@ ctx.ui.rinCommandResult?.({
 });
 ```
 
-Use `RinExtensionCommandContext`, `RinExtensionCommandResult`, and `RinExtensionUIContext` from `@hoshinorin/rin/extension` for the canonical types. `text` and `parts` are delivered together by Chat; `fallbackText` is used by terminal frontends that cannot display the rich parts. If `rinCommandResult` is absent, the extension is running under a frontend or plain Pi runtime without Rin rich-result support and should use the native Pi text presentation appropriate for that frontend.
+Use `RinExtensionCommandContext`, `RinExtensionCommandResult`, and `RinExtensionUIContext` from `@hoshinorin/rin/extension` for the canonical types. `text` and `parts` are delivered together by Chat; `fallbackText` is used by terminal frontends that cannot display the rich parts. Set `silent: true` only when the extension fully handled the command and intentionally wants no Chat delivery. Explicit silence with no text or parts completes the command without a reply; an accidentally empty result remains an error, and real text or parts are never discarded by the flag. If `rinCommandResult` is absent, the extension is running under a frontend or plain Pi runtime without Rin rich-result support and should use the native Pi text presentation appropriate for that frontend.
 
 This is a command-result channel, not an out-of-band notification API. Local media paths must exist until Chat has accepted the result; Chat validates and copies/delivers them through its normal outbox boundary.
 

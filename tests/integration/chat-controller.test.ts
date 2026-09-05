@@ -1888,6 +1888,83 @@ test("chat controller preserves the active turn when backend /abort fails", asyn
   assert.equal(workingClears, 0);
 });
 
+test("chat controller accepts explicit silent extension completion without a competing reply", async () => {
+  const controller = await createController();
+  const deliveries = [],
+    processed = [];
+  controller.connect = async () => true;
+  controller.markProcessedMessage = (...args) => processed.push(args);
+  controller.deliverAssistantReply = async (delivery) =>
+    deliveries.push(delivery);
+  controller.driver.runCommand = async () => {
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: { silent: true },
+    });
+    return { handled: true };
+  };
+  const result = await controller.runCommand(
+    "/external",
+    "silent-input",
+    "silent-input",
+  );
+  assert.equal(result.silent, true);
+  assert.deepEqual(deliveries, []);
+  assert.deepEqual(processed, [["silent-input", false]]);
+  assert.equal(controller.commandUiSilent, false);
+
+  // Silence is per command; it cannot mask an accidentally empty next command.
+  controller.driver.runCommand = async () => ({ handled: true });
+  await assert.rejects(
+    controller.runCommand("/empty", "empty-input", "empty-input"),
+    /chat_command_text_missing/,
+  );
+  assert.equal(deliveries.length, 1);
+});
+
+test("silent flag never discards real command text or image parts", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  controller.connect = async () => true;
+  controller.deliverAssistantReply = async (delivery) =>
+    deliveries.push(delivery);
+  controller.driver.runCommand = async (commandLine) => {
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result:
+        commandLine === "/image"
+          ? {
+              silent: true,
+              parts: [
+                {
+                  type: "image",
+                  path: "/tmp/media.png",
+                  mimeType: "image/png",
+                },
+              ],
+            }
+          : { silent: true, text: "Visible result" },
+    });
+    return { handled: true };
+  };
+  await controller.runCommand("/external", "text-input", "text-input");
+  assert.equal(deliveries[0].text, "Visible result");
+  await controller.runCommand("/image", "image-input", "image-input");
+  assert.deepEqual(deliveries[1].parts, [
+    { type: "image", path: "/tmp/media.png", mimeType: "image/png" },
+  ]);
+  await assert.rejects(
+    controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: { silent: true },
+    }),
+    /outside command execution/,
+  );
+});
+
 test("chat controller can deliver image-only extension command parts", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];

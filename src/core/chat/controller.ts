@@ -203,6 +203,7 @@ export class ChatController {
   private collectingCommandUi = false;
   private commandUiMessages: string[] = [];
   private commandUiParts: ChatMessagePart[] = [];
+  private commandUiSilent = false;
   backendAcceptedIncomingMessageId = "";
   private pendingTurnPresentations = new Map<string, PendingTurnPresentation>();
   stagedDelivery: ChatAssistantDelivery | null = null;
@@ -2785,6 +2786,7 @@ export class ChatController {
 
       this.commandUiMessages = [];
       this.commandUiParts = [];
+      this.commandUiSilent = false;
       this.collectingCommandUi = true;
       let data: any;
       if (commandName === "done") {
@@ -2864,6 +2866,10 @@ export class ChatController {
           ? (data.parts.filter(Boolean) as ChatMessagePart[])
           : []),
       ];
+      if (!text && !parts.length && this.commandUiSilent) {
+        this.markProcessedMessage(incomingMessageId, false);
+        return { ...data, silent: true };
+      }
       if (!text && !parts.length) throw new Error("chat_command_text_missing");
       data = { ...data, text, ...(parts.length ? { parts } : {}) };
       await this.deliverAssistantReply({
@@ -2892,6 +2898,7 @@ export class ChatController {
       this.collectingCommandUi = false;
       this.commandUiMessages = [];
       this.commandUiParts = [];
+      this.commandUiSilent = false;
       if (!interruptingActiveTurn || activeTurnInterruptionCommitted) {
         this.awaitingTurnSettle = false;
         await this.clearWorkingReaction().catch(() => {});
@@ -3374,13 +3381,14 @@ export class ChatController {
           .respondExtensionUi(projection.response)
           .catch(() => {});
       }
-      if (projection.text || projection.parts?.length) {
+      if (projection.text || projection.parts?.length || projection.silent) {
         if (this.collectingCommandUi) {
           if (projection.text) this.commandUiMessages.push(projection.text);
           if (projection.parts?.length) {
             this.commandUiParts.push(...projection.parts);
           }
-        } else if (projection.parts?.length) {
+          if (projection.silent) this.commandUiSilent = true;
+        } else if (projection.parts?.length || projection.silent) {
           throw new Error(
             "Extension command result arrived outside command execution",
           );
