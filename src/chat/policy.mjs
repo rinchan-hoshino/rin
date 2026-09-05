@@ -8,7 +8,6 @@ export function validateConfig(config) {
     if (!adapterTypes.includes(a.type)) throw new Error(`Unsupported adapter type: ${a.type}`);
     if (!Array.isArray(a.allowUsers) || a.allowUsers.some(x => typeof x !== 'string')) throw new Error(`allowUsers must be an array of user IDs: ${a.id}`);
     if (a.enabled !== false && a.allowUsers.length === 0) throw new Error(`Enabled adapter requires an explicit allowUsers list: ${a.id}`);
-    if(a.commandChatIds!==undefined && (!Array.isArray(a.commandChatIds) || a.commandChatIds.some(id=>typeof id!=='string')))throw new Error('commandChatIds must be an array of chat IDs');
     ids.add(a.id);
   }
   const routes = new Set();
@@ -28,11 +27,15 @@ export function validateConfig(config) {
   return config;
 }
 
-export function allowed(adapter, message, {command=false} = {}) {
-  if (!adapter.allowUsers.includes(String(message.userId))) return false;
-  if (!['dm','group'].includes(message.kind)) return false;
-  const commandGroup=command && message.kind==='group' && adapter.commandChatIds?.includes(String(message.chatId))===true;
-  if ((adapter.dmOnly ?? adapter.type === 'discord') && message.kind !== 'dm' && !commandGroup) return false;
+// Identity admission is shared by every adapter. dmOnly governs ordinary routing.
+export function admitted(adapter, userId, kind, {command=false} = {}) {
+  if (!Array.isArray(adapter.allowUsers) || !adapter.allowUsers.includes(String(userId))) return false;
+  if (!['dm','group'].includes(kind)) return false;
+  return command || !(adapter.dmOnly ?? adapter.type === 'discord') || kind === 'dm';
+}
+
+export function allowed(adapter, message, options = {}) {
+  if (!admitted(adapter, message.userId, message.kind, options)) return false;
   if (message.kind === 'group' && adapter.requireMention !== false && !message.mentioned) return false;
   return Boolean(message.id && message.chatId && (message.text || message.files?.length));
 }

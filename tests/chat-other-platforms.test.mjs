@@ -54,6 +54,19 @@ test('QQ official accepts the installed SDK 1.0 message callback fixture', async
   await adapter.stop();
 });
 
+test('QQ official admits only recognized group commands through dmOnly', async () => {
+  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
+  const adapter = createQQ({id:'qq-command',appId:'a',appSecret:'s',allowUsers:['owner'],dmOnly:true,requireMention:false,sdk:{QQBot:FakeQQBot}},ctx);
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'owner',groupOpenid:'g',messageId:'1',content:'/ping'});
+  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'stranger',groupOpenid:'g',messageId:'2',content:'/ping'});
+  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'owner',groupOpenid:'g',messageId:'3',content:'/help'});
+  await new Promise(setImmediate);
+  assert.deepEqual(incoming.map(event=>event.id),['1']);
+  await adapter.stop();
+});
+
 class FakeWebSocket extends EventEmitter {
   static OPEN = 1;
   constructor(url, options) { super(); this.url = url; this.options = options; this.readyState = 1; FakeWebSocket.instance = this; }
@@ -91,6 +104,21 @@ test('OneBot HTTP sends to the v11 action endpoint with bearer auth', async () =
   assert.equal(calls[1].url, 'http://api/delete_msg');
   assert.deepEqual(JSON.parse(calls[1].init.body), { message_id: '3' });
   await assert.rejects(() => adapter.typing({ chatId: '42', kind: 'dm' }), /does not define typing/);
+  await adapter.stop();
+});
+
+test('OneBot admits only recognized group commands through dmOnly', async () => {
+  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
+  const adapter=createOneBot({id:'ob-command',wsUrl:'ws://onebot',allowUsers:['42'],dmOnly:true,requireMention:false,WebSocket:FakeWebSocket},ctx);
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  for(const event of [
+    {user_id:42,message_id:1,message:'/ping'},
+    {user_id:7,message_id:2,message:'/ping'},
+    {user_id:42,message_id:3,message:'/help'},
+  ]) FakeWebSocket.instance.emit('message',JSON.stringify({post_type:'message',message_type:'group',group_id:8,...event}));
+  await new Promise(setImmediate);
+  assert.deepEqual(incoming.map(event=>event.id),['1']);
   await adapter.stop();
 });
 
@@ -136,6 +164,24 @@ test('Feishu long connection gates resources and uses official message endpoints
   assert.equal(calls[3][0], 'delete');
   assert.equal(calls[3][1].path.message_id, 'fs-edit');
   await assert.rejects(() => adapter.typing({ chatId: 'c', kind: 'dm' }), /does not support typing/);
+  await adapter.stop();
+});
+
+test('Feishu admits only recognized group commands through dmOnly', async () => {
+  const client={im:{}};
+  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
+  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
+  const adapter=createFeishu({id:'fs-command',appId:'a',appSecret:'s',allowUsers:['owner'],dmOnly:true,botOpenId:'bot',sdk,client},ctx);
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  const receive=FakeDispatcher.instance.map['im.message.receive_v1'];
+  for(const event of [
+    {userId:'owner',id:'1',text:'/ping'},
+    {userId:'stranger',id:'2',text:'/ping'},
+    {userId:'owner',id:'3',text:'/help'},
+  ]) await receive({sender:{sender_id:{open_id:event.userId}},message:{message_id:event.id,chat_id:'g',chat_type:'group',mentions:[{key:'@_user_1',id:{open_id:'bot'}}],content:JSON.stringify({text:`@_user_1 ${event.text}`})}});
+  assert.deepEqual(incoming.map(event=>event.id),['1']);
+  assert.equal(incoming[0].text,'/ping');
   await adapter.stop();
 });
 

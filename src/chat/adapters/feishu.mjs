@@ -3,12 +3,10 @@ import { createReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { admitted } from '../policy.mjs';
+import { COMMANDS, parseCommand } from '../commands.mjs';
 
 const capabilities = Object.freeze({ edit: true, delete: true, typing: false, maxText: 30000 });
-
-function admitted(config, userId, kind) {
-  return Array.isArray(config.allowUsers) && config.allowUsers.includes(String(userId)) && !(config.dmOnly && kind !== 'dm');
-}
 
 function unwrap(response) { return response?.data?.data || response?.data || response; }
 
@@ -46,6 +44,7 @@ export function createAdapter(config, context) {
   if (!config?.appId || !config?.appSecret) throw new Error('Feishu adapter requires appId and appSecret');
   if (!Array.isArray(config.allowUsers) || config.allowUsers.length === 0) throw new Error('Feishu adapter requires a non-empty allowUsers list');
   let client, wsClient, dispatcher;
+  const commands = Array.isArray(context.commands) ? context.commands : COMMANDS;
 
   async function saveResource(messageId, key, type, name, sdk) {
     const result = await client.im.messageResource.get({ path: { message_id: messageId, file_key: key }, params: { type } });
@@ -81,17 +80,24 @@ export function createAdapter(config, context) {
           if (!message || !sender) return;
           const kind = message.chat_type === 'p2p' ? 'dm' : 'group';
           const userId = String(sender.sender_id?.open_id || sender.sender_id?.user_id || '');
-          // Admission deliberately precedes authenticated resource downloads.
-          if (!admitted(config, userId, kind)) return;
-          const mentioned = kind === 'group' && Boolean(config.botOpenId) && Array.isArray(message.mentions)
-            && message.mentions.some((mention) => String(mention.id?.open_id || mention.open_id || '') === String(config.botOpenId));
-          if (kind === 'group' && config.requireMention !== false && !mentioned) return;
           let content = {};
           try { content = JSON.parse(message.content || '{}'); } catch { content = { text: message.content || '' }; }
+          const text = String(content.text || content.title || '').trim();
+          const botMentions = kind === 'group' && Boolean(config.botOpenId) && Array.isArray(message.mentions)
+            ? message.mentions.filter((mention) => String(mention.id?.open_id || mention.open_id || '') === String(config.botOpenId)) : [];
+          const mentioned = botMentions.length > 0;
+          const commandText = botMentions.reduce((value, mention) => {
+            const key = String(mention.key || '');
+            return key ? value.split(key).join('') : value;
+          }, text).trim();
+          const command = Boolean(parseCommand(commandText,commands));
+          // Admission deliberately precedes authenticated resource downloads.
+          if (!admitted({...config,type:'feishu'},userId,kind,{command})) return;
+          if (kind === 'group' && config.requireMention !== false && !mentioned) return;
           const envelope = {
             id: String(message.message_id), chatId: String(message.chat_id), userId, kind,
             mentioned,
-            text: String(content.text || content.title || '').trim(), files: [],
+            text: command ? commandText : text, files: [],
             ...(message.parent_id ? { replyTo: String(message.parent_id) } : {}),
           };
           if (context.isBound && !await context.isBound(envelope)) return;

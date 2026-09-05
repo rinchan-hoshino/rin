@@ -2,16 +2,12 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {telegramHtmlToPlainText} from '../presentation.mjs';
-import {COMMANDS,registerCommands} from '../commands.mjs';
+import {admitted} from '../policy.mjs';
+import {COMMANDS,parseCommand,registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-function allowed(config, userId, kind) {
-  const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
-  return users.length > 0 && users.includes(String(userId)) && (!config.dmOnly || kind === 'dm');
-}
 
 function fileDescriptor(message) {
   if (message.document) return {id: message.document.file_id, name: message.document.file_name, mimeType: message.document.mime_type};
@@ -29,31 +25,29 @@ export function normalizeTelegramUpdate(update, config, bot = {}, commands = COM
   if (!message || message.from?.is_bot) return null;
   const userId = String(message.from?.id || '');
   const kind = message.chat?.type === 'private' ? 'dm' : 'group';
-  if (!userId || !allowed(config, userId, kind)) return null;
   const raw = String(message.text || message.caption || '');
   const entities = message.entities || message.caption_entities || [];
   const username = String(bot.username || '').replace(/^@/, '').toLowerCase();
   let mentioned = kind === 'dm';
   let text = raw;
-  const commandMatch = /^\/([a-z0-9_]+)(?:@([a-z0-9_]+))?(?=\s|$)/i.exec(raw);
-  let recognizedCommand = false;
+  for (const entity of [...entities].sort((a, b) => b.offset - a.offset)) {
+    const token = raw.slice(entity.offset, entity.offset + entity.length);
+    const matches = entity.type === 'mention' && username && token.replace(/^@/, '').toLowerCase() === username;
+    const textMatch = entity.type === 'text_mention' && String(entity.user?.id) === String(bot.id);
+    if (matches || textMatch) { mentioned = true; text = text.slice(0, entity.offset) + text.slice(entity.offset + entity.length); }
+  }
+  text = text.trim();
+  const commandMatch = /^\/([a-z0-9_]+)(?:@([a-z0-9_]+))?(?=\s|$)/i.exec(text);
   if (commandMatch) {
     const target = String(commandMatch[2] || '').toLowerCase();
     if (target && (!username || target !== username)) return null;
     if (commands.some(command => command.name === commandMatch[1].toLowerCase())) {
-      recognizedCommand = true;
-      if (target && target === username) mentioned = true;
-      text = `/${commandMatch[1].toLowerCase()}${raw.slice(commandMatch[0].length)}`;
+      if (target) mentioned = true;
+      text = `/${commandMatch[1].toLowerCase()}${text.slice(commandMatch[0].length)}`;
     }
   }
-  if (!recognizedCommand) {
-    for (const entity of [...entities].sort((a, b) => b.offset - a.offset)) {
-      const token = raw.slice(entity.offset, entity.offset + entity.length);
-      const matches = entity.type === 'mention' && username && token.replace(/^@/, '').toLowerCase() === username;
-      const textMatch = entity.type === 'text_mention' && String(entity.user?.id) === String(bot.id);
-      if (matches || textMatch) { mentioned = true; text = text.slice(0, entity.offset) + text.slice(entity.offset + entity.length); }
-    }
-  }
+  const recognizedCommand = Boolean(parseCommand(text,commands));
+  if (!userId || !admitted({...config,type:'telegram'},userId,kind,{command:recognizedCommand})) return null;
   if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   return {id: String(message.message_id), chatId: String(message.chat.id), userId, kind, mentioned,
     text: text.trim(), replyTo: message.reply_to_message?.message_id ? String(message.reply_to_message.message_id) : undefined,

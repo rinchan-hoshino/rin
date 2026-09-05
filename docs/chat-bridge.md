@@ -49,7 +49,7 @@ QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不�
 
 The authoritative catalog contains `/help`, `/usage`, and locally installed command extensions. The same catalog drives text invocation, execution, help, and platform registration. Existing `bindings` remain message routes and are independent of command discovery.
 
-Command permission is exactly chat admission: any user admitted by `allowUsers`, `dmOnly`, and the group mention rule can call commands. There is no second owner role. `privateOnly` restricts where an extension result may be shown; the built-in `/usage` is available in admitted group chats. For a DM-only Discord adapter, `commandChatIds` can explicitly allow registered commands in selected group channels without changing ordinary-message routing; the same user allowlist and text-mention rule still apply. Recognized Discord controls do not enter the attention/model path.
+Command permission uses the same `allowUsers` identity admission on every adapter, with no extra owner role or channel allowlist. Registered commands bypass `dmOnly`, which only governs ordinary-message routing. Text commands keep the existing group mention rule; native slash interactions address the bot directly. Unknown slash text follows ordinary-message routing. `privateOnly` restricts where an extension result may be shown; built-in `/help` and `/usage` are available in groups. Recognized Discord controls do not enter the attention/model path.
 
 Command IDs are claimed durably before execution, so platform replay cannot invoke a handler twice. Interrupted commands are not automatically replayed. Discord private response handles exist only in memory: after restart or expiry, a reply fails closed instead of posting publicly.
 

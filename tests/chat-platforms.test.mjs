@@ -163,6 +163,21 @@ test('Telegram normalizes commands addressed to this bot and rejects commands fo
   assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},{...config,requireMention:false},{id:'9',username:'rinbot'}).mentioned,false);
 });
 
+test('Telegram admits recognized group commands for allowed users under dmOnly', () => {
+  const config={allowUsers:['1'],dmOnly:true};
+  const base={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot'}},config,{id:'9',username:'rinbot'}).text,'/help');
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'@RinBot /help',entities:[{type:'mention',offset:0,length:7}]}},config,{id:'9',username:'rinbot'}).text,'/help');
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help @RinBot',entities:[{type:'mention',offset:6,length:7}]}},config,{id:'9',username:'rinbot'}).text,'/help');
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot @RinBot',entities:[{type:'mention',offset:13,length:7}]}},config,{id:'9',username:'rinbot'}).text,'/help');
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'@RinBot /help@OtherBot',entities:[{type:'mention',offset:0,length:7}]}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...base,from:{id:2},text:'/help@RinBot'}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'hello',entities:[{type:'text_mention',offset:0,length:0,user:{id:'9'}}]}},config,{id:'9',username:'rinbot'}),null);
+  const extensions=[{name:'ping',description:'Check latency'}];
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/ping@RinBot'}},config,{id:'9',username:'rinbot'},extensions).text,'/ping');
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot'}},config,{id:'9',username:'rinbot'},extensions),null);
+});
+
 test('Telegram clears legacy narrow scopes and authoritatively updates the default command menu', async () => {
   const calls=[]; const deleted=[]; let updates=0;
   const api={raw:{

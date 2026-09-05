@@ -55,7 +55,7 @@ App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，
 
 ### 统一命令与可选安装配置
 
-聊天命令默认仅 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。命令权限等于已有聊天准入，没有额外主人角色；`privateOnly` 只限制结果呈现场景。用量走 Codex 只读额度接口，提供 PNG 和完整文字、新采样历史，不导入旧 token/cost 数据。普通消息 `bindings` 路由保持独立。
+聊天命令默认仅 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。五种适配器共用命令身份准入，没有额外主人角色或频道白名单；`dmOnly` 仅控制普通消息路由，已注册命令仍遵循身份白名单与既有群提及条件；`privateOnly` 只限制结果呈现场景。用量走 Codex 只读额度接口，提供 PNG 和完整文字、新采样历史，不导入旧 token/cost 数据。普通消息 `bindings` 路由保持独立。
 
 平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 

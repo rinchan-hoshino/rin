@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { registerCommands } from '../commands.mjs';
+import { admitted } from '../policy.mjs';
+import { COMMANDS, parseCommand, registerCommands } from '../commands.mjs';
 import { syncQQCommandPanels } from '../qq-commands.mjs';
 
 const capabilities = Object.freeze({ edit: false, delete: false, typing: true, maxText: 2000 });
@@ -20,10 +21,6 @@ function logger(log = {}) {
     warn: (...args) => log.warn?.(...args),
     error: (...args) => log.error?.(...args),
   };
-}
-
-function allowed(config, userId, kind) {
-  return Array.isArray(config.allowUsers) && config.allowUsers.includes(String(userId)) && !(config.dmOnly && kind !== 'dm');
 }
 
 function safeName(value, fallback) {
@@ -77,6 +74,7 @@ export function createAdapter(config, context) {
   let bot;
   let startPromise;
   let handler;
+  const commands = Array.isArray(context.commands) ? context.commands : COMMANDS;
 
   function targetFor(target) {
     return {
@@ -107,8 +105,9 @@ export function createAdapter(config, context) {
         }
         const kind = msg.kind === 'group' ? 'group' : 'dm';
         const userId = String(msg.senderId);
+        const text = String(msg.content || '').trim();
         // Admission deliberately precedes every attachment fetch.
-        if (!allowed(config, userId, kind)) {
+        if (!admitted({...config,type:'qqbot'},userId,kind,{command:Boolean(parseCommand(text,commands))})) {
           context.log?.info?.('QQ message rejected by admission', {
             adapter: config.id, userId, kind,
             chatId: String(msg.kind === 'group' ? msg.groupOpenid : msg.senderId),
@@ -126,7 +125,7 @@ export function createAdapter(config, context) {
           userId,
           kind,
           mentioned: msg.kind === 'group' ? mentioned : false,
-          text: String(msg.content || '').trim(),
+          text,
           files: [],
           ...(msg.refMsgIdx ? { replyTo: String(msg.refMsgIdx) } : {}),
         };

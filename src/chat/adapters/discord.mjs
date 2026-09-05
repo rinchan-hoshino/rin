@@ -1,3 +1,4 @@
+import {admitted} from '../policy.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -21,11 +22,6 @@ function commandText(commands, name, args = '') {
   if (!command) return '';
   const suffix = String(args || '').trim();
   return `/${command.name}${suffix ? ` ${suffix}` : ''}`;
-}
-
-function allowed(config, userId, kind, commandChatId) {
-  const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
-  return users.length > 0 && users.includes(String(userId)) && (!(config.dmOnly ?? true) || kind === 'dm' || config.commandChatIds?.includes(String(commandChatId))===true);
 }
 
 function cleanName(name = '') {
@@ -71,7 +67,7 @@ export function normalizeDiscordMessage(message, config, selfId = '', commands =
   if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   let text = String(message.content || '').trim();
   if (mentioned && kind === 'group') for (const token of mentionTokens) text = text.split(token).join('').trim();
-  if (!userId || !allowed(config,userId,kind,parseCommand(text,commands)?message.channelId:undefined))return null;
+  if (!userId || !admitted({...config,type:'discord'},userId,kind,{command:Boolean(parseCommand(text,commands))}))return null;
   return {id: String(message.id), chatId: String(message.channelId), userId, kind, mentioned, text,
     replyTo: message.reference?.messageId ? String(message.reference.messageId) : undefined};
 }
@@ -129,7 +125,7 @@ export function createAdapter(config, context) {
     const userId = String(interaction.user?.id || '');
     const kind = interaction.guildId ? 'group' : 'dm';
     const text = commandText(commands, interaction.commandName, interaction.options?.getString?.('args'));
-    if (!text || !allowed(config, userId, kind, interaction.channelId) || interaction.user?.bot) return;
+    if (!text || !admitted({...config,type:'discord'},userId,kind,{command:true}) || interaction.user?.bot) return;
     const interactionId = String(interaction.id);
     if (pendingInteractions.has(interactionId) || interactions.has(interactionId)) return;
     pendingInteractions.add(interactionId);

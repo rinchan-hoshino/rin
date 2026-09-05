@@ -1,12 +1,10 @@
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { admitted } from '../policy.mjs';
+import { COMMANDS, parseCommand } from '../commands.mjs';
 
 const capabilities = Object.freeze({ edit: false, delete: true, typing: false, maxText: 4000 });
-
-function admitted(config, userId, kind) {
-  return Array.isArray(config.allowUsers) && config.allowUsers.includes(String(userId)) && !(config.dmOnly && kind !== 'dm');
-}
 
 function segments(message) {
   return Array.isArray(message) ? message : [{ type: 'text', data: { text: String(message || '') } }];
@@ -67,6 +65,7 @@ export function createAdapter(config, context) {
   let stopped = true;
   let reconnectTimer;
   let onMessage;
+  const commands = Array.isArray(context.commands) ? context.commands : COMMANDS;
   const pending = new Map();
 
   function rejectPending(error) {
@@ -86,16 +85,17 @@ export function createAdapter(config, context) {
     if (event.post_type !== 'message') return;
     const kind = event.message_type === 'group' ? 'group' : 'dm';
     const userId = String(event.user_id);
-    // Admission deliberately precedes URL downloads and get_file calls.
-    if (!admitted(config, userId, kind)) return;
     const parts = segments(event.message);
+    const text = parts.filter((part) => part.type === 'text').map((part) => part.data?.text || '').join('').trim();
+    // Admission deliberately precedes URL downloads and get_file calls.
+    if (!admitted({...config,type:'onebot'},userId,kind,{command:Boolean(parseCommand(text,commands))})) return;
     const mentioned = parts.some((part) => part.type === 'at' && String(part.data?.qq) === String(event.self_id));
     if (kind === 'group' && config.requireMention !== false && !mentioned) return;
     const reply = parts.find((part) => part.type === 'reply')?.data?.id;
     const envelope = {
       id: String(event.message_id), chatId: String(kind === 'group' ? event.group_id : event.user_id), userId, kind,
       mentioned,
-      text: parts.filter((part) => part.type === 'text').map((part) => part.data?.text || '').join('').trim(), files: [],
+      text, files: [],
       ...(reply == null ? {} : { replyTo: String(reply) }),
     };
     if (context.isBound && !await context.isBound(envelope)) return;

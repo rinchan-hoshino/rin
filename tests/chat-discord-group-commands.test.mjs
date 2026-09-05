@@ -12,7 +12,7 @@ test('Discord clears guild overrides and executes admitted group usage through t
   const client=new EventEmitter();Object.assign(client,{user:{id:'bot'},login:async()=>{},isReady:()=>true,destroy:async()=>{},
     application:{commands:{set:async(commands,guildId)=>menus.push({commands,guildId})}},
     guilds:{cache:new Map([['cached',{}]]),fetch:async()=>new Map([['current',{}]])}});
-  const config={dataDir,bindings:[],adapters:[{id:'d',type:'discord',token:'test',allowUsers:['allowed'],dmOnly:true,commandChatIds:['channel'],__client:client}]};
+  const config={dataDir,bindings:[],adapters:[{id:'d',type:'discord',token:'test',allowUsers:['allowed'],dmOnly:true,__client:client}]};
   const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{}},adapterFactory:createAdapter,
     log:{info(){},warn(){},error(){}},usage:async()=>{reads++;return{text:'Usage result'};}});
   bridge.attention={observe:()=>{observed++;},flush:async()=>{},stop(){}};
@@ -25,6 +25,16 @@ test('Discord clears guild overrides and executes admitted group usage through t
     client.emit('interactionCreate',interaction);await new Promise(resolve=>setImmediate(resolve));await bridge.flush();
     assert.equal(reads,1);assert.equal(observed,0);assert.equal(edits[0].content,'Usage result');
     client.emit('interactionCreate',{...interaction,id:'denied',user:{id:'stranger'}});await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,1);
-    client.emit('interactionCreate',{...interaction,id:'other-channel',channelId:'other'});await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,1);
+    client.emit('interactionCreate',{...interaction,id:'other-channel',channelId:'other'});await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,2);assert.equal(observed,0);
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
+});
+
+test('Discord group text commands retain addressing and recognize extension registry',()=>{
+  const config={allowUsers:['allowed'],dmOnly:true};
+  const message={id:'text',guildId:'guild',channelId:'any-channel',author:{id:'allowed'},content:'<@bot> /ping',mentions:{users:{has:()=>true}}};
+  const commands=[{name:'ping',description:'Extension'}];
+  assert.equal(normalizeDiscordMessage(message,config,'bot',commands)?.text,'/ping');
+  assert.equal(normalizeDiscordMessage({...message,content:'<@bot> /unknown'},config,'bot',commands),null);
+  assert.equal(normalizeDiscordMessage({...message,mentions:{users:{has:()=>false}}},config,'bot',commands),null);
+  assert.equal(normalizeDiscordMessage({...message,author:{id:'stranger'}},config,'bot',commands),null);
 });
