@@ -153,8 +153,8 @@ test('/bind, /status and /unbind update durable bindings and remain replyable',a
     await bridge.start();
     const base={chatId:'dm',userId:'owner',kind:'dm'};
     await receive({...base,id:'1',text:`/bind ${threadId}`});await bridge.flush();
-    assert.deepEqual(watched,[threadId]);assert.equal(bridge.config.bindings[0].mirror,true);assert.match(sent.at(-1).text,/已绑定/);
-    await receive({...base,id:'2',text:'/status'});await bridge.flush();assert.match(sent.at(-1).text,/已绑定 Codex 会话/);
+    assert.deepEqual(watched,[threadId]);assert.equal(bridge.config.bindings[0].mirror,true);assert.match(sent.at(-1).text,/已连接/);
+    await receive({...base,id:'2',text:'/status'});await bridge.flush();assert.match(sent.at(-1).text,/本聊天已连接/);
     await receive({...base,id:'3',text:'/unbind'});await bridge.flush();assert.match(sent.at(-1).text,/已解除/);
     assert.deepEqual(bridge.config.bindings,[]);assert.deepEqual(bridge.store.cursor('bindings'),[]);
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}

@@ -2,10 +2,12 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {telegramHtmlToPlainText} from '../presentation.mjs';
+import {COMMANDS,registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const telegramCommands = COMMANDS.map(({name, description}) => ({command: name, description}));
 
 function allowed(config, userId, kind) {
   const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
@@ -34,12 +36,26 @@ export function normalizeTelegramUpdate(update, config, bot = {}) {
   const username = String(bot.username || '').replace(/^@/, '').toLowerCase();
   let mentioned = kind === 'dm';
   let text = raw;
-  for (const entity of [...entities].sort((a, b) => b.offset - a.offset)) {
-    const token = raw.slice(entity.offset, entity.offset + entity.length);
-    const matches = entity.type === 'mention' && username && token.replace(/^@/, '').toLowerCase() === username;
-    const textMatch = entity.type === 'text_mention' && String(entity.user?.id) === String(bot.id);
-    if (matches || textMatch) { mentioned = true; text = text.slice(0, entity.offset) + text.slice(entity.offset + entity.length); }
+  const commandMatch = /^\/([a-z0-9_]+)(?:@([a-z0-9_]+))?(?=\s|$)/i.exec(raw);
+  let recognizedCommand = false;
+  if (commandMatch) {
+    const target = String(commandMatch[2] || '').toLowerCase();
+    if (target && (!username || target !== username)) return null;
+    if (COMMANDS.some(command => command.name === commandMatch[1].toLowerCase())) {
+      recognizedCommand = true;
+      if (target && target === username) mentioned = true;
+      text = `/${commandMatch[1].toLowerCase()}${raw.slice(commandMatch[0].length)}`;
+    }
   }
+  if (!recognizedCommand) {
+    for (const entity of [...entities].sort((a, b) => b.offset - a.offset)) {
+      const token = raw.slice(entity.offset, entity.offset + entity.length);
+      const matches = entity.type === 'mention' && username && token.replace(/^@/, '').toLowerCase() === username;
+      const textMatch = entity.type === 'text_mention' && String(entity.user?.id) === String(bot.id);
+      if (matches || textMatch) { mentioned = true; text = text.slice(0, entity.offset) + text.slice(entity.offset + entity.length); }
+    }
+  }
+  if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   return {id: String(message.message_id), chatId: String(message.chat.id), userId, kind, mentioned,
     text: text.trim(), replyTo: message.reply_to_message?.message_id ? String(message.reply_to_message.message_id) : undefined,
     descriptor: fileDescriptor(message)};
@@ -133,6 +149,12 @@ export function createAdapter(config, context) {
       try { await call('deleteWebhook', {drop_pending_updates: false}); } catch {}
       const me = await call('getMe', {});
       bot = {id: String(me.id), username: me.username || ''};
+      await registerCommands(async()=>{
+        const current = await call('getMyCommands', {});
+        if (JSON.stringify(current || []) !== JSON.stringify(telegramCommands)) {
+          await call('setMyCommands', {commands: telegramCommands});
+        }
+      },context.log,'Telegram command registration failed');
       running = true;
       pollPromise = poll();
     },

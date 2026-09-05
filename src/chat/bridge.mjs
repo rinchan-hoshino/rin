@@ -1,15 +1,19 @@
+import { parseCommand, commandOwner, commandHelp } from './commands.mjs';
+import { executeUsage } from './usage.mjs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { AttentionClient } from './attention-client.mjs';
 import { ChatStore, stableId } from './store.mjs';
 import { allowed, splitText, validateConfig } from './policy.mjs';
 import { outputFiles, outputParts } from './files.mjs';
-import { prepareText, editableIntermediateHeadText, composeEditableMessageText, DEFAULT_WORKING_TEXT, normalizeAssistantSummaryText, stripMarkdownFormatting } from './presentation.mjs';
+import { prepareText, editableIntermediateHeadText, composeEditableMessageText, normalizeAssistantSummaryText, stripMarkdownFormatting } from './presentation.mjs';
+import { resolveWorking, workingFrame } from './working.mjs';
 
 export class ChatBridge {
-  constructor(config, { codex, adapterFactory, log = console, store } = {}) {
+  constructor(config, { codex, adapterFactory, log = console, store, usage = executeUsage } = {}) {
     this.config = validateConfig(config);
     this.log = log;
+    this.usage = usage;
     this.store = store || new ChatStore(resolve(config.dataDir, 'chat.sqlite'));
     this.attention = config.attention?.nerveConfig ? new AttentionClient(config.attention.nerveConfig,this.store,{log}) : null;
     if(this.store.cursor('bindings')) this.config.bindings=this.store.cursor('bindings');
@@ -25,6 +29,8 @@ export class ChatBridge {
     this.faultedThreads = new Set();
     this.retryAt = new Map();
     this.lastTypingAt = new Map();
+    this.working = resolveWorking(this.config.display?.working);
+    this.workingTimers = new Map();
     this.running = false;
     this.flushing = false;
     this.submitting = false;
@@ -45,7 +51,8 @@ export class ChatBridge {
         getCursor: key => this.store.cursor(key),
         setCursor: (key,value) => this.store.setCursor(key,value),
         observeDiscord: this.attention ? record => this.attention.observe(record) : undefined,
-        isBound: message => this.attention && config.type==='discord' ? false : /^\/(bind|status|unbind)(?:\s|$)/.test(message.text || '') || this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind),
+        isCommand: message => Boolean(parseCommand(message.text)),
+        isBound: message => Boolean(parseCommand(message.text)) || (!(this.attention && config.type==='discord') && this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind)),
       });
       this.adapters.set(config.id, adapter);
 
@@ -80,33 +87,57 @@ export class ChatBridge {
     }
   }
   async command(config,message) {
-    const match=/^\/(bind|status|unbind)(?:\s+(.*))?$/.exec((message.text || '').trim());
-    if(!match)return false;
-    const adapter=this.adapters.get(config.id);
+    const command=parseCommand(message.text);
+    if(!command)return false;
+    // Claim before awaiting or mutating bindings, so duplicate events cannot act twice.
+    const key=`command:${stableId(config.id,message.chatId,message.id)}`;
+    if(this.store.cursor(key))return true;
+    this.store.setCursor(key,{state:'started'});
     const current=this.config.bindings.find(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId));
-    let text;
-    if(match[1]==='status') text=current?'已绑定 Codex 会话。后续公开回复会同步到这里。':'尚未绑定。使用 /bind <Codex 会话 ID> 绑定已有会话。';
-    else if(match[1]==='unbind') {
-      this.config.bindings=this.config.bindings.filter(b=>b!==current);this.store.setCursor('bindings',this.config.bindings);
-      text='已解除本聊天的会话绑定。';
-    } else {
-      const threadId=match[2]?.trim();
-      if(!/^[0-9a-f-]{36}$/i.test(threadId || '')) text='用法：/bind <Codex 会话 UUID>';
-      else if(this.config.bindings.some(b=>b.threadId===threadId && b!==current)) text='这个会话已绑定其他聊天。请先在那里 /unbind，避免回复发错地方。';
-      else {
-        try {
+    const owner=commandOwner(config,message.userId);
+    let output;
+    try {
+      if(command.name==='help') output={text:commandHelp(message.kind==='dm')};
+      else if(command.name==='status') output={text:current?'本聊天已连接。':'本聊天尚未连接。'};
+      else if(!owner) output={text:config.ownerUsers===undefined && config.allowUsers?.length!==1?'尚未配置主人身份，暂不能使用此命令。':'此命令仅供主人使用。'};
+      else if(command.name==='usage') output=message.kind!=='dm'
+        ? {text:'请在私聊中使用 /usage 查看用量。'}
+        : await this.usage(command.args,{config:this.config.codex || {},dataDir:this.config.dataDir});
+      else if(command.name==='unbind') {
+        if(current)this.stopWorkingRotation(current.threadId);
+        this.config.bindings=this.config.bindings.filter(b=>b!==current);this.store.setCursor('bindings',this.config.bindings);
+        output={text:'已解除本聊天的连接。'};
+      } else {
+        const threadId=command.args;
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId)) output={text:'用法：/bind <已有任务 ID>'};
+        else if(this.config.bindings.some(b=>b.threadId===threadId && b!==current)) output={text:'该任务已连接其他聊天，请先解除原连接。'};
+        else {
           await this.codex.watch(threadId);
           this.faultedThreads.delete(threadId);
           this.config.bindings=this.config.bindings.filter(b=>b!==current);
           this.config.bindings.push({adapter:config.id,chatId:String(message.chatId),kind:message.kind,userId:message.userId,threadId,mirror:true});
           this.store.setCursor('bindings',this.config.bindings);
-          text='已绑定。这个 Codex 会话之后的公开回复会同步到本聊天，已有历史不会回放。';
-        }catch(error){this.log.warn('bind failed',error);text='无法绑定：请确认会话存在，且当前 Codex 版本受 Rin 支持。';}
+          output={text:'已连接。后续公开回复会同步到本聊天，已有历史不会回放。'};
+        }
       }
+    } catch {
+      this.log.warn('command failed',{name:command.name});
+      output={text:command.name==='usage'?'暂时无法读取用量，请稍后重试。':'命令未完成，请检查输入后重试。'};
     }
-    this.store.stage(stableId(config.id,message.chatId,message.id,'command'),JSON.stringify([config.id,String(message.chatId)]),{text,target:{chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id}});
+    const target={chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id,
+      ...(message.commandInteraction?{commandInteraction:{id:message.commandInteraction.id}}:{})};
+    const chunks=['discord','telegram'].includes(config.type)
+      ? prepareText(config.type,output.text || '',this.adapters.get(config.id)?.capabilities.maxText || 1900)
+      : splitText(stripMarkdownFormatting(output.text || ''),1900).map(text=>({text}));
+    // Native interaction replies are one private response; adapters retain the handle in memory.
+    const parts=message.commandInteraction?[{text:output.text,...(output.files?.length?{files:output.files}:{})}]
+      : [...chunks,...(output.files?.length?[{files:output.files}]:[])];
+    for(const [index,part] of parts.entries())this.store.stage(stableId(key,index),JSON.stringify([config.id,String(message.chatId)]),{...part,target});
+    this.store.setCursor(key,{state:'done'});
+    if(message.commandInteraction)await this.flush();
     return true;
   }
+
   async submit() {
     if (this.submitting || !this.running) return;
     this.submitting = true;
@@ -154,7 +185,7 @@ export class ChatBridge {
   }
   event(event) {
     if (!event.threadId) return;
-    if(event.type==='observerError') {this.log.error('Codex observer stopped',event.error || event.text || 'unsupported history');this.active.delete(event.threadId);this.faultedThreads.add(event.threadId);return;}
+    if(event.type==='observerError') {this.log.error('Codex observer stopped',event.error || event.text || 'unsupported history');this.stopWorkingRotation(event.threadId);this.active.delete(event.threadId);this.faultedThreads.add(event.threadId);return;}
     const bindings = this.config.bindings.filter(b=>b.threadId===event.threadId && this.adapters.has(b.adapter) && b.mirror === true);
     if (!bindings.length) return;
     if (event.type === 'image' && event.itemId && event.turnId && typeof event.path === 'string') {
@@ -179,7 +210,10 @@ export class ChatBridge {
       for(const binding of bindings) {
         const key=`turn-reply:${this.routeKey(binding)}:${event.turnId}`;
         if(this.store.cursor(key)===undefined)this.store.setCursor(key,this.store.cursor(`reply:${this.routeKey(binding)}`) || {});
-        if(this.adapters.get(binding.adapter).capabilities.edit)this.stageText(binding,{threadId:event.threadId,turnId:event.turnId,itemId:'progress',phase:'working',text:''},false);
+        if(this.adapters.get(binding.adapter).capabilities.edit) {
+          this.stageText(binding,{threadId:event.threadId,turnId:event.turnId,itemId:'progress',phase:'working',text:workingFrame(this.working)},false);
+          this.startWorkingRotation(binding,event.threadId,event.turnId);
+        }
         else this.stageWorkingMarker(binding,event.turnId,this.store.cursor(key) || {});
       }
     }
@@ -197,6 +231,7 @@ export class ChatBridge {
       const turnKey=JSON.stringify([event.threadId,event.turnId]);
       if(event.phase !== 'final' && this.finalizedTurns.has(turnKey))return;
       if(event.phase === 'final') {
+        this.stopWorkingRotation(event.threadId,event.turnId);
         this.finalizedTurns.add(turnKey);
         this.store.setCursor('finalized-turns',[...this.finalizedTurns]);
       }
@@ -217,6 +252,7 @@ export class ChatBridge {
       for (const binding of bindings) this.stageText(binding,old,event.done === true || event.delta === undefined);
     }
     if (event.type === 'completed' || event.type === 'failed') {
+      this.stopWorkingRotation(event.threadId,event.turnId);
       for (const [key,item] of this.items) {
         if (item.threadId !== event.threadId || (event.turnId && item.turnId !== event.turnId)) continue;
         for (const binding of bindings) this.stageText(binding,item,true);
@@ -235,7 +271,7 @@ export class ChatBridge {
     if(this.finalizedTurns.has(JSON.stringify([binding.threadId,turnId])))return;
     const route=this.routeKey(binding);
     this.store.stage(stableId(route,turnId,context.messageId || 'chat','working-marker'),route,{
-      text:DEFAULT_WORKING_TEXT,
+      text:workingFrame(this.working),
       ...(context.messageId?{replyTo:context.messageId}:{}),
       target:{chatId:binding.chatId,kind:binding.kind,...context},
     });
@@ -273,17 +309,18 @@ export class ChatBridge {
       } else {
         if(this.finalizedTurns.has(JSON.stringify([item.threadId,item.turnId])))return;
         const itemSegment=segments.items[item.itemId];
-        // A replay/completion may revisit an item from before the question.
-        if(itemSegment!==undefined && itemSegment!==segments.current)return;
-        segments.items[item.itemId]=segments.current;
+        // Working frames always belong to the current progress segment. Public
+        // items retain their original segment when history is replayed.
+        if(item.phase!=='working' && itemSegment!==undefined && itemSegment!==segments.current)return;
+        if(item.phase!=='working')segments.items[item.itemId]=segments.current;
         if(!segments.groups.includes(progressGroup))segments.groups.push(progressGroup);
         this.store.setCursor(segmentKey,segments);
         const sections=this.store.cursor(`progress-sections:${progressGroup}`) || {};
-        if(item.phase==='working')sections.summary='';
+        if(item.phase==='working')sections.working=item.text || workingFrame(this.working);
         else sections[item.phase]=item.text;
         this.store.setCursor(`progress-sections:${progressGroup}`,sections);
         item={...item,itemId:'progress',text:composeEditableMessageText({
-          workingTextChunks:[editableIntermediateHeadText(sections.summary || DEFAULT_WORKING_TEXT)],
+          workingTextChunks:[editableIntermediateHeadText(sections.summary || sections.working || workingFrame(this.working))],
           contentTextChunks:sections.commentary ? [sections.commentary] : [],
           todoTextChunks:sections.todo ? [sections.todo] : [],
         })};
@@ -324,6 +361,25 @@ export class ChatBridge {
     if(typeof adapter.delete==='function')this.store.retire(group,liveIds);
     if(done) for(const file of outputFiles(item.text,this.attachmentRoots(item.threadId))) {
       this.store.stage(stableId(this.routeKey(binding),item.turnId,item.itemId,'file',file.path),this.routeKey(binding),{files:[file]});
+    }
+  }
+  startWorkingRotation(binding,threadId,turnId) {
+    const key=JSON.stringify([this.routeKey(binding),turnId]);
+    if(this.workingTimers.has(key) || this.working.frames.length<2)return;
+    let index=0;
+    const timer=setInterval(()=>{
+      if(!this.running || !this.active.has(threadId) || this.finalizedTurns.has(JSON.stringify([threadId,turnId])))return this.stopWorkingRotation(threadId,turnId);
+      index=(index+1)%this.working.frames.length;
+      this.stageText(binding,{threadId,turnId,itemId:'progress',phase:'working',text:workingFrame(this.working,index)},false);
+      this.flush().catch(error=>this.log.error('working status delivery failed',error));
+    },this.working.intervalMs);
+    timer.unref?.();
+    this.workingTimers.set(key,{timer,threadId,turnId});
+  }
+  stopWorkingRotation(threadId,turnId) {
+    for(const [key,state] of this.workingTimers) {
+      if(state.threadId!==threadId || (turnId && state.turnId!==turnId))continue;
+      clearInterval(state.timer);this.workingTimers.delete(key);
     }
   }
   async flush() {
@@ -368,6 +424,8 @@ export class ChatBridge {
   }
   async stop() {
     this.running = false; clearInterval(this.timer); clearInterval(this.typingTimer);
+    for(const {timer} of this.workingTimers.values())clearInterval(timer);
+    this.workingTimers.clear();
     this.attention?.stop();
     await Promise.allSettled([...this.adapters.values()].map(a=>a.stop()));
     await this.codex.stop();

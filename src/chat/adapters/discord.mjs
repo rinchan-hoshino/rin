@@ -1,10 +1,25 @@
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {COMMANDS, parseCommand, registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const READY_TIMEOUT_MS = 30_000;
+
+const discordCommands = COMMANDS.map(command => ({
+  name: command.name,
+  description: command.description,
+  type: 1,
+  ...(command.argument ? {options: [{name: 'args', description: command.argument, type: 3, required: false}]} : {}),
+}));
+
+function commandText(name, args = '') {
+  const command = COMMANDS.find(item => item.name === String(name || '').toLowerCase());
+  if (!command) return '';
+  const suffix = String(args || '').trim();
+  return `/${command.name}${suffix ? ` ${suffix}` : ''}`;
+}
 
 function allowed(config, userId, kind) {
   const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
@@ -62,13 +77,18 @@ export function normalizeDiscordMessage(message, config, selfId = '') {
 export function createAdapter(config, context) {
   let client;
   let handler;
+  const interactions = new Map();
+  const pendingInteractions = new Set();
   const fetchImpl = config.__fetch || globalThis.fetch;
   const capabilities = {edit: true, typing: true, maxText: 2000};
 
   async function receive(message) {
     const incoming = normalizeDiscordMessage(message, config, client?.user?.id);
     const bound = incoming && (!context.isBound || await context.isBound(incoming));
-    if (context.observeDiscord && message?.author?.id && !message.author.bot && String(message.author.id)!==String(client?.user?.id)) {
+    let commandSource=String(message?.content || '').trim();
+    for(const token of client?.user?.id ? [`<@${client.user.id}>`,`<@!${client.user.id}>`] : [])commandSource=commandSource.split(token).join('').trim();
+    const recognizedCommand=Boolean(parseCommand(commandSource));
+    if (!recognizedCommand && context.observeDiscord && message?.author?.id && !message.author.bot && String(message.author.id)!==String(client?.user?.id)) {
       const ancestorIds=[];
       let current=message.channel;
       for(let depth=0;current && depth<4;depth++) {
@@ -88,12 +108,46 @@ export function createAdapter(config, context) {
         attachments:[...(message.attachments?.values?.() || [])].map(a=>({name:a.name,url:a.url,mimeType:a.contentType})),replyTo:message.reference?.messageId ? String(message.reference.messageId):undefined});
     }
     if (!incoming || !bound) return;
+    if (recognizedCommand) { await handler({...incoming, files: []}); return; }
     const attachments = [];
     for (const item of message.attachments?.values?.() || []) {
       const url = item.url || item.proxyURL;
       if (url) attachments.push(await download(url, item.name, item.contentType, context.dataDir, fetchImpl));
     }
     await handler({...incoming, files: attachments});
+  }
+
+  async function receiveInteraction(interaction) {
+    if (!interaction?.isChatInputCommand?.()) return;
+    const userId = String(interaction.user?.id || '');
+    const kind = interaction.guildId ? 'group' : 'dm';
+    const text = commandText(interaction.commandName, interaction.options?.getString?.('args'));
+    if (!text || !allowed(config, userId, kind) || interaction.user?.bot) return;
+    const interactionId = String(interaction.id);
+    if (pendingInteractions.has(interactionId) || interactions.has(interactionId)) return;
+    pendingInteractions.add(interactionId);
+    const incoming = {
+      id: interactionId, chatId: String(interaction.channelId), userId, kind,
+      mentioned: true, text, files: [], commandInteraction: {id: interactionId},
+    };
+    try {
+      if (context.isBound && !await context.isBound(incoming)) return;
+      try { await interaction.deferReply({ephemeral: true}); }
+      catch { throw new Error('discord_command_interaction_ack_failed'); }
+      const timer = setTimeout(() => interactions.delete(interactionId), 15 * 60_000);
+      timer.unref?.();
+      interactions.set(interactionId, {interaction, timer});
+      try { await handler(incoming); }
+      catch (error) { clearTimeout(timer); interactions.delete(interactionId); throw error; }
+    } finally { pendingInteractions.delete(interactionId); }
+  }
+
+  async function syncCommands() {
+    const set = client?.application?.commands?.set;
+    if (typeof set !== 'function') throw new Error('discord_application_command_api_missing');
+    const guildIds = Array.isArray(config.commandGuildIds) ? config.commandGuildIds.map(String).filter(Boolean) : [];
+    if (guildIds.length) for (const guildId of guildIds) await set.call(client.application.commands, discordCommands, guildId);
+    else await set.call(client.application.commands, discordCommands);
   }
 
   async function channel(chatId) {
@@ -129,14 +183,43 @@ export function createAdapter(config, context) {
         });
       }
       client.on('messageCreate', message => receive(message).catch(error => context.log?.error?.('discord inbound failed', error)));
+      client.on('interactionCreate', interaction => receiveInteraction(interaction).catch(() => context.log?.error?.('Discord command handling failed')));
       await client.login(config.token);
       await ready();
+      await registerCommands(syncCommands,context.log,'Discord command registration failed');
     },
-    async stop() { if (client) await client.destroy(); client = undefined; },
+    async stop() {
+      pendingInteractions.clear();
+      for (const value of interactions.values()) clearTimeout(value.timer);
+      interactions.clear();
+      if (client) await client.destroy(); client = undefined;
+    },
     async send(target, output) {
-      const destination = await channel(target.chatId);
       const payload = {content: String(output.text || ''), allowedMentions: {parse: [], repliedUser: false}};
       if (output.files?.length) payload.files = output.files.map(file => ({attachment: file.path, name: file.name}));
+      const interactionId = target.commandInteraction?.id;
+      if (interactionId) {
+        const entry = interactions.get(String(interactionId));
+        if (!entry) throw new Error('discord_command_interaction_unavailable');
+        const {interaction, timer} = entry;
+        const chunks=[]; const content=payload.content;
+        for(let index=0;index<content.length;index+=2000)chunks.push(content.slice(index,index+2000));
+        if(!chunks.length)chunks.push('');
+        let edited;
+        try { edited = await interaction.editReply({...payload,content:chunks[0]}); }
+        catch {
+          if (!payload.files?.length) throw new Error('discord_command_interaction_response_failed');
+          try { edited = await interaction.editReply({content:chunks[0] || '附件发送失败，请在 Codex 中查看。',allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
+          catch { throw new Error('discord_command_interaction_response_failed'); }
+        }
+        for(const contentPart of chunks.slice(1)) {
+          try { await interaction.followUp({content:contentPart,ephemeral:true,allowedMentions:payload.allowedMentions}); }
+          catch { throw new Error('discord_command_interaction_followup_failed'); }
+        }
+        clearTimeout(timer); interactions.delete(String(interactionId));
+        return {id: String(edited?.id || interactionId)};
+      }
+      const destination = await channel(target.chatId);
       if (output.replyTo && !output.editId) payload.reply = {messageReference: String(output.replyTo), failIfNotExists: false};
       if (output.editId) {
         try {

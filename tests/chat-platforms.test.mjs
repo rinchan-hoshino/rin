@@ -26,6 +26,77 @@ test('Discord applies admission before downloading attachments', async () => {
   await adapter.stop();
 });
 
+test('Discord recognized controls never enter attention when group or user admission rejects them', async()=>{
+  const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
+  let observed=0,handled=0;
+  const adapter=discordAdapter({token:'x',allowUsers:['owner'],dmOnly:true,__client:client},{dataDir:'/tmp',log:{},observeDiscord:async()=>{observed++;}});
+  await adapter.start(async()=>{handled++;});
+  client.emit('messageCreate',{id:'1',channelId:'g',guildId:'guild',content:'/usage',author:{id:'owner'},attachments:new Map()});
+  client.emit('messageCreate',{id:'2',channelId:'dm',content:'/usage',author:{id:'stranger'},attachments:new Map()});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(observed,0);assert.equal(handled,0);
+  await adapter.stop();
+});
+
+test('Discord registers the shared commands and routes deferred slash commands through the bridge', async () => {
+  const registered = []; const received = []; const edits = []; const followups=[]; let defers=0;
+  const client = new EventEmitter();
+  client.user = {id: 'bot'}; client.login = async () => {}; client.isReady = () => true; client.destroy = async () => {};
+  client.application = {commands: {set: async (...args) => registered.push(args)}};
+  client.channels = {fetch: async () => assert.fail('interaction response must not fall back to a public channel')};
+  const adapter = discordAdapter({token: 'x', allowUsers: ['allowed'], __client: client}, {
+    dataDir: '/tmp', log: {}, isBound: async () => true, isCommand: message => message.text.startsWith('/'),
+  });
+  await adapter.start(message => received.push(message));
+  const interaction = {
+    id: 'ix', channelId: 'dm', user: {id: 'allowed'}, commandName: 'bind', guildId: null,
+    isChatInputCommand: () => true, options: {getString: name => name === 'args' ? '1234' : null},
+    deferReply: async payload => { defers++; assert.deepEqual(payload, {ephemeral: true}); },
+    editReply: async payload => { edits.push(payload); return {id: 'response'}; },
+    followUp: async payload => followups.push(payload),
+  };
+  client.emit('interactionCreate', interaction);
+  client.emit('interactionCreate', interaction);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(registered.length, 1);
+  assert.deepEqual(registered[0][0].map(command => command.name), ['help','usage','bind','status','unbind']);
+  assert.equal(registered[0][0].find(command => command.name === 'bind').options[0].name, 'args');
+  assert.deepEqual(received[0], {
+    id:'ix', chatId:'dm', userId:'allowed', kind:'dm', mentioned:true, text:'/bind 1234', files:[], commandInteraction:{id:'ix'},
+  });
+  assert.equal(defers,1); assert.equal(received.length,1);
+  assert.deepEqual(await adapter.send({chatId:'dm', commandInteraction:{id:'ix'}}, {text:'x'.repeat(2001)}), {id:'response'});
+  assert.equal(edits[0].content.length, 2000);
+  assert.deepEqual(followups,[{content:'x',ephemeral:true,allowedMentions:{parse:[],repliedUser:false}}]);
+  await assert.rejects(adapter.send({chatId:'dm', commandInteraction:{id:'missing'}}, {text:'no'}), /interaction_unavailable/);
+  await adapter.stop();
+});
+
+test('Discord interaction attachment failure safely edits the same private response without files', async () => {
+  const client=new EventEmitter(); client.user={id:'bot'}; client.login=async()=>{}; client.isReady=()=>true; client.destroy=async()=>{};
+  const edits=[]; client.application={commands:{set:async()=>{}}};
+  const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{dataDir:'/tmp',log:{},isBound:async()=>true});
+  await adapter.start(async()=>{});
+  client.emit('interactionCreate',{
+    id:'file-ix',channelId:'dm',user:{id:'allowed'},commandName:'help',isChatInputCommand:()=>true,options:{getString:()=>null},
+    deferReply:async()=>{},editReply:async payload=>{edits.push(payload);if(payload.files?.length)throw new Error('upload');return{id:'response'};},followUp:async()=>{},
+  });
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(await adapter.send({commandInteraction:{id:'file-ix'}},{text:'caption',files:[{path:'/tmp/a',name:'a'}]}),{id:'response'});
+  assert.equal(edits.length,2); assert.deepEqual(edits[1].files,[]); assert.deepEqual(edits[1].attachments,[]); assert.equal(edits[1].content,'caption');
+  await adapter.stop();
+});
+
+test('Discord command registration failure does not block startup', async () => {
+  const warnings=[]; const client = new EventEmitter();
+  client.user={id:'bot'}; client.login=async()=>{}; client.isReady=()=>true; client.destroy=async()=>{};
+  client.application={commands:{set:async()=>{throw new Error('secret registration detail');}}};
+  const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{dataDir:'/tmp',log:{warn:value=>warnings.push(value)}});
+  await adapter.start(async()=>{});
+  assert.deepEqual(warnings,['Discord command registration failed']);
+  await adapter.stop();
+});
+
 test('Discord applies the core binding gate before downloading attachments', async () => {
   const client = new EventEmitter(); client.user = {id: 'bot'}; client.login = async () => {}; client.isReady = () => true; client.destroy = async () => {};
   let fetched = 0;
@@ -64,6 +135,35 @@ test('Telegram normalization selects the largest photo and gates before file par
   const accepted = normalizeTelegramUpdate({message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}, photo: [{file_id: 'small'}, {file_id: 'large'}]}}, {allowUsers: ['1']});
   assert.equal(accepted.descriptor.id, 'large');
   assert.equal(normalizeTelegramUpdate({edited_message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}}}, {allowUsers: ['1']}), null);
+});
+
+test('Telegram normalizes commands addressed to this bot and rejects commands for another bot', () => {
+  const config={allowUsers:['1'],dmOnly:false};
+  const message={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/bind@RinBot abc'}},config,{id:'9',username:'rinbot'}).text,'/bind abc');
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status@OtherBot'}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status'}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status'}},{...config,requireMention:false},{id:'9',username:'rinbot'}).mentioned,false);
+});
+
+test('Telegram reads and updates the shared command menu without making startup depend on sync', async () => {
+  const calls=[]; let updates=0;
+  const api={raw:{
+    deleteWebhook:async()=>true,getMe:async()=>({id:9,username:'rin'}),
+    getMyCommands:async()=>[],setMyCommands:async payload=>calls.push(payload),
+    getUpdates:async(_payload,signal)=>updates++ ? await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true})) : [],
+  }};
+  const adapter=telegramAdapter({id:'main',token:'x',allowUsers:['1'],__api:api},{dataDir:'/tmp',log:{},getCursor:async()=>0,setCursor:async()=>{}});
+  await adapter.start(async()=>{});
+  assert.deepEqual(calls[0].commands.map(command=>command.command),['help','usage','bind','status','unbind']);
+  await adapter.stop();
+
+  const failing={raw:{...api.raw,getMyCommands:async()=>{throw new Error('secret');}}};
+  const warnings=[];
+  const degraded=telegramAdapter({id:'degraded',token:'x',allowUsers:['1'],__api:failing},{dataDir:'/tmp',log:{warn:value=>warnings.push(value)},getCursor:async()=>0,setCursor:async()=>{}});
+  await degraded.start(async()=>{});
+  assert.deepEqual(warnings,['Telegram command registration failed']);
+  await degraded.stop();
 });
 
 test('Telegram commits its cursor only after durable message acceptance', async () => {

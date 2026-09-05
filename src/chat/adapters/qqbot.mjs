@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { registerCommands } from '../commands.mjs';
+import { syncQQCommandPanels } from '../qq-commands.mjs';
 
 const capabilities = Object.freeze({ edit: false, delete: false, typing: true, maxText: 2000 });
 
@@ -141,6 +143,7 @@ export function createAdapter(config, context) {
       startPromise = Promise.resolve(bot.start()).catch((error) => {
         if (bot) context.log?.error?.('QQ official adapter stopped unexpectedly', error);
       });
+      await registerCommands(()=>syncQQCommandPanels(bot,config),context.log,'QQ command panel registration failed');
     },
     async stop() {
       const current = bot;

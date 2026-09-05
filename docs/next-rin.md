@@ -52,3 +52,11 @@ App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，
 5. 做完整 App 重启、断网、取消、不确定发送和自主回复行为的验收。
 
 不因这次主干迁移自动启用未配置的平台、恢复旧业务定时任务、发布 npm 包或改动正在运行的部署。
+
+### 统一命令与可选安装配置
+
+聊天桥新增统一 `/help`、`/usage`、`/bind`、`/status`、`/unbind`；原生命令与文字命令共用权限和持久去重，控制命令不进入 Discord 注意力唤醒。管理权限可用独立 `ownerUsers` 指定；多人白名单不推断主人。用量仅主人私聊可读，调用本地 Codex 只读额度接口，支持多 bucket、PNG 卡片与完整文字、从启用后开始的采样历史；不导入旧 token/cost 数据库，不兑换或购买。见 [聊天桥](chat-bridge.md)。
+
+Discord/Telegram 对账命令菜单，QQ 官方通过真实面板 API 只维护 Rin 所属面板；接口注册成功不等同用户实际命令端到端验收。working 文案支持独立语言和自定义帧，保留原 summary/commentary 展示。
+
+安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；不修改审批策略或其他未选择配置。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。

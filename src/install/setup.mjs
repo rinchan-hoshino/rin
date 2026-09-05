@@ -3,9 +3,10 @@ import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
 import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { installHome, REPOSITORY, exists, run, withInstallLock, prepareRelease, atomicJSON } from './core.mjs';
+import { installHome, REPOSITORY, exists, run, withInstallLock, prepareRelease, atomicJSON, codexCommand } from './core.mjs';
 import { createService } from './service.mjs';
 import { installProducts, installHistoryTool, historySupport } from './products.mjs';
+import { applyRecommendedCodexProfile } from './profile.mjs';
 
 const quoteSh = value => `'${value.replaceAll("'", "'\\''")}'`;
 export async function ensureCommandPath(binDir, { userHome = homedir(), platform = process.platform, env = process.env, exec = run } = {}) {
@@ -127,8 +128,11 @@ export async function collectChoices(ask, say, { hasAgents = false, legacy = nul
     if (selected.every(x => ['1', '2'].includes(x))) break;
     say('Enter 1, 2, 1,2, or leave blank.');
   }
-  const recommendations = /^y(?:es)?$/i.test((await ask('Use Rin recommended settings when a reviewed profile is available? [y/N] ')).trim());
-  say('No recommendation profile is included in this version. Existing Codex settings will be preserved.');
+  say('The optional Rin profile enables context management and memories; prevents sleep during work and keeps remote control awake while plugged in.');
+  say('It uses an empty Git branch prefix, squash merges, and best-effort worktree refresh, and disables Sites, Hotline, and Safety Settings connectors.');
+  say('It grants Codex full filesystem access. Approval settings are unchanged, so your existing policy may still require approval for actions. Other settings are preserved.');
+  const recommendations = /^y(?:es)?$/i.test((await ask('Apply the Rin recommended Codex profile? [y/N] ')).trim());
+  if(!recommendations)say('Existing Codex settings will be preserved.');
   let agents = '';
   if (!hasAgents || /^y(?:es)?$/i.test((await ask('Global AGENTS.md already exists. Append your new instructions? [y/N] ')).trim())) {
     say('Write your initial global AGENTS instructions. Suggested topics: agent role, working principles, and communication preferences.');
@@ -159,6 +163,11 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
       await installProducts({ products: choices.products, home });
       await mkdir(join(home, 'private/logs'), { recursive: true, mode: 0o700 });
       await mkdir(codexHome, { recursive: true, mode: 0o700 });
+      if(choices.recommendations) {
+        const command=await codexCommand({env:{...process.env,CODEX_HOME:codexHome}});
+        await applyRecommendedCodexProfile({codexHome,command});
+        console.log('Rin recommended Codex profile applied. Existing approval settings were preserved.');
+      }
       if (choices.agents) {
         const previous = await exists(agentsPath) ? await readFile(agentsPath, 'utf8') : '';
         await writeFile(agentsPath, previous ? `${previous.trimEnd()}\n\n${choices.agents}\n` : `${choices.agents}\n`, { mode: 0o600 });
