@@ -1,0 +1,13 @@
+{
+  "dataDir": "chat-data",
+  "codex": {"command": ["codex"], "appSteering": false},
+  "display": {"summaries": true},
+  "adapters": [
+    {"id":"discord","type":"discord","enabled":false,"token":"","allowUsers":[],"dmOnly":true},
+    {"id":"telegram","type":"telegram","enabled":false,"token":"","allowUsers":[],"dmOnly":true},
+    {"id":"qq-official","type":"qqbot","enabled":false,"appId":"","appSecret":"","allowUsers":[],"dmOnly":true},
+    {"id":"qq-onebot","type":"onebot","enabled":false,"wsUrl":"ws://127.0.0.1:3001","httpUrl":"http://127.0.0.1:3000","token":"","allowUsers":[],"dmOnly":true},
+    {"id":"feishu","type":"feishu","enabled":false,"appId":"","appSecret":"","allowUsers":[],"dmOnly":true}
+  ],
+  "bindings": []
+}

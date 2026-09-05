@@ -1,0 +1,16 @@
+# Optional cc-connect platform blocks. Neither is enabled in the local deployment.
+# Add ONE relevant block to the selected project after supplying local credentials.
+
+# [[projects.platforms]]
+# type = "qq"
+# [projects.platforms.options]
+# ws_url = "ws://127.0.0.1:3001"
+# token = "${ONEBOT_TOKEN}"
+# allow_from = "YOUR_QQ_USER_ID"
+
+# [[projects.platforms]]
+# type = "feishu"
+# [projects.platforms.options]
+# app_id = "${FEISHU_APP_ID}"
+# app_secret = "${FEISHU_APP_SECRET}"
+# allow_from = "YOUR_FEISHU_OPEN_ID"

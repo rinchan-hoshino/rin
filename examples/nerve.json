@@ -1,0 +1,18 @@
+{
+  "database": "private/nerve.sqlite",
+  "cwd": ".",
+  "port": 9761,
+  "targets": {
+    "codex": {
+      "type": "codex",
+      "threadId": "00000000-0000-0000-0000-000000000000",
+      "command": [
+        "codex"
+      ],
+      "timeoutMs": 1800000,
+      "idempotent": false,
+      "cwd": "private/nerve-workspace"
+    }
+  },
+  "triggers": []
+}

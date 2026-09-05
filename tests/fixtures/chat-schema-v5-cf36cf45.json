@@ -1,7 +1,0 @@
-{
-  "sourceCommit": "cf36cf45e512f08c47aa4ffe656927c52f0d8d1f",
-  "committerTime": "2026-07-20T14:04:41+08:00",
-  "producer": "src/core/chat/database.ts#openChatDatabase",
-  "schemaVersion": 5,
-  "sha256": "60265fc6145d63506a607876838aa71815656ac70230e8ee8fe0c592138de4ea"
-}

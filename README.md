@@ -1,121 +1,40 @@
-[English](README.md) · [简体中文](readme/README.zh-CN.md) · [日本語](readme/README.ja.md) · [Español](readme/README.es.md) · [Français](readme/README.fr.md) · [More languages](readme/README.md)
-
 # Rin
 
-> **Your personal AI assistant, living on your computer.**<br>
-> Rin remembers what matters, helps with real tasks, and gets better as you use it.
+以 Codex 为执行核心的轻量聊天桥与事件服务。
 
-Rin is a local, general-purpose AI assistant with memory, tools, scheduling, terminal workflows, and chat bridges built in. It can help with documents, web research, files, reminders, code, connected services, and repeated workflows — while sharing one assistant state across terminal, automation, and chat.
+`main` 维护 Codex 版本；旧 Pi 版本及完整历史保留在 [`legacy/pi`](https://github.com/rinchan-hoshino/rin/tree/legacy/pi)。新版不加载旧 Rin、Pi、旧 daemon 或旧扩展运行时。当前是实验性的本机集成，不发布 npm 包，也没有通用安装器。
 
-| What matters             | What Rin provides                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| Global memory            | Useful facts, preferences, and lessons can survive beyond a single chat session.      |
-| Learns from repeated use | Corrections and successful workflows can become compact instructions and skills.      |
-| Local background runtime | Different interfaces connect to one assistant instead of isolated chat windows.       |
-| Ready-to-use product     | Memory, scheduling, tools, terminal workflows, and chat bridges are built in.         |
-| Self-bootstrapped        | Rin is used to build Rin, making this repository a live test of the assistant itself. |
+## 组件
 
-> [!WARNING]
-> Rin is still young. Treat everyday use as experimental: you may meet rough edges, missing documentation, unstable behavior, token/API cost, or occasional breaking changes.
+- **聊天桥**：Discord、Telegram、QQ 官方、独立 OneBot v11、飞书适配器。将准入后的消息投递到已有 Codex 任务，转发公开文字、明确附件与生成图片；按平台能力编辑进度或发送消息快照。
+- **Nerve**：条件、定时、webhook 与 Discord 注意力事件，持久去重。可复用一个常驻 Codex App 任务，也可用独立的 `codex exec resume` 目标；记录真实完成，不自动重放结果不确定的事件。
+- **本地状态**：SQLite 收件箱、发件箱与游标。账号、密钥、身份映射、人格资料及部署记录放在忽略的 `private/` 中。
 
-## Support Rin
+QQ 官方机器人与 OneBot v11 是两种独立协议，必须分别配置、分别验收；OneBot 不绑定特定服务实现。
 
-If Rin saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.com/THE_cattail). Sponsorship is voluntary and supports ongoing maintenance costs; it does not buy feature priority or private support commitments.
+## 运行
 
-## Installation
+需要 Node.js 24、已安装的 Codex，以及目标平台的机器人账号。先复制示例到私有配置目录并填写自己的账号和任务标识；示例中所有适配器默认关闭。
 
-> [!TIP]
-> Most users should start with the stable install command below. Use the install commands directly; the installer sets up the `rin` command. Pre-release and git channels are available in the folded sections.
-
-On Linux x64, stable, beta, and nightly installs use a matching platform bundle when one is available. The bundle includes Rin's managed Node.js and npm runtime, so those installs do not require system Node.js or npm.
-
-Other platforms, git or direct-version installs, and any source fallback require Node.js 22.19.0 or newer plus npm. Check your local version before installing:
-
-```bash
-node -v
-npm -v
+```sh
+npm ci
+npm test
+node src/rin.mjs check /absolute/path/to/private/chat.json
+node src/rin.mjs serve /absolute/path/to/private/chat.json
+node src/nerve.mjs serve /absolute/path/to/private/nerve.json
 ```
 
-If the installer prints `rin installer requires Node.js >= 22.19.0`, upgrade Node.js, open a new terminal, and run the install command again.
+Codex App 路径依赖已核对的内部 IPC 与只读历史投影，目前锁定 0.153.x / paginated 模式。`appSteering` 和 `appWake` 为显式开关；自动唤醒目前仅支持 macOS。默认 CLI queue 的成功回执只代表排队，不保证未加载任务立即执行。版本升级或协议变化需要重新验证。
 
-### Linux and macOS
+## 能力边界
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh
-```
+Discord 的直接桥接和注意力模式、QQ 官方群文字与图片入站已有实际运行证据；其余能力的验证程度不同。独立生成图片结果的转发已经实现，但最近一次 QQ 补发因被动回复窗口过期被拒，最终到群仍需新的有效窗口验收。适配器存在和单测通过都不等于平台端到端可用。
 
-<details>
-<summary>Other release channels</summary>
+- [架构决定与后续工作](docs/next-rin.md)
+- [聊天桥配置、收发与恢复](docs/chat-bridge.md)
+- [旧版能力差距与验证边界](docs/chat-parity-audit.md)
+- [保留的呈现行为与来源](docs/legacy-render-audit.md)
+- [Nerve 配置与 MCP](docs/nerve.md)
+- [实验性 Codex App 接入](docs/codex-app-steering.md)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --beta
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --nightly
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git main
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git deadbeef
-```
-
-</details>
-
-### Windows
-
-Install from PowerShell or Windows Terminal.
-
-If `node -v` is older than 22.19.0 on Windows, install or upgrade Node.js first:
-
-```powershell
-winget upgrade OpenJS.NodeJS.LTS
-# If winget reports that Node.js is not installed:
-winget install OpenJS.NodeJS.LTS
-```
-
-Then open a new PowerShell or Windows Terminal window and install Rin:
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1)))
-```
-
-<details>
-<summary>Other release channels</summary>
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --beta
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --nightly
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git main
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git deadbeef
-```
-
-</details>
-
-After installation, use the same command on every platform:
-
-```bash
-rin
-```
-
-The Windows installer writes the `rin` command launcher and adds Rin's user launcher directory to the user `PATH` when possible. Open a new terminal if the current shell does not see `rin` immediately.
-
-## Safety and cost
-
-Rin can keep context, write memory, run scheduled work, browse the web, and call models repeatedly. This may consume more model tokens, API quota, or subscription capacity than a one-off chat.
-
-Use supervision for important actions. Do not let Rin perform irreversible or sensitive work unless you understand the risk and can review or roll back the result.
-
-## Technical direction
-
-Rin is built on Pi and keeps Pi's KISS-first spirit:
-
-- keep the core small and understandable
-- show the model the real tools and context
-- let the model decide when that is the simplest reliable design
-- avoid model-specific tricks and over-tuned prompts
-- prefer transparent local state over remote platform lock-in
-
-Rin is not trying to be a heavy agent framework. It is trying to be a practical everyday assistant that can remember, act, and improve while staying inspectable.
-
-## Documentation
-
-This README is the public user overview. Translations live in `readme/README.*.md` and should stay aligned with this English version.
-
-If you are changing Rin itself, start with [`docs/developer/README.md`](docs/developer/README.md). Agent-facing runtime guidance and installed docs are kept separately from this public README.
+源码与运行部署分开；提交代码不会自动替换正在运行的服务。GPL-3.0，见 [LICENSE](LICENSE)。
