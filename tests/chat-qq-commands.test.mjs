@@ -51,3 +51,13 @@ test('QQ panel sync refuses ambiguous ownership without modifying panels',async(
   await assert.rejects(syncQQCommandPanels(bot,{appId:'app',appSecret:'secret'}),/ambiguous:c2c/);
   assert.equal(calls.filter(call=>['POST','PUT','DELETE'].includes(call[0])).length,0);
 });
+
+test('QQ readback normalization does not rewrite an unchanged panel',async()=>{
+  const writes=[];const desired=qqCommandPanels();
+  const bot={tokenManager:{getAccessToken:async()=> 'token'},apiClient:{request:async(_token,method,url,body)=>{
+    if(method!=='GET'){writes.push({method,url,body});return {};}
+    const match=desired.find(panel=>url.includes(`scope=${panel.scope}`));
+    return {is_end:true,records:[{...match,panel_id:'owned',panel:{remark:match.panel.remark,items:match.panel.items.map(item=>({name:item.name.replace(/^\//,''),desc:item.desc,type:item.type}))}}]};
+  }}};
+  await syncQQCommandPanels(bot,{appId:'app',appSecret:'secret'});assert.equal(writes.length,0);
+});

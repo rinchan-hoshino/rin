@@ -21,10 +21,14 @@ export function qqCommandPanels() {
   ];
 }
 
+function comparableItems(items) {
+  return (items || []).map(item=>[item.type,String(item.name || '').replace(/^\//,''),item.desc || '',Boolean(item.only_admin)]);
+}
+
 function samePanel(record, desired) {
   return record?.target_type === desired.target_type &&
     record?.panel?.remark === desired.panel.remark &&
-    JSON.stringify(record.panel.items || []) === JSON.stringify(desired.panel.items);
+    JSON.stringify(comparableItems(record.panel.items)) === JSON.stringify(comparableItems(desired.panel.items));
 }
 
 export async function syncQQCommandPanels(bot, config) {
