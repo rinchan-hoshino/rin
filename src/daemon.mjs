@@ -127,12 +127,15 @@ export async function startDaemon(configFile, options = {}) {
       dependencies.validateNerveConfig(nerveConfig);
       nerveConfig.database = nerveConfig.database === ':memory:' ? ':memory:' : resolveConfiguredPath(nerveConfig.database, nerveDir, 'database');
       if (nerveConfig.cwd !== undefined) nerveConfig.cwd = resolveConfiguredPath(nerveConfig.cwd, nerveDir, 'cwd');
+      if (nerveConfig.minecraft) nerveConfig.minecraft.stateFile = resolveConfiguredPath(nerveConfig.minecraft.stateFile, nerveDir, 'Minecraft stateFile');
       for (const target of Object.values(nerveConfig.targets)) {
         if (target.cwd !== undefined) target.cwd = resolveConfiguredPath(target.cwd, nerveDir, 'target cwd');
       }
       nerveStore = new dependencies.Store(nerveConfig.database);
-      nerve = new dependencies.Nerve(nerveConfig, nerveStore);
-      const token = options.nerveToken ?? env.NERVE_TOKEN ?? readJson(resolve(nerveDir, 'secrets.json')).NERVE_TOKEN;
+      let secrets;
+      const secret = name => env[name] ?? (secrets ??= readJson(resolve(nerveDir, 'secrets.json')))[name];
+      nerve = new dependencies.Nerve(nerveConfig, nerveStore, {minecraftSecret:nerveConfig.minecraft ? secret(nerveConfig.minecraft.tokenEnv) : undefined});
+      const token = options.nerveToken ?? secret('NERVE_TOKEN');
       nerveServer = dependencies.makeServer(nerve, token);
       nerveServer.requestTimeout = 15000;
       await new Promise((resolveListen, reject) => {
@@ -142,6 +145,7 @@ export async function startDaemon(configFile, options = {}) {
         nerveServer.once('listening', onListen);
         nerveServer.listen({ port: nerveConfig.port ?? 9761, host: '127.0.0.1', exclusive: true });
       });
+      await nerve.open?.();
       const recovered = nerveStore.recover();
       nerveTimer = setInterval(tickNerve, intervalMs);
       await tickNerve();

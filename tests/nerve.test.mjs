@@ -5,6 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, Nerve, scheduleSlot, runCommand, makeServer, validateConfig } from '../src/nerve.mjs';
 
+test('a slow or unavailable Minecraft server does not block other events',async()=>{
+ const store=new Store(':memory:');
+ const nerve=new Nerve({targets:{out:{type:'command',argv:['true']}},triggers:[]},store);
+ let rejectSync, attempts=0, scans=0;
+ nerve.minecraft={syncOnce:()=>{attempts++;return new Promise((_,reject)=>{rejectSync=reject;});},close:async()=>{}};
+ nerve.attention={scan:()=>{scans++;}};
+ await nerve.poll();await nerve.poll();
+ assert.equal(scans,2);assert.equal(attempts,1);
+ const pending=nerve.minecraftSync;rejectSync(new Error('connection refused'));
+ await pending;
+ assert.equal(nerve.minecraftSync,undefined);
+ await nerve.close();store.close();
+});
+
 test('durable dedupe, content collision and ambiguous crash recovery',()=>{
  const dir=mkdtempSync(join(tmpdir(),'nerve-')); const file=join(dir,'events.db');
  let db=new Store(file);

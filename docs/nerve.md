@@ -29,11 +29,41 @@ Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP �
 
 Git 安装生成稳定入口 `<RIN_HOME>/nerve-mcp-run.mjs`。MCP 配置以 Node 运行此入口，并保留 `NERVE_CONFIG` 指向实际配置；不要将 MCP 绑定到某个 `releases/<sha>` 目录。每次新建 MCP 连接时，入口读取 `install.json.current` 并加载该发布的客户端。`rin update` 后，已有连接继续使用原客户端；重连后使用新版，不需要重启聊天守护进程。
 
-`nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`，默认9761。MCP提供10个工具：
+`nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`，默认9761。MCP提供14个工具：
 
 - 状态、列出/保存/停用触发器；列出/读取/提交/重试事件。
 - `nerve_read_chat`：按chatKey读取规范记录，可分页，最多200条。
 - `nerve_send_chat`：向已记录且未排除的Discord目的地发送，稳定ID去重；正文最多2000字符，引用必须属于同频道。使用现有账号的REST，不开第二条Gateway；不确定发送保留账本，不自动重试。
+
+## Minecraft transport（显式配置，默认关闭）
+
+Minecraft 是同一常驻 persona 的一个本地输入源，不会创建第二个 Codex 任务。启用时，Nerve 以独立 Node transport 轮询游戏模组的 loopback HTTP 服务；游戏消息先在 `stateFile` 中原子持久化，再使用稳定事件 ID `minecraft:<serverId>:<messageId>` 交给已经配置的唯一 `codex` 或 `codex-app` target。ACK 只表示 Nerve 已可靠接手，绝不表示模型或游戏动作完成。进程在发送前崩溃的出站项保留 `uncertain`，不自动重放。
+
+`private/nerve.json` 必须显式加入以下配置；没有这一节即不会开启 Minecraft。`source` 是硬锁：`playerUuid` 必须来自目标服务器实际 `ServerPlayer` UUID 的管理员配置，不能以“任意进服玩家”或聊天文字识别主人。`MC_BRIDGE_TOKEN` 与 `NERVE_TOKEN` 是两个不同的随机密钥，前者至少32字符，只用于游戏 loopback 接口，不能放进公开配置。
+
+```json
+{
+  "minecraft": {
+    "endpoint": "http://localhost:17831/",
+    "stateFile": "state/minecraft-transport.json",
+    "tokenEnv": "MC_BRIDGE_TOKEN",
+    "target": "main",
+    "source": {
+      "serverId": "my-survival-server",
+      "playerUuid": "replace-with-authoritative-serverplayer-uuid",
+      "maidUuid": "replace-with-authoritative-maid-uuid"
+    }
+  }
+}
+```
+
+将 `MC_BRIDGE_TOKEN` 放在同一 private 目录的 `secrets.json`，例如 `{ "NERVE_TOKEN": "…", "MC_BRIDGE_TOKEN": "至少32字符的不同随机值" }`。接口仅接受 `http://localhost`、`127.0.0.1` 或 `[::1]` origin，拒绝重定向、凭据、路径和非 loopback 地址；如游戏服不在本机，只能先建立由操作者维护的安全隧道，并把本地隧道端口作为 endpoint。
+
+安装版会按 nerve.json 所在目录解析相对 stateFile；游戏轮询独立执行，离线或超时不会阻塞 Discord 注意力与定时检查。
+
+状态锁不会自动删除。启动提示锁已存在时，先运行 `node src/nerve.mjs minecraft-lock private/nerve.json` 并确认记录的 PID 已退出且锁已足够旧，再运行 `node src/nerve.mjs minecraft-recover-lock private/nerve.json`；恢复命令会在删除前再次核对锁内容。
+
+MCP 中 `nerve_read_minecraft` 读取规范消息；`nerve_inspect_minecraft` 获取绑定玩家/女仆的实时位置、背包、附近已加载容器/方块和作业；`nerve_send_minecraft` 才会明确发送游戏内聊天或动作。调用方无法提交 player/maid UUID，Node 从所读消息绑定身份。动作可为单个任务或 `script`，脚本是受限大小的 JSON `{version:1,steps:[…]}`，由游戏端做最终语义、权限和预算校验；支持组合移动、交互、容器、等待、说话、变量、条件和跳转步骤。普通 final、思考、工具输出都不会自动转发到游戏。
 
 定时触发器仍支持 `everySeconds`、`at`、带时区的 `daily`，三选一。可选 `check` 是可信只读命令，输出 `{ready,key,payload}`，仅ready触发。不恢复未配置的旧业务定时任务。
 
