@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {access,mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {access,mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {historySupport,installHistoryTool,installProducts,productSources} from '../src/install/products.mjs';
@@ -95,6 +95,15 @@ test('FFF preserves a different existing MCP entry without overwriting it',async
   await (await import('node:fs/promises')).mkdir(join(home,'tools'),{recursive:true});await writeFile(binary,'already installed');
   const result=await installHistoryTool({codexCommand:'codex',home,codexHome,platform:'darwin',arch:'arm64',exists:async path=>path===binary,verify:async()=>{},run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:JSON.stringify({command:'/different/fff-mcp',args:[]})};}});
   assert.equal(result.status,'conflict');assert.deepEqual(calls.map(x=>x.args.slice(0,3)),[['mcp','get','session-history']]);
+});
+
+test('FFF still installs its verified binary when an existing MCP entry is preserved',async t=>{
+  const home=await temp(t),calls=[],downloads=[];
+  const result=await installHistoryTool({codexCommand:'codex',home,codexHome:join(home,'.codex'),platform:'linux',arch:'x64',libc:'gnu',download:async(url,path)=>{downloads.push(url);await writeFile(path,'verified FFF');},verify:async()=>{},run:async(command,args)=>{calls.push(args);return {code:0,stdout:JSON.stringify({command:'/existing/search',args:[]})};}});
+  assert.equal(result.status,'conflict');
+  assert.equal(await readFile(result.binary,'utf8'),'verified FFF');
+  assert.equal(downloads.length,1);
+  assert.deepEqual(calls,[['mcp','get','session-history','--json']]);
 });
 
 test('FFF does not mistake an inspection error for an absent MCP server',async t=>{

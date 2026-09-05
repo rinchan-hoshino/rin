@@ -7,6 +7,7 @@ import {homedir,tmpdir} from 'node:os';
 import {basename,join,resolve} from 'node:path';
 
 const installer=resolve('install.sh');
+const windowsInstaller=resolve('install.ps1');
 const missing=path=>access(path).then(()=>false,()=>true);
 
 async function executable(path,body) { await writeFile(path,`#!/bin/sh\nset -eu\n${body}\n`);await chmod(path,0o755); }
@@ -15,7 +16,7 @@ const runtimeTest=t=>process.platform==='win32'&&t.skip('POSIX bootstrap test');
 
 function command(command,args) { return new Promise((resolveCommand,reject)=>{const child=spawn(command,args,{stdio:'ignore'});child.once('error',reject);child.once('close',code=>code===0?resolveCommand():reject(Error(`${command} failed: ${code}`)));}); }
 
-async function fixture(t,{nodeOk=false,legacyNode=false,gitOk=true,validNode=false}={}) {
+async function fixture(t,{nodeOk=false,legacyNode=false,gitOk=true,validNode=false,system=process.platform==='darwin'?'Darwin':'Linux'}={}) {
   const root=await mkdtemp(join(tmpdir(),'rin-bootstrap-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const bin=join(root,'bin'),home=join(root,'install'),log=join(root,'calls.log'),input=join(root,'terminal-input'),testInstaller=join(root,'install.sh');await mkdir(bin);await mkdir(join(root,'src','install'),{recursive:true});await writeFile(join(root,'src','install','bootstrap.mjs'),'// fixture');
   // Preserve installer control flow while replacing only its controlling-terminal
@@ -37,7 +38,8 @@ if [ "$TEST_VALID_NODE" = yes ]; then case "$url" in */SHASUMS256.txt) printf '%
 else case "$url" in */SHASUMS256.txt) printf '%064d  %s\\n' 0 "$TEST_ARCHIVE" >"$out";; *) printf 'unverified archive' >"$out";; esac; fi`);
   for(const manager of ['brew','apt-get','dnf','pacman'])await executable(join(bin,manager),`printf '${manager}:%s\\n' "$*" >>"$TEST_LOG"; : >"$TEST_GIT_INSTALLED"`);
   await executable(join(bin,'id'),`[ "\${1:-}" = -u ] && { echo 0; exit 0; }; /usr/bin/id "$@"`);
-  const arch=process.arch==='arm64'?'arm64':'x64';const platform=process.platform==='darwin'?'darwin':'linux';
+  await executable(join(bin,'uname'),`case "\${1:-}" in -s) printf '%s\\n' '${system}' ;; -m) printf '%s\\n' '${process.arch==='arm64'?'arm64':'x86_64'}' ;; *) /usr/bin/uname "$@" ;; esac`);
+  const arch=process.arch==='arm64'?'arm64':'x64';const platform=system==='Darwin'?'darwin':'linux';
   const archiveName=`node-v24.18.0-${platform}-${arch}.tar.gz`,archive=join(root,archiveName),tree=join(root,`node-v24.18.0-${platform}-${arch}`);await mkdir(join(tree,'bin'),{recursive:true});
   await executable(join(tree,'bin','node'),`case "\${1:-}" in -p) printf '%s\\n' "$0";; -e) exit 0;; *) printf 'setup-managed:%s:%s\\n' "$0" "$*" >>"$TEST_LOG";; esac`);
   await command('/usr/bin/tar',['-czf',archive,'-C',root,basename(tree)]);const sha=createHash('sha256').update(await readFile(archive)).digest('hex');
@@ -89,7 +91,22 @@ test('empty machine installs stub Git, verifies and promotes managed Node, then 
   assert.deepEqual(await readdir(join(f.home,'runtime')),['node-v24.18.0']);
 });
 
+test('Linux bootstrap selects apt and installs a verified Linux managed Node when uname reports Linux',async t=>{
+  if(runtimeTest(t))return;
+  const f=await fixture(t,{gitOk:false,validNode:true,system:'Linux'});const result=await ptyRun(f.env,'y\n');assert.equal(result.code,0,result.stdout+result.stderr);
+  const calls=await readFile(f.log,'utf8');assert.match(calls,/apt-get:update/);assert.match(calls,/apt-get:install -y git curl ca-certificates tar gzip xz-utils/);assert.match(calls,/node-v24\.18\.0-linux-/);
+  const managed=join(f.home,'runtime','node-v24.18.0','bin','node');assert.equal(await missing(managed),false);
+});
+
 test('bootstrap source retains pinned Node and verification gates',async()=>{
   const source=await readFile(installer,'utf8');
   assert.match(source,/RIN_NODE_VERSION=24\.18\.0/);assert.match(source,/SHASUMS256\.txt/);assert.match(source,/\[ "\$actual" = "\$checksum" \]/);assert.match(source,/read -r answer <\/dev\/tty/);
+});
+
+test('Windows bootstrap retains its local-entry, legacy-runtime exclusion, and verified managed Node gates',async()=>{
+  const source=await readFile(windowsInstaller,'utf8');
+  assert.match(source,/\$rinNodeVersion = '24\.18\.0'/);
+  assert.match(source,/\$nodePath\.StartsWith\(\(Join-Path \$env:USERPROFILE '\.rin'\) \+ '\\', \[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(source,/Get-FileHash -LiteralPath \$archivePath -Algorithm SHA256/);assert.match(source,/if \(\$actual -ne \$expected\) \{ throw 'Node\.js archive checksum verification failed\.' \}/);
+  assert.match(source,/if \(\$PSScriptRoot -and \(Test-Path \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)\)\) \{\s*& node \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)/s);
 });

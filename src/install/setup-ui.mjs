@@ -65,7 +65,6 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
   if (!hasAgents || await confirmChoice('Global AGENTS.md already exists. Append personal instructions?',false,ui)) agents = await promptInstructions(ui);
   note(ui,RIN_SUBAGENT_INSTRUCTIONS,'Optional subagent guidance');
   const subagentGuidance = await confirmChoice('Append Rin subagent guidance after your instructions?',false,ui);
-  const history = await confirmChoice('Install original-session text search (FFF MCP)?',false,ui);
   note(ui,[
     home ? `Install location: ${home}` : 'Install for the current user.',
     `Products: ${products.length ? products.join(', ') : 'use existing products'}`,
@@ -73,10 +72,10 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
     `Personal instructions: ${agents ? 'append supplied text' : 'preserve current text'}`,
     `Subagent guidance: ${subagentGuidance ? 'append if not already present' : 'skip'}`,
     agentsPath ? `Instructions file: ${agentsPath}` : '',
-    `Original-session search: ${history ? 'install' : 'skip'}`,
+    'Original-session search: included (FFF MCP)',
   ].filter(Boolean).join('\n'),'Installation plan');
   if (!await confirmChoice('Install Rin with these choices?',true,ui)) { ui.outro('Finished without installing Rin.'); return null; }
-  return {products,recommendations,agents,subagentGuidance,history};
+  return {products,recommendations,agents,subagentGuidance};
 }
 
 export async function runSetupProgress(message, action, {ui = clack, tty = process.stderr.isTTY} = {}) {

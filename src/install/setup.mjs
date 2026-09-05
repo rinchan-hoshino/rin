@@ -1,6 +1,6 @@
-import { readFile, writeFile, mkdir, rename, realpath, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installHome, REPOSITORY, exists, run, withInstallLock, prepareRelease, atomicJSON, codexCommand } from './core.mjs';
 import { createService } from './service.mjs';
@@ -8,6 +8,8 @@ import { installProducts, installHistoryTool, historySupport } from './products.
 import { applyRecommendedCodexProfile } from './profile.mjs';
 import {appendAgentsInstructions} from './instructions.mjs';
 import {collectChoices,confirmChoice,runSetupProgress,setupUI} from './setup-ui.mjs';
+import { inspectLegacy, disableLegacy } from './legacy.mjs';
+export { inspectLegacy, disableLegacy } from './legacy.mjs';
 export {collectChoices} from './setup-ui.mjs';
 export {appendAgentsInstructions,RIN_SUBAGENT_INSTRUCTIONS} from './instructions.mjs';
 
@@ -30,58 +32,6 @@ export async function ensureCommandPath(binDir, { userHome = homedir(), platform
     }
   }
 }
-export async function inspectLegacy({ userHome = homedir(), env = process.env } = {}) {
-  const root = join(userHome, '.rin');
-  let record;
-  try { record = JSON.parse(await readFile(join(root, 'installer.json'), 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw new Error('Cannot inspect the old Rin installation record'); }
-  if (!record && !await exists(join(root, 'app/current'))) return null;
-  const cli = [];
-  const names = process.platform === 'win32' ? ['rin.cmd', 'rin.ps1', 'rin'] : ['rin'];
-  for (const directory of new Set([join(userHome, '.local/bin'), ...(env.PATH || '').split(process.platform === 'win32' ? ';' : ':')].filter(Boolean))) {
-    for (const name of names) {
-      const file = join(directory, name);
-      try {
-        const target = await realpath(file), text = (await readFile(file, 'utf8')).slice(0, 16384);
-        const below = relative(root, target);
-        const legacyText = text.replaceAll('\\', '/').toLowerCase(), rootText = root.replaceAll('\\', '/').toLowerCase();
-        if ((below && !below.startsWith('..') && !isAbsolute(below) || legacyText.includes(rootText) || legacyText.includes('.rin/app/current')) && /rin|dist\/index/i.test(text)) cli.push(file);
-      } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'EISDIR') throw e; }
-    }
-  }
-  return { root, service: record?.service, cli: [...new Set(cli)] };
-}
-export async function disableLegacy(legacy, { exec = run, platform = process.platform, uid = process.getuid?.() } = {}) {
-  if (!legacy) return;
-  for (const file of legacy.cli) if (await exists(`${file}.pi-disabled`)) throw new Error(`A disabled legacy launcher already exists: ${file}.pi-disabled`);
-  const service = legacy.service;
-  if (service?.kind === 'launchd') {
-    if (!/^com\.rin\.daemon\.[a-zA-Z0-9_-]+$/.test(service.label)) throw new Error('Unrecognized legacy service label; inspect it before migration');
-    const target = `gui/${uid}/${service.label}`;
-    await exec('launchctl', ['disable', target]);
-    const status = await exec('launchctl', ['print', target], { capture: true, allowFailure: true });
-    if (status.code === 0) await exec('launchctl', ['bootout', target]);
-  } else if (service?.kind === 'systemd') {
-    const unit = service.label || service.unit || service.name;
-    if (!/^rin-daemon-[a-zA-Z0-9_-]+\.service$/.test(unit || '')) throw new Error('Unrecognized legacy systemd unit; inspect it before migration');
-    await exec('systemctl', ['--user', 'disable', '--now', unit]);
-  } else if (service?.kind === 'windows-startup' && platform === 'win32') {
-    const node = join(legacy.root, 'runtime/node/current/node.exe');
-    const entry = join(legacy.root, 'app/current/dist/app/rin/main.js');
-    if (!await exists(node) || !await exists(entry)) throw new Error('The legacy Windows CLI is missing; stop its daemon before continuing');
-    await exec(node, [entry, 'stop']);
-    const startup = service.path || service.servicePath;
-    if (!startup || !/[\\/]Rin Daemon\.cmd$/.test(startup)) throw new Error('Unrecognized legacy startup launcher');
-    if (await exists(startup)) await rename(startup, `${startup}.pi-disabled`);
-  } else if (service || !legacy.service) {
-    throw new Error('The legacy service record is missing or unsupported. Inspect its shutdown and autostart before retrying.');
-  }
-  for (const file of legacy.cli) {
-    const disabled = `${file}.pi-disabled`;
-    if (await exists(disabled)) throw new Error(`A disabled legacy launcher already exists: ${disabled}`);
-    await rename(file, disabled);
-  }
-}
-
 export async function writeLaunchers(home, { binDir, node = process.execPath, platform = process.platform, publish = true } = {}) {
   await mkdir(binDir, { recursive: true });
   // Stable entrypoints read the same atomic record. Updating never rewrites live source.
@@ -121,11 +71,11 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Rin requires Node.js 24 or newer');
   if (!process.stdin.isTTY) throw new Error('Run the installer in an interactive terminal');
   if (await exists(join(home, 'install.json'))) throw new Error('Rin is already installed here. Use rin update.');
-  const legacy = await inspectLegacy();
+  const legacy = await inspectLegacy({ binDir });
   const agentsPath = join(codexHome, 'AGENTS.md');
   const choices = await collectChoices({hasAgents: await exists(agentsPath), legacy, home, agentsPath});
   if (!choices) return {home, cancelled: true};
-  if (choices.history && !historySupport().supported) throw new Error(historySupport().reason);
+  if (!historySupport().supported) throw new Error(historySupport().reason);
   const destination = join(binDir, process.platform === 'win32' ? 'rin.cmd' : 'rin');
   if (await exists(destination) && !legacy?.cli.includes(destination) && !(await readFile(destination, 'utf8')).includes(join(home, 'launcher.mjs'))) throw new Error(`An unrelated launcher already exists: ${destination}`);
   return await withInstallLock(home, async () => {
@@ -145,10 +95,8 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
     await writeLaunchers(home, { binDir, publish: false });
     const service = createService({ home, node: process.execPath, env: { ...process.env, PATH: [binDir, dirname(process.execPath), process.env.PATH || ''].join(process.platform === 'win32' ? ';' : ':') } });
     await runSetupProgress('Register the Rin service', () => service.install());
-    if (choices.history) {
-      const tool = await installHistoryTool({ home, codexHome });
-      setupUI.log.success(tool.registered ? 'Original-session text search is registered.' : 'An existing session-history MCP entry was preserved. The downloaded tool has not replaced it.');
-    }
+    const tool = await runSetupProgress('Install original-session text search (FFF MCP)', () => installHistoryTool({ home, codexHome }));
+    setupUI.log.success(tool.registered ? 'Original-session text search is registered.' : 'FFF is installed. An existing session-history MCP entry was preserved.');
     // Service registration and auxiliary setup must succeed before the old CLI is disabled.
     await disableLegacy(legacy);
     let launcher;

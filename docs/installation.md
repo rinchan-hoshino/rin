@@ -12,11 +12,11 @@ The setup asks whether to replace an old Pi-based Rin, which products to install
 
 The optional profile uses Codex's configuration write protocol to merge only these choices into the user's existing configuration: context management and memories enabled; full filesystem access and `approval_policy = "never"`; desktop sleep prevention while work is running and remote-control wake while plugged in; an empty Git branch prefix, squash pull-request merge, and best-effort worktree upstream refresh; Sites, Hotline, and Safety Settings connectors disabled. Other keys and comments are preserved. In particular, the profile does not set the service tier, model, reasoning effort, Chronicle, or unrelated connectors. The setup preview explains both full filesystem access and the `never` execution-approval policy before the user opts in. Sandbox access and approval policy are separate settings in the [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference). Declining the profile preserves the existing configuration; `rin update` does not apply it.
 
-After preparing and testing a candidate, the installer sets up the selected products, registers a disabled Rin service, and optionally registers FFF session-text search. It disables the recognized old Pi service and renames its detected CLI launchers with `.pi-disabled` before publishing the new `rin` entrypoint. Old private data is retained, never imported into the new runtime. Unrecognized legacy service records stop the cutover with an explanation. Existing unrelated CLI launchers are not overwritten.
+After preparing and testing a candidate, the installer sets up the selected products, registers a disabled Rin service, and installs FFF session-text search as part of Rin, without a separate opt-in. It reads the old installer manifest and platform launcher metadata to resolve custom installation directories, disables the recognized old Pi service, copies installation records to `.pi-disabled` backups, and renames its detected `rin` and `rin-install` launchers with `.pi-disabled` before publishing the new `rin` entrypoint. Existing backup collisions stop the cutover before service changes. Old private data is retained, never imported into the new runtime. Unrecognized legacy service records stop the cutover with an explanation. Existing unrelated CLI launchers are not overwritten.
 
 Product installation uses [official Codex installation guidance](https://learn.chatgpt.com/docs/codex/cli), the [macOS desktop download](https://learn.chatgpt.com/docs/app), the [Windows Store command](https://learn.chatgpt.com/docs/windows/windows-app), and the [supported Linux packages](https://learn.chatgpt.com/docs/linux/linux-app). The current macOS desktop download requires Apple Silicon. Linux desktop packages support the distributions listed in the official guide; the installer rejects unsupported targets before installing a selected product. Existing macOS applications are retained.
 
-The installation needs a usable Codex CLI for `rin` and MCP registration. The launcher can also find the bundled executable in standard macOS ChatGPT/Codex app locations. On other systems, select Codex CLI if an executable is not already available. Sign-in remains an ordinary Codex or ChatGPT interaction.
+FFF is included even when no product is selected. Its binary is downloaded and verified; an existing different `session-history` MCP entry is preserved. The installation needs a usable Codex CLI for `rin` and MCP registration. The launcher can also find the bundled executable in standard macOS ChatGPT/Codex app locations. On other systems, select Codex CLI if an executable is not already available. Sign-in remains an ordinary Codex or ChatGPT interaction.
 
 ## Layout
 
@@ -30,7 +30,7 @@ The default installation root is `$XDG_DATA_HOME/rin` (or `~/.local/share/rin`) 
 | `launcher.mjs`, `daemon-run.mjs` | Stable entrypoints |
 | `private/daemon.json` | Selected chat and Nerve configuration files |
 | `private/` | Account settings, logs, databases and other local state |
-| `tools/` | Optional verified FFF binary |
+| `tools/` | Verified FFF binary included with Rin |
 
 Do not edit a prepared release as a development checkout. Develop in a separate clone. Do not commit private configuration or use a real private installation as a test fixture.
 

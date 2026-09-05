@@ -144,10 +144,11 @@ export async function installHistoryTool({home,codexHome,platform=process.platfo
   const commandEnv={...process.env,CODEX_HOME:codexHome};
   const codex=typeof codexCommand==='string'?{command:codexCommand,args:[]}:codexCommand??await resolveCodex({platform,env:commandEnv});
   const current=await run(codex.command,[...codex.args,'mcp','get','session-history','--json'],{capture:true,allowFailure:true,env:commandEnv});
+  let conflict = false;
   if(current.code===0){
     let parsed; try{parsed=JSON.parse(current.stdout);}catch{throw new Error('Could not inspect existing session-history MCP configuration');}
     const currentCommand=parsed.command??parsed.transport?.command,currentArgs=parsed.args??parsed.transport?.args??[];
-    if(currentCommand!==binary||JSON.stringify(currentArgs)!==JSON.stringify(args)) return {status:'conflict',binary,registered:false};
+    conflict = currentCommand!==binary||JSON.stringify(currentArgs)!==JSON.stringify(args);
   }else if(!/No MCP server named .* found/i.test(`${current.stdout||''}\n${current.stderr||''}`)) throw new Error(`Could not inspect existing session-history MCP configuration${current.stderr?`: ${current.stderr.trim()}`:''}`);
   await mkdir(tools,{recursive:true});
   if(!await exists(binary)){
@@ -159,6 +160,7 @@ export async function installHistoryTool({home,codexHome,platform=process.platfo
     }finally{await rm(work,{recursive:true,force:true});}
   }else await verify(binary,asset.sha256);
   await mkdir(root,{recursive:true}); await mkdir(join(home,'private','logs'),{recursive:true});
+  if (conflict) return {status:'conflict',binary,registered:false};
   for(const name of ['sessions','archived_sessions']){
     const target=join(codexHome,name),destination=join(root,name);
     await mkdir(target,{recursive:true});

@@ -37,12 +37,14 @@ function uiFixture(answers) {
 }
 
 test('Clack setup collects independent product choices and preserves existing AGENTS by default', async () => {
-  const ui = uiFixture([['codex', 'chatgpt'], true, false, false, false, true]);
+  const ui = uiFixture([['codex', 'chatgpt'], true, false, false, true]);
   const choices = await collectChoices({hasAgents: true, ui});
-  assert.deepEqual(choices, {products: ['codex', 'chatgpt'], recommendations: true, agents: '', subagentGuidance: false, history: false});
+  assert.deepEqual(choices, {products: ['codex', 'chatgpt'], recommendations: true, agents: '', subagentGuidance: false});
   const notes = ui.events.filter(([kind]) => kind === 'note').map(([, , body]) => body).join('\n');
   assert.match(notes, /full filesystem access/);
   assert.match(notes, /approval_policy=never/);
+  assert.match(notes, /Original-session search: included \(FFF MCP\)/);
+  assert.equal(ui.events.some(([kind, options]) => kind === 'confirm' && /FFF/.test(options.message)), false);
 });
 
 test('legacy decline and explicit final decline return null without an installation choice', async () => {
@@ -50,7 +52,7 @@ test('legacy decline and explicit final decline return null without an installat
   assert.equal(await collectChoices({legacy: {}, ui: legacyUI}), null);
   assert.equal(legacyUI.events.filter(([kind]) => kind === 'multiselect').length, 0);
 
-  const finalUI = uiFixture([[], false, 'skip', false, false, false]);
+  const finalUI = uiFixture([[], false, 'skip', false, false]);
   assert.equal(await collectChoices({ui: finalUI}), null);
   assert.match(finalUI.events.at(-1)[1], /Finished without installing Rin/);
 });
@@ -63,7 +65,7 @@ test('a Clack cancellation is reported with INSTALL_CANCELLED', async () => {
 });
 
 test('empty product selection is accepted and manual instructions preserve existing AGENTS text', async t => {
-  const ui = uiFixture([[], false, 'text', 'Use short answers.', false, false, true]);
+  const ui = uiFixture([[], false, 'text', 'Use short answers.', false, true]);
   const choices = await collectChoices({ui});
   assert.deepEqual(choices.products, []);
   const file = join(await temporary(t), 'AGENTS.md');
@@ -73,7 +75,7 @@ test('empty product selection is accepted and manual instructions preserve exist
 });
 
 test('blank manual instructions use an empty Clack default instead of prompt placeholder text', async () => {
-  const ui = uiFixture([[], false, 'text', '', false, false, true]);
+  const ui = uiFixture([[], false, 'text', '', false, true]);
   const choices = await collectChoices({ui});
   assert.equal(choices.agents, '');
   const [, options] = ui.events.find(([kind]) => kind === 'text');
@@ -85,7 +87,7 @@ test('file instructions retry after an unreadable path and preserve existing AGE
   const dir = await temporary(t), source = join(dir, 'instructions.md'), agents = join(dir, 'AGENTS.md');
   await writeFile(source, 'Prefer concrete examples.\n');
   await writeFile(agents, 'Existing instructions.\n');
-  const ui = uiFixture([[], false, 'file', join(dir, 'missing.md'), source, false, false, true]);
+  const ui = uiFixture([[], false, 'file', join(dir, 'missing.md'), source, false, true]);
   const choices = await collectChoices({ui});
   assert.equal(choices.agents, 'Prefer concrete examples.\n');
   assert.equal(ui.events.filter(([kind]) => kind === 'error').length, 1);

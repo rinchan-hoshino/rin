@@ -22,7 +22,7 @@ test('recommended profile batch-upserts only the reviewed keys',async()=>{
 
 test('declining recommendations remains a pure choice with an explicit preservation message',async()=>{
   const {collectChoices}=await import('../src/install/setup.mjs'); const output=[];
-  const answers=[[],false,'skip',false,false,true];
+  const answers=[[],false,'skip',false,true];
   const ui={intro(){},note(){},outro(){},cancel(){},isCancel(){return false},multiselect:async()=>answers.shift(),confirm:async()=>answers.shift(),select:async()=>answers.shift(),text:async()=>answers.shift(),log:{info:line=>output.push(line),error(){}}};
   const choices=await collectChoices({ui});
   assert.equal(choices.recommendations,false);assert.match(output.join('\n'),/Existing Codex settings will be preserved/);
