@@ -15,7 +15,7 @@ node src/rin.mjs status /absolute/path/to/private/chat.json
 
 所有直接入口要求 `allowUsers` 匹配平台提供的用户 ID。Discord 默认仅私聊；其他平台的群消息默认要求提及机器人。先准入与检查绑定，再下载附件。
 
-`/bind <已有任务 UUID>`、`/status`、`/unbind` 管理直接绑定。一个任务只能绑定一个聊天；`mirror:true` 表示该任务之后所有公开输出都会同步，包括在 App 中直接开展工作的输出。初次绑定不回放历史，动态绑定持久化后优先于初始配置。
+直接路由由私有 `bindings` 配置提供，一个任务只能绑定一个聊天。`mirror:true` 表示该任务之后所有公开输出都会同步，包括在 App 中直接开展工作的输出；不会回放已有历史。
 
 QQ 官方平台使用 OpenID，不能把普通 QQ 数字号或 OneBot 用户 ID 当成它。平台开发体验资格与本地白名单是独立门槛。Discord 的 Nerve 注意力模式则停用直接绑定入口，见 [Nerve](nerve.md)。
 
@@ -47,13 +47,33 @@ QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不�
 
 ## Unified chat commands
 
-The shared command registry provides `/help`, `/usage`, `/bind <task UUID>`, `/status`, and `/unbind`. Text commands and platform menus use the same admission rules. Commands do not create a model turn. `/new`, `/abort`, model selection, and other remote administration commands are not registered.
+The authoritative catalog contains `/help`, `/usage`, and locally installed command extensions. The same catalog drives text invocation, execution, help, and platform registration. Existing `bindings` remain message routes and are independent of command discovery.
 
-`allowUsers` admits messages. Set each adapter's `ownerUsers` to the platform IDs allowed to use `/usage`, `/bind`, and `/unbind`. A single-entry `allowUsers` list defaults to that one owner; a multi-entry list grants no command administration until `ownerUsers` is configured. Account usage is available only in a private chat, including when a group interaction supports ephemeral responses. Group replies contain no account, model, task ID, or filesystem details. Normal group messages still require a mention.
+Command permission is exactly chat admission: any user admitted by `allowUsers`, `dmOnly`, and the group mention rule can call commands. There is no second owner role. `privateOnly` restricts where results may be shown; `/usage` remains private-chat-only, even for an ephemeral group invocation. Recognized Discord controls do not enter the attention/model path.
 
-Command IDs are claimed durably before execution, so platform replays cannot repeat binding changes or usage reads. Interrupted commands are not automatically replayed. Discord interaction handles exist only in memory; after restart or expiry, Rin cannot recover the private response and will never fall back to a public channel.
+Command IDs are claimed durably before execution, so platform replay cannot invoke a handler twice. Interrupted commands are not automatically replayed. Discord private response handles exist only in memory: after restart or expiry, a reply fails closed instead of posting publicly.
 
-Discord reconciles its application command menu at startup; Telegram reconciles the default bot command scope. Failed registration emits a warning without stopping message delivery. Telegram commands addressed to another bot are ignored. Old Telegram menus with narrower scopes can override the default menu; Rin does not silently delete those scopes.
+### Private command directory
+
+Put one `.mjs` module per command in `dataDir/commands`, or set `commands.directory` in the private chat configuration (relative paths resolve under `dataDir`). Rin creates the directory privately, loads modules at startup, and registers the resulting catalog. Run `rin restart` after adding, editing, or removing a module. These are trusted local Node.js modules, independent of Pi; they can import the user's own helpers.
+
+```js
+export default {
+  name: 'hello',
+  description: 'Say hello',
+  argument: 'Optional name',
+  privateOnly: false,
+  async run({ args, message, dataDir }) {
+    return { text: `Hello, ${args || 'there'}!` };
+  },
+};
+```
+
+`name` starts with a lowercase letter and contains 1–13 lowercase letters, digits, or underscores. `description` is 1–100 characters. `argument` is an optional 1–100 character description; `privateOnly` is an optional boolean. `run` receives `args`, `dataDir`, and the admitted message's adapter, ID, chat ID, user ID, kind, and text. It returns `{text, files?}`; files use `{path, name?, mimeType?}`. Results go through the existing text/file delivery path; extensions cannot redirect a result by returning a different target.
+
+Only regular `.mjs` files are loaded, in filename order. Invalid definitions and import failures are skipped with a fixed warning. Extensions cannot replace a built-in name; if extensions share a name, all conflicting definitions are rejected. Unrelated valid extensions still load. No model turn or extra approval role is introduced by the command layer.
+
+Platform command APIs are reconciled to the complete catalog. Discord updates the application scope; configured guild scopes are handled explicitly. Telegram clears the known legacy private/group/admin scopes before maintaining its default catalog. QQ command panels are reconciled across supported scopes; unrelated non-command menu content is preserved. Failed or unavailable API operations produce a warning without holding daemon readiness indefinitely. Actual readback is needed to establish whether old commands were removed.
 
 ### Usage
 
@@ -63,13 +83,13 @@ Snapshots and cards live under the configured private `dataDir/usage`. Old Rin d
 
 ### Working text
 
-Only the generic working indicator is localized. Put optional settings in the private chat configuration:
+The working indicator is plain display text. Put optional settings in the private chat configuration:
 
 ```json
 {
   "display": {
     "working": {
-      "language": "zh-CN",
+      "text": "处理中...",
       "frames": ["处理中...", "正在推进..."],
       "intervalMs": 30000
     }
@@ -77,6 +97,6 @@ Only the generic working indicator is localized. Put optional settings in the pr
 }
 ```
 
-Built-in languages are `en`, `zh-CN`, and `ja`; English is the fallback. Nonempty custom frames override the preset. Editable platforms rotate the generic heading while preserving existing summaries and commentary. Final output, completion, failure, observer errors, and shutdown stop rotation. Platforms without editing receive one working marker. Installer text and other chat text are outside this localization setting.
+Nonempty `frames` take priority over `text`. If neither is supplied, Rin uses one `Working...` frame. Editable platforms rotate configured frames while preserving existing summaries and commentary. Final output, completion, failure, observer errors, and shutdown stop rotation. Platforms without editing receive one working marker. This setting does not select a language or change other chat text.
 
-QQ official bots also have a [command panel OpenAPI](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/menu-panel/). Rin reconciles only panels with its ownership remark `Rin commands`: five commands in C2C, and `/help` plus `/status` in groups. It does not change other panels or the global custom menu. Duplicate ownership markers, incomplete lists, incompatible target scopes, and missing permissions produce a warning instead of a blind overwrite. A command panel fills the input box; message admission and QQ passive-reply rules still apply. These APIs are unrelated to OneBot v11.
+QQ official [command panels](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/menu-panel/) fill the chat input box. Message admission and passive-reply rules still apply; this API is unrelated to OneBot v11.

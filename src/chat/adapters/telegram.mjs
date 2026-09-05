@@ -7,7 +7,6 @@ import {COMMANDS,registerCommands} from '../commands.mjs';
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const telegramCommands = COMMANDS.map(({name, description}) => ({command: name, description}));
 
 function allowed(config, userId, kind) {
   const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
@@ -25,7 +24,7 @@ function fileDescriptor(message) {
   return photo ? {id: photo.file_id, name: 'photo.jpg', mimeType: 'image/jpeg'} : null;
 }
 
-export function normalizeTelegramUpdate(update, config, bot = {}) {
+export function normalizeTelegramUpdate(update, config, bot = {}, commands = COMMANDS) {
   const message = update?.message;
   if (!message || message.from?.is_bot) return null;
   const userId = String(message.from?.id || '');
@@ -41,7 +40,7 @@ export function normalizeTelegramUpdate(update, config, bot = {}) {
   if (commandMatch) {
     const target = String(commandMatch[2] || '').toLowerCase();
     if (target && (!username || target !== username)) return null;
-    if (COMMANDS.some(command => command.name === commandMatch[1].toLowerCase())) {
+    if (commands.some(command => command.name === commandMatch[1].toLowerCase())) {
       recognizedCommand = true;
       if (target && target === username) mentioned = true;
       text = `/${commandMatch[1].toLowerCase()}${raw.slice(commandMatch[0].length)}`;
@@ -62,6 +61,8 @@ export function normalizeTelegramUpdate(update, config, bot = {}) {
 }
 
 export function createAdapter(config, context) {
+  const commands = Array.isArray(context.commands) ? context.commands : COMMANDS;
+  const telegramCommands = commands.map(({name, description}) => ({command: name, description}));
   let api;
   let InputFile;
   let running = false;
@@ -111,7 +112,7 @@ export function createAdapter(config, context) {
   }
 
   async function process(update) {
-    const incoming = normalizeTelegramUpdate(update, config, bot);
+    const incoming = normalizeTelegramUpdate(update, config, bot, commands);
     if (!incoming) return;
     const {descriptor, ...value} = incoming;
     if (context.isBound && !await context.isBound(value)) return;
@@ -150,9 +151,13 @@ export function createAdapter(config, context) {
       const me = await call('getMe', {});
       bot = {id: String(me.id), username: me.username || ''};
       await registerCommands(async()=>{
-        const current = await call('getMyCommands', {});
+        for (const type of ['all_private_chats','all_group_chats','all_chat_administrators']) {
+          await call('deleteMyCommands', {scope: {type}});
+        }
+        const scope = {type: 'default'};
+        const current = await call('getMyCommands', {scope});
         if (JSON.stringify(current || []) !== JSON.stringify(telegramCommands)) {
-          await call('setMyCommands', {commands: telegramCommands});
+          await call('setMyCommands', {commands: telegramCommands, scope});
         }
       },context.log,'Telegram command registration failed');
       running = true;

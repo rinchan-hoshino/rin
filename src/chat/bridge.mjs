@@ -1,4 +1,5 @@
-import { parseCommand, commandOwner, commandHelp } from './commands.mjs';
+import { COMMANDS, parseCommand, builtinCommands, commandHelp } from './commands.mjs';
+import { loadCommandExtensions } from './command-extensions.mjs';
 import { executeUsage } from './usage.mjs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -14,6 +15,7 @@ export class ChatBridge {
     this.config = validateConfig(config);
     this.log = log;
     this.usage = usage;
+    this.commands = [];
     this.store = store || new ChatStore(resolve(config.dataDir, 'chat.sqlite'));
     this.attention = config.attention?.nerveConfig ? new AttentionClient(config.attention.nerveConfig,this.store,{log}) : null;
     if(this.store.cursor('bindings')) this.config.bindings=this.store.cursor('bindings');
@@ -43,6 +45,9 @@ export class ChatBridge {
   }
   async start() {
     this.running = true;
+    const builtins=builtinCommands((name,context)=>this.builtinCommand(name,context));
+    const directory=resolve(this.config.dataDir,this.config.commands?.directory || 'commands');
+    this.commands=[...builtins,...await loadCommandExtensions({directory,reservedNames:COMMANDS.map(c=>c.name),log:this.log})];
     this.codex.onEvent = event => this.event(event);
     await this.codex.start();
     for (const config of this.config.adapters.filter(a => a.enabled !== false)) {
@@ -51,8 +56,9 @@ export class ChatBridge {
         getCursor: key => this.store.cursor(key),
         setCursor: (key,value) => this.store.setCursor(key,value),
         observeDiscord: this.attention ? record => this.attention.observe(record) : undefined,
-        isCommand: message => Boolean(parseCommand(message.text)),
-        isBound: message => Boolean(parseCommand(message.text)) || (!(this.attention && config.type==='discord') && this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind)),
+        commands: this.commands,
+        isCommand: message => Boolean(parseCommand(message.text,this.commands)),
+        isBound: message => Boolean(parseCommand(message.text,this.commands)) || (!(this.attention && config.type==='discord') && this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind)),
       });
       this.adapters.set(config.id, adapter);
 
@@ -86,43 +92,32 @@ export class ChatBridge {
       queueMicrotask(()=>this.submit().catch(e=>this.log.error('submit failed',e)));
     }
   }
+  async builtinCommand(name,{args,message}) {
+    if(name==='help')return {text:commandHelp(this.commands,message.kind==='dm')};
+    if(name==='usage')return this.usage(args,{config:this.config.codex || {},dataDir:this.config.dataDir});
+    throw new Error('Unknown built-in command');
+  }
   async command(config,message) {
-    const command=parseCommand(message.text);
-    if(!command)return false;
-    // Claim before awaiting or mutating bindings, so duplicate events cannot act twice.
+    const parsed=parseCommand(message.text,this.commands);
+    if(!parsed)return false;
+    const command=this.commands.find(c=>c.name===parsed.name);
+    // Admission is the only caller permission check. Claim before every handler.
     const key=`command:${stableId(config.id,message.chatId,message.id)}`;
     if(this.store.cursor(key))return true;
     this.store.setCursor(key,{state:'started'});
-    const current=this.config.bindings.find(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId));
-    const owner=commandOwner(config,message.userId);
     let output;
     try {
-      if(command.name==='help') output={text:commandHelp(message.kind==='dm')};
-      else if(command.name==='status') output={text:current?'本聊天已连接。':'本聊天尚未连接。'};
-      else if(!owner) output={text:config.ownerUsers===undefined && config.allowUsers?.length!==1?'尚未配置主人身份，暂不能使用此命令。':'此命令仅供主人使用。'};
-      else if(command.name==='usage') output=message.kind!=='dm'
-        ? {text:'请在私聊中使用 /usage 查看用量。'}
-        : await this.usage(command.args,{config:this.config.codex || {},dataDir:this.config.dataDir});
-      else if(command.name==='unbind') {
-        if(current)this.stopWorkingRotation(current.threadId);
-        this.config.bindings=this.config.bindings.filter(b=>b!==current);this.store.setCursor('bindings',this.config.bindings);
-        output={text:'已解除本聊天的连接。'};
-      } else {
-        const threadId=command.args;
-        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId)) output={text:'用法：/bind <已有任务 ID>'};
-        else if(this.config.bindings.some(b=>b.threadId===threadId && b!==current)) output={text:'该任务已连接其他聊天，请先解除原连接。'};
-        else {
-          await this.codex.watch(threadId);
-          this.faultedThreads.delete(threadId);
-          this.config.bindings=this.config.bindings.filter(b=>b!==current);
-          this.config.bindings.push({adapter:config.id,chatId:String(message.chatId),kind:message.kind,userId:message.userId,threadId,mirror:true});
-          this.store.setCursor('bindings',this.config.bindings);
-          output={text:'已连接。后续公开回复会同步到本聊天，已有历史不会回放。'};
-        }
+      if(command.privateOnly && message.kind!=='dm')output={text:'请在私聊中使用此命令。'};
+      else {
+        const result=await command.run({args:parsed.args,message:{adapter:config.id,id:message.id,chatId:message.chatId,userId:message.userId,kind:message.kind,text:message.text},dataDir:this.config.dataDir});
+        if(!result || typeof result!=='object' || (result.text!==undefined && typeof result.text!=='string') ||
+          (result.files!==undefined && (!Array.isArray(result.files) || result.files.some(file=>!file || typeof file.path!=='string' || (file.name!==undefined && typeof file.name!=='string') || (file.mimeType!==undefined && typeof file.mimeType!=='string')))) ||
+          (!result.text && !result.files?.length))throw new Error('Invalid command result');
+        output={text:result.text || '',...(result.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
       }
     } catch {
       this.log.warn('command failed',{name:command.name});
-      output={text:command.name==='usage'?'暂时无法读取用量，请稍后重试。':'命令未完成，请检查输入后重试。'};
+      output={text:'命令未完成，请检查输入或稍后重试。'};
     }
     const target={chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id,
       ...(message.commandInteraction?{commandInteraction:{id:message.commandInteraction.id}}:{})};

@@ -44,12 +44,13 @@ test('Discord registers the shared commands and routes deferred slash commands t
   client.user = {id: 'bot'}; client.login = async () => {}; client.isReady = () => true; client.destroy = async () => {};
   client.application = {commands: {set: async (...args) => registered.push(args)}};
   client.channels = {fetch: async () => assert.fail('interaction response must not fall back to a public channel')};
+  const commands=[{name:'help',description:'Show available commands'},{name:'usage',description:'Show account usage',argument:'Options'}];
   const adapter = discordAdapter({token: 'x', allowUsers: ['allowed'], __client: client}, {
-    dataDir: '/tmp', log: {}, isBound: async () => true, isCommand: message => message.text.startsWith('/'),
+    commands, dataDir: '/tmp', log: {}, isBound: async () => true, isCommand: message => message.text.startsWith('/'),
   });
   await adapter.start(message => received.push(message));
   const interaction = {
-    id: 'ix', channelId: 'dm', user: {id: 'allowed'}, commandName: 'bind', guildId: null,
+    id: 'ix', channelId: 'dm', user: {id: 'allowed'}, commandName: 'usage', guildId: null,
     isChatInputCommand: () => true, options: {getString: name => name === 'args' ? '1234' : null},
     deferReply: async payload => { defers++; assert.deepEqual(payload, {ephemeral: true}); },
     editReply: async payload => { edits.push(payload); return {id: 'response'}; },
@@ -59,16 +60,32 @@ test('Discord registers the shared commands and routes deferred slash commands t
   client.emit('interactionCreate', interaction);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(registered.length, 1);
-  assert.deepEqual(registered[0][0].map(command => command.name), ['help','usage','bind','status','unbind']);
-  assert.equal(registered[0][0].find(command => command.name === 'bind').options[0].name, 'args');
+  assert.deepEqual(registered[0][0].map(command => command.name), ['help','usage']);
+  assert.equal(registered[0][0].find(command => command.name === 'usage').options[0].name, 'args');
   assert.deepEqual(received[0], {
-    id:'ix', chatId:'dm', userId:'allowed', kind:'dm', mentioned:true, text:'/bind 1234', files:[], commandInteraction:{id:'ix'},
+    id:'ix', chatId:'dm', userId:'allowed', kind:'dm', mentioned:true, text:'/usage 1234', files:[], commandInteraction:{id:'ix'},
   });
   assert.equal(defers,1); assert.equal(received.length,1);
   assert.deepEqual(await adapter.send({chatId:'dm', commandInteraction:{id:'ix'}}, {text:'x'.repeat(2001)}), {id:'response'});
   assert.equal(edits[0].content.length, 2000);
   assert.deepEqual(followups,[{content:'x',ephemeral:true,allowedMentions:{parse:[],repliedUser:false}}]);
   await assert.rejects(adapter.send({chatId:'dm', commandInteraction:{id:'missing'}}, {text:'no'}), /interaction_unavailable/);
+  await adapter.stop();
+});
+
+test('Discord registers and routes dynamic commands without exposing their implementation', async () => {
+  const registered=[]; const received=[];
+  const commands=[{name:'ping',description:'Check latency',argument:'Optional label',run(){throw new Error('must not run');}}];
+  const client=new EventEmitter(); client.user={id:'bot'}; client.login=async()=>{}; client.isReady=()=>true; client.destroy=async()=>{};
+  client.application={commands:{set:async value=>registered.push(value)}};
+  const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{commands,dataDir:'/tmp',log:{},isBound:async()=>true});
+  await adapter.start(message=>received.push(message));
+  assert.deepEqual(registered[0],[{name:'ping',description:'Check latency',type:1,options:[{name:'args',description:'Optional label',type:3,required:false}]}]);
+  assert.equal(JSON.stringify(registered[0]).includes('run'),false);
+  client.emit('interactionCreate',{id:'dynamic',channelId:'dm',user:{id:'allowed'},commandName:'ping',isChatInputCommand:()=>true,
+    options:{getString:()=> 'now'},deferReply:async()=>{},editReply:async()=>({id:'reply'})});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(received[0].text,'/ping now');
   await adapter.stop();
 });
 
@@ -140,30 +157,47 @@ test('Telegram normalization selects the largest photo and gates before file par
 test('Telegram normalizes commands addressed to this bot and rejects commands for another bot', () => {
   const config={allowUsers:['1'],dmOnly:false};
   const message={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/bind@RinBot abc'}},config,{id:'9',username:'rinbot'}).text,'/bind abc');
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status@OtherBot'}},config,{id:'9',username:'rinbot'}),null);
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status'}},config,{id:'9',username:'rinbot'}),null);
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/status'}},{...config,requireMention:false},{id:'9',username:'rinbot'}).mentioned,false);
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/usage@RinBot current'}},config,{id:'9',username:'rinbot'}).text,'/usage current');
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},config,{id:'9',username:'rinbot'}),null);
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},{...config,requireMention:false},{id:'9',username:'rinbot'}).mentioned,false);
 });
 
-test('Telegram reads and updates the shared command menu without making startup depend on sync', async () => {
-  const calls=[]; let updates=0;
+test('Telegram clears legacy narrow scopes and authoritatively updates the default command menu', async () => {
+  const calls=[]; const deleted=[]; let updates=0;
   const api={raw:{
     deleteWebhook:async()=>true,getMe:async()=>({id:9,username:'rin'}),
+    deleteMyCommands:async payload=>deleted.push(payload),
     getMyCommands:async()=>[],setMyCommands:async payload=>calls.push(payload),
     getUpdates:async(_payload,signal)=>updates++ ? await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true})) : [],
   }};
-  const adapter=telegramAdapter({id:'main',token:'x',allowUsers:['1'],__api:api},{dataDir:'/tmp',log:{},getCursor:async()=>0,setCursor:async()=>{}});
+  const commands=[{name:'help',description:'Show available commands'},{name:'usage',description:'Show account usage'}];
+  const adapter=telegramAdapter({id:'main',token:'x',allowUsers:['1'],__api:api},{commands,dataDir:'/tmp',log:{},getCursor:async()=>0,setCursor:async()=>{}});
   await adapter.start(async()=>{});
-  assert.deepEqual(calls[0].commands.map(command=>command.command),['help','usage','bind','status','unbind']);
+  assert.deepEqual(deleted.map(value=>value.scope.type),['all_private_chats','all_group_chats','all_chat_administrators']);
+  assert.deepEqual(calls[0],{commands:[{command:'help',description:'Show available commands'},{command:'usage',description:'Show account usage'}],scope:{type:'default'}});
   await adapter.stop();
 
-  const failing={raw:{...api.raw,getMyCommands:async()=>{throw new Error('secret');}}};
+  const failing={raw:{...api.raw,deleteMyCommands:async()=>{throw new Error('secret');}}};
   const warnings=[];
   const degraded=telegramAdapter({id:'degraded',token:'x',allowUsers:['1'],__api:failing},{dataDir:'/tmp',log:{warn:value=>warnings.push(value)},getCursor:async()=>0,setCursor:async()=>{}});
   await degraded.start(async()=>{});
   assert.deepEqual(warnings,['Telegram command registration failed']);
   await degraded.stop();
+});
+
+test('Telegram uses dynamic commands for its menu and addressed-command normalization', async () => {
+  const calls=[]; const commands=[{name:'ping',description:'Check latency',run(){throw new Error('must not run');}}];
+  const api={raw:{deleteWebhook:async()=>true,getMe:async()=>({id:9,username:'rinbot'}),getMyCommands:async()=>[],
+    deleteMyCommands:async()=>true,setMyCommands:async payload=>calls.push(payload),getUpdates:async(_payload,signal)=>await new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}))}};
+  const adapter=telegramAdapter({id:'main',token:'x',allowUsers:['1'],dmOnly:false,__api:api},{commands,dataDir:'/tmp',log:{},getCursor:async()=>0,setCursor:async()=>{}});
+  await adapter.start(async()=>{});
+  assert.deepEqual(calls,[{commands:[{command:'ping',description:'Check latency'}],scope:{type:'default'}}]);
+  assert.equal(JSON.stringify(calls).includes('run'),false);
+  const message={message_id:2,chat:{id:-3,type:'group'},from:{id:1},text:'/ping@RinBot now'};
+  assert.equal(normalizeTelegramUpdate({message},{allowUsers:['1'],dmOnly:false},{id:'9',username:'rinbot'},commands).text,'/ping now');
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help@RinBot'}},{allowUsers:['1'],dmOnly:false},{id:'9',username:'rinbot'},commands)?.text,undefined);
+  await adapter.stop();
 });
 
 test('Telegram commits its cursor only after durable message acceptance', async () => {

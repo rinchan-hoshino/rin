@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { ChatBridge } from '../src/chat/bridge.mjs';
 import { DEFAULT_WORKING_INTERVAL_MS, resolveWorking, workingFrame } from '../src/chat/working.mjs';
 
-test('working configuration selects language, custom frames and safe fallbacks',()=>{
-  assert.equal(workingFrame(resolveWorking({language:'zh-CN'})), '处理中...');
-  assert.equal(workingFrame(resolveWorking({language:'ja'})), '作業中...');
-  assert.deepEqual(resolveWorking({language:'unknown',frames:['',42,'  Custom  '],intervalMs:250}).frames,['Custom']);
+test('working configuration selects frames, text and safe fallbacks',()=>{
+  assert.deepEqual(resolveWorking({text:'  自定义处理中...  '}).frames,['  自定义处理中...  ']);
+  assert.deepEqual(resolveWorking({text:'Ignored',frames:['',42,'  Custom  '],intervalMs:250}).frames,['  Custom  ']);
+  assert.deepEqual(resolveWorking({}).frames,['Working...']);
+  assert.deepEqual(resolveWorking({text:'',frames:[]}).frames,['Working...']);
   assert.equal(resolveWorking({intervalMs:-1}).intervalMs,DEFAULT_WORKING_INTERVAL_MS);
   assert.equal(workingFrame(resolveWorking({frames:['one','two']}),3),'two');
+  assert.equal(workingFrame(), 'Working...');
 });
 
 test('editable working frames rotate without discarding summary or commentary and stop on final',async()=>{
@@ -37,9 +39,9 @@ test('editable working frames rotate without discarding summary or commentary an
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-test('non-editing transports stage one localized working marker without rotation',async()=>{
+test('non-editing transports stage one custom working marker without rotation',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-working-marker-'));const calls=[];
-  const config={dataDir,display:{working:{language:'zh-CN',intervalMs:100}},adapters:[{id:'q',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const config={dataDir,display:{working:{text:'处理中...',intervalMs:100}},adapters:[{id:'q',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false},start:async()=>{},stop:async()=>{},send:async(_target,output)=>{calls.push(output);return{id:'marker'};}};
   const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{

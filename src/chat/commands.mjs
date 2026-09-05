@@ -1,22 +1,19 @@
 // One command contract for text ingress and platform menus.
 export const COMMANDS = Object.freeze([
   {name:'help',description:'Show available commands'},
-  {name:'usage',description:'Show account usage in a private chat',argument:'Options: current, history, card, text, --help'},
-  {name:'bind',description:'Connect this chat to an existing task',argument:'Task UUID'},
-  {name:'status',description:'Show this chat connection status'},
-  {name:'unbind',description:'Disconnect this chat'},
+  {name:'usage',privateOnly:true,description:'Show account usage in a private chat',argument:'Options: current, history, card, text, --help'},
 ]);
-export function parseCommand(text) {
-  const match=/^\/([a-z]+)(?:@[\w]+)?(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());
-  return match && COMMANDS.some(c=>c.name===match[1]) ? {name:match[1],args:(match[2] || '').trim()} : null;
+export function parseCommand(text, commands = COMMANDS) {
+  const match=/^\/([a-z][a-z0-9_]*)(?:@[\w]+)?(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());
+  return match && commands.some(c=>c.name===match[1]) ? {name:match[1],args:(match[2] || '').trim()} : null;
 }
-export function commandOwner(config,userId) {
-  // A multi-user chat allowlist is not an administrative role assignment.
-  const owners=config.ownerUsers ?? (config.allowUsers?.length===1 ? config.allowUsers : []);
-  return Array.isArray(owners) && owners.includes(String(userId));
+export function builtinCommands(run) {
+  return COMMANDS.map(command=>({...command,run:context=>run(command.name,context)}));
 }
-export function commandHelp(privateChat) {
-  return '/help — 查看命令\n/status — 查看连接状态\n/usage — 在私聊查看用量\n/bind — 连接已有任务（主人）\n/unbind — 解除连接（主人）' + (privateChat?'\n用量选项：/usage --help':'');
+export function commandHelp(commands, privateChat) {
+  return commands.filter(command=>privateChat || !command.privateOnly)
+    .map(command=>`/${command.name} — ${command.description}`).join('\n')
+    + (!privateChat && commands.some(command=>command.privateOnly)?'\n私聊可查看更多命令。':'');
 }
 
 // Menu synchronization is auxiliary: a slow platform must not hold daemon readiness.

@@ -1,21 +1,23 @@
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {COMMANDS, parseCommand, registerCommands} from '../commands.mjs';
+import {COMMANDS, registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const READY_TIMEOUT_MS = 30_000;
 
-const discordCommands = COMMANDS.map(command => ({
-  name: command.name,
-  description: command.description,
-  type: 1,
-  ...(command.argument ? {options: [{name: 'args', description: command.argument, type: 3, required: false}]} : {}),
-}));
+function discordCommandDefinitions(commands) {
+  return commands.map(command => ({
+    name: command.name,
+    description: command.description,
+    type: 1,
+    ...(command.argument ? {options: [{name: 'args', description: command.argument, type: 3, required: false}]} : {}),
+  }));
+}
 
-function commandText(name, args = '') {
-  const command = COMMANDS.find(item => item.name === String(name || '').toLowerCase());
+function commandText(commands, name, args = '') {
+  const command = commands.find(item => item.name === String(name || '').toLowerCase());
   if (!command) return '';
   const suffix = String(args || '').trim();
   return `/${command.name}${suffix ? ` ${suffix}` : ''}`;
@@ -75,6 +77,8 @@ export function normalizeDiscordMessage(message, config, selfId = '') {
 }
 
 export function createAdapter(config, context) {
+  const commands = Array.isArray(context.commands) ? context.commands : COMMANDS;
+  const discordCommands = discordCommandDefinitions(commands);
   let client;
   let handler;
   const interactions = new Map();
@@ -87,7 +91,10 @@ export function createAdapter(config, context) {
     const bound = incoming && (!context.isBound || await context.isBound(incoming));
     let commandSource=String(message?.content || '').trim();
     for(const token of client?.user?.id ? [`<@${client.user.id}>`,`<@!${client.user.id}>`] : [])commandSource=commandSource.split(token).join('').trim();
-    const recognizedCommand=Boolean(parseCommand(commandSource));
+    const commandMatch = /^\/([a-z0-9_]+)(?:\s|$)/i.exec(commandSource);
+    const recognizedCommand = context.isCommand
+      ? Boolean(context.isCommand({text: commandSource}))
+      : Boolean(commandMatch && commands.some(command => command.name === commandMatch[1].toLowerCase()));
     if (!recognizedCommand && context.observeDiscord && message?.author?.id && !message.author.bot && String(message.author.id)!==String(client?.user?.id)) {
       const ancestorIds=[];
       let current=message.channel;
@@ -121,7 +128,7 @@ export function createAdapter(config, context) {
     if (!interaction?.isChatInputCommand?.()) return;
     const userId = String(interaction.user?.id || '');
     const kind = interaction.guildId ? 'group' : 'dm';
-    const text = commandText(interaction.commandName, interaction.options?.getString?.('args'));
+    const text = commandText(commands, interaction.commandName, interaction.options?.getString?.('args'));
     if (!text || !allowed(config, userId, kind) || interaction.user?.bot) return;
     const interactionId = String(interaction.id);
     if (pendingInteractions.has(interactionId) || interactions.has(interactionId)) return;

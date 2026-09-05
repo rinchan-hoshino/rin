@@ -141,24 +141,7 @@ test('restart preserves buffered public text until completion on a no-edit trans
   }
 });
 
-test('/bind, /status and /unbind update durable bindings and remain replyable',async()=>{
-  const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-bind-'));const sent=[],watched=[];let receive;
-  const codex={start:async()=>{},stop:async()=>{},watch:async id=>{watched.push(id);},queue:async()=>({messageId:'q'})};
-  const adapter={capabilities:{edit:true,typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},
-    send:async(_target,output)=>{sent.push(output);return {id:`reply-${sent.length}`};}};
-  const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[]};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
-  const threadId='12345678-1234-1234-1234-123456789abc';
-  try{
-    await bridge.start();
-    const base={chatId:'dm',userId:'owner',kind:'dm'};
-    await receive({...base,id:'1',text:`/bind ${threadId}`});await bridge.flush();
-    assert.deepEqual(watched,[threadId]);assert.equal(bridge.config.bindings[0].mirror,true);assert.match(sent.at(-1).text,/已连接/);
-    await receive({...base,id:'2',text:'/status'});await bridge.flush();assert.match(sent.at(-1).text,/本聊天已连接/);
-    await receive({...base,id:'3',text:'/unbind'});await bridge.flush();assert.match(sent.at(-1).text,/已解除/);
-    assert.deepEqual(bridge.config.bindings,[]);assert.deepEqual(bridge.store.cursor('bindings'),[]);
-  }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
-});
+
 for(const type of ['discord','telegram','feishu']) test(`${type}: different public items update one progress message, survive restart, and retire before a fresh final`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-progress-`));
   const calls=[],remote=new Map();let nextId=1,bridge;

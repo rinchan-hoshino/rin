@@ -55,8 +55,8 @@ App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，
 
 ### 统一命令与可选安装配置
 
-聊天桥新增统一 `/help`、`/usage`、`/bind`、`/status`、`/unbind`；原生命令与文字命令共用权限和持久去重，控制命令不进入 Discord 注意力唤醒。管理权限可用独立 `ownerUsers` 指定；多人白名单不推断主人。用量仅主人私聊可读，调用本地 Codex 只读额度接口，支持多 bucket、PNG 卡片与完整文字、从启用后开始的采样历史；不导入旧 token/cost 数据库，不兑换或购买。见 [聊天桥](chat-bridge.md)。
+聊天命令默认仅 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。命令权限等于已有聊天准入，没有额外主人角色；`privateOnly` 只限制结果呈现场景。用量走 Codex 只读额度接口，提供 PNG 和完整文字、新采样历史，不导入旧 token/cost 数据。普通消息 `bindings` 路由保持独立。
 
-Discord/Telegram 对账命令菜单，QQ 官方通过真实面板 API 只维护 Rin 所属面板；接口注册成功不等同用户实际命令端到端验收。working 文案支持独立语言和自定义帧，保留原 summary/commentary 展示。
+平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 
 安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；不修改审批策略或其他未选择配置。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。

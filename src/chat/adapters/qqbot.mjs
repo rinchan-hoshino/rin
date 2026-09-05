@@ -143,7 +143,15 @@ export function createAdapter(config, context) {
       startPromise = Promise.resolve(bot.start()).catch((error) => {
         if (bot) context.log?.error?.('QQ official adapter stopped unexpectedly', error);
       });
-      await registerCommands(()=>syncQQCommandPanels(bot,config),context.log,'QQ command panel registration failed');
+      await registerCommands(async()=>{
+        try { await syncQQCommandPanels(bot,config,context.commands); }
+        catch (error) {
+          const message = String(error?.message || '');
+          const reason = /^qq_command_panel_sync_failed:[a-z0-9_:,.-]+$/.test(message)
+            ? message : 'qq_command_panel_sync_failed:unknown';
+          context.log?.warn?.(`QQ command panel registration failed (${reason})`);
+        }
+      },context.log,'QQ command panel registration failed');
     },
     async stop() {
       const current = bot;
