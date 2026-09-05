@@ -20,7 +20,7 @@ test('recommended profile batch-upserts only the reviewed keys',async()=>{
 });
 
 test('declining recommendations remains a pure choice with an explicit preservation message',async()=>{
-  const {collectChoices}=await import('../src/install/setup.mjs');const answers=['','no','.','no'],output=[];
+  const {collectChoices}=await import('../src/install/setup.mjs');const answers=['','no','.','no','no'],output=[];
   const choices=await collectChoices(async question=>{output.push(question);return answers.shift();},line=>output.push(line));
   assert.equal(choices.recommendations,false);assert.match(output.join('\n'),/Existing Codex settings will be preserved/);
 });

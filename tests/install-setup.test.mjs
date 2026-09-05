@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../src/install/setup.mjs';
+import { appendAgentsInstructions, RIN_SUBAGENT_INSTRUCTIONS, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../src/install/setup.mjs';
 
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'rin-setup-'));
@@ -12,10 +12,10 @@ async function temporary(t) {
 }
 
 test('English setup collects independent product choices and preserves existing AGENTS by default', async () => {
-  const answers = ['3', '1,2,1', 'yes', '', 'no'];
+  const answers = ['3', '1,2,1', 'yes', '', 'no', 'no'];
   const output = [];
   const choices = await collectChoices(async q => { output.push(q); return answers.shift(); }, s => output.push(s), { hasAgents: true });
-  assert.deepEqual(choices, { products: ['codex', 'chatgpt'], recommendations: true, agents: '', history: false });
+  assert.deepEqual(choices, { products: ['codex', 'chatgpt'], recommendations: true, agents: '', subagentGuidance: false, history: false });
   assert.match(output.join('\n'), /full filesystem access/);
   assert.match(output.join('\n'), /Approval settings are unchanged/);
   assert.equal(answers.length, 0);
@@ -68,4 +68,36 @@ test('launcher publication never replaces an unrelated executable', async t => {
   await writeFile(join(binDir, name), 'unrelated');
   await assert.rejects(writeLaunchers(home, { binDir }), /unrelated launcher/);
   assert.equal(await readFile(join(binDir, name), 'utf8'), 'unrelated');
+});
+
+test('subagent guidance is independent opt-in after custom instructions', async () => {
+  const answers = ['', 'no', 'My instructions', '.', 'yes', 'no'];
+  const choices = await collectChoices(async () => answers.shift(), () => {});
+  assert.equal(choices.agents, 'My instructions');
+  assert.equal(choices.subagentGuidance, true);
+  assert.equal(choices.recommendations, false);
+  assert.equal(answers.length, 0);
+});
+
+test('AGENTS append preserves existing bytes, orders guidance last and avoids exact duplicates', async t => {
+  const dir = await temporary(t), file = join(dir, 'AGENTS.md');
+  const original = 'Keep these spaces  \n\n';
+  await writeFile(file, original);
+  assert.equal(await appendAgentsInstructions(file), false);
+  assert.equal(await readFile(file, 'utf8'), original);
+  await appendAgentsInstructions(file, {agents: 'My added instructions', subagentGuidance: true});
+  const once = await readFile(file, 'utf8');
+  assert.ok(once.startsWith(original));
+  assert.ok(once.indexOf('My added instructions') < once.indexOf(RIN_SUBAGENT_INSTRUCTIONS));
+  assert.ok(once.endsWith(RIN_SUBAGENT_INSTRUCTIONS + '\n'));
+  assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), false);
+  assert.equal(await readFile(file, 'utf8'), once);
+});
+
+test('declining all AGENTS additions creates no file; guidance alone can create one', async t => {
+  const file = join(await temporary(t), 'nested', 'AGENTS.md');
+  assert.equal(await appendAgentsInstructions(file), false);
+  await assert.rejects(readFile(file), {code: 'ENOENT'});
+  assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), true);
+  assert.equal(await readFile(file, 'utf8'), RIN_SUBAGENT_INSTRUCTIONS + '\n');
 });

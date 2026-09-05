@@ -114,6 +114,26 @@ try{
   return file;
 }
 
+export const RIN_SUBAGENT_INSTRUCTIONS = `## Rin subagent guidance
+
+Choose subagent models from those currently available in the host, using their stated capabilities and relative cost. Use lower-cost models for bounded, straightforward work; reserve more capable models for difficult reasoning, uncertain requirements, and integration decisions. Do not assume model names or prices remain current.
+
+Delegate concrete, independent tasks in parallel when the expected benefit exceeds coordination and context costs. Keep dependent steps sequential, avoid concurrent edits to the same files, and do small tasks locally when delegation adds overhead. Give each subagent only the context and acceptance criteria it needs. Follow the host's available tools and model-selection rules; if a model override is unavailable, use the supported default.
+
+The primary agent owns the outcome: review and integrate subagent results, resolve conflicts, and verify the combined change before reporting completion.`;
+
+export async function appendAgentsInstructions(file, {agents = '', subagentGuidance = false} = {}) {
+  const previous = await exists(file) ? await readFile(file, 'utf8') : '';
+  let next = previous;
+  const append = text => { next += `${next && !next.endsWith('\n') ? '\n' : ''}${next ? '\n' : ''}${text}\n`; };
+  if (agents.trim()) append(agents);
+  if (subagentGuidance && !next.includes(RIN_SUBAGENT_INSTRUCTIONS)) append(RIN_SUBAGENT_INSTRUCTIONS);
+  if (next === previous) return false;
+  await mkdir(dirname(file), {recursive: true});
+  await writeFile(file, next, {mode: 0o600});
+  return true;
+}
+
 export async function collectChoices(ask, say, { hasAgents = false, legacy = null } = {}) {
   say('Rin for Codex — Git installation');
   if (legacy) {
@@ -139,10 +159,14 @@ export async function collectChoices(ask, say, { hasAgents = false, legacy = nul
     say('Finish with a single period (.) on its own line. Leave empty to skip.');
     const lines = [];
     for (;;) { const line = await ask('> '); if (line === '.') break; lines.push(line); }
-    agents = lines.join('\n').trim();
+    agents = lines.join('\n');
   }
+  say('Optional subagent guidance chooses currently available models by cost and task difficulty, and delegates independent work in parallel.');
+  say('It is appended after your instructions; existing text is preserved. Preview:');
+  say(RIN_SUBAGENT_INSTRUCTIONS);
+  const subagentGuidance = /^y(?:es)?$/i.test((await ask('Append Rin subagent guidance to global AGENTS.md? [y/N] ')).trim());
   const history = /^y(?:es)?$/i.test((await ask('Install the optional original-session text search tool (FFF MCP)? [y/N] ')).trim());
-  return { products: selected.map(x => x === '1' ? 'codex' : 'chatgpt'), recommendations, agents, history };
+  return { products: selected.map(x => x === '1' ? 'codex' : 'chatgpt'), recommendations, agents, subagentGuidance, history };
 }
 
 export async function setup({ home = installHome(), repository = REPOSITORY, binDir = join(homedir(), '.local/bin'), codexHome = process.env.CODEX_HOME || join(homedir(), '.codex') } = {}) {
@@ -168,10 +192,7 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
         await applyRecommendedCodexProfile({codexHome,command});
         console.log('Rin recommended Codex profile applied. Existing approval settings were preserved.');
       }
-      if (choices.agents) {
-        const previous = await exists(agentsPath) ? await readFile(agentsPath, 'utf8') : '';
-        await writeFile(agentsPath, previous ? `${previous.trimEnd()}\n\n${choices.agents}\n` : `${choices.agents}\n`, { mode: 0o600 });
-      }
+      await appendAgentsInstructions(agentsPath, choices);
       if (!await exists(join(home, 'private/daemon.json'))) await atomicJSON(join(home, 'private/daemon.json'), { chat: null, nerve: null });
       await writeLaunchers(home, { binDir, publish: false });
       const service = createService({ home, node: process.execPath, env: { ...process.env, PATH: [binDir, dirname(process.execPath), process.env.PATH || ''].join(process.platform === 'win32' ? ';' : ':') } });

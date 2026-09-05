@@ -2,7 +2,7 @@
 
 以 Codex 为执行核心的轻量聊天桥与事件服务。
 
-`main` 维护 Codex 版本；旧 Pi 版本及完整历史保留在 [`legacy/pi`](https://github.com/rinchan-hoshino/rin/tree/legacy/pi)。新版不加载旧 Rin、Pi、旧 daemon 或旧扩展运行时。安装和更新只提供 Git 版，不发布 npm 包。
+`main` 维护 Codex 版本；旧 Pi 版本及完整历史保留在 [`legacy/pi`](https://github.com/rinchan-hoshino/rin/tree/legacy/pi)。新版不加载旧 Rin、Pi、旧 daemon 或旧扩展运行时。安装和更新只提供 Git 版，不发布 npm 包。旧版用户及协助迁移的代理先读[迁移指南](docs/legacy-migration.md)。
 
 ## 安装与使用
 
