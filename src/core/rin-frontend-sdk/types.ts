@@ -42,6 +42,8 @@ export type RinExtensionUiMethod =
   | "set_editor_text";
 
 export type RinExtensionCommandResult = {
+  /** Explicitly handled without any chat delivery; not an empty reply. */
+  silent?: boolean;
   text?: string;
   fallbackText?: string;
   parts?: ChatMessagePart[];

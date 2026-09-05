@@ -86,6 +86,25 @@ test("chat extension UI projects rich command results without terminal fallback 
   );
 });
 
+test("chat extension UI preserves explicit silence but not accidental empty output", () => {
+  assert.deepEqual(
+    ui.projectChatExtensionUiRequest({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: { silent: true },
+    }),
+    { silent: true },
+  );
+  assert.deepEqual(
+    ui.projectChatExtensionUiRequest({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: {},
+    }),
+    {},
+  );
+});
+
 test("chat extension UI cancels unsupported dialogs instead of hanging", () => {
   assert.deepEqual(
     ui.projectChatExtensionUiRequest({
