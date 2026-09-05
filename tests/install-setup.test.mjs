@@ -156,7 +156,7 @@ test('declining all AGENTS additions creates no file; guidance alone can create 
   assert.equal(await appendAgentsInstructions(file), false);
   await assert.rejects(readFile(file), {code: 'ENOENT'});
   assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), true);
-  assert.equal(await readFile(file, 'utf8'), RIN_SUBAGENT_INSTRUCTIONS + '\n');
+  assert.equal(await readFile(file, 'utf8'), 'Make active use of subagents: use Astra for work that can run in parallel, Terra for relatively independent, simple tasks, and Luna for purely execution-oriented tasks.\n');
 });
 
 test('setup CLI reports the non-interactive preflight failure once', async () => {
