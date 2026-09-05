@@ -22,7 +22,7 @@ test('Minecraft ingress stays source-locked, durable, private until an explicit 
     let body=''; for await (const chunk of req) body += chunk;
     const url = new URL(req.url,'http://127.0.0.1');
     const reply = value => { res.setHeader('content-type','application/json'); res.end(JSON.stringify(value)); };
-    if (req.method === 'GET' && url.pathname === '/v1/inbox') return reply({version:1,messages:acknowledged ? [] : [inbound],nextCursor:'cursor-1'});
+    if (req.method === 'GET' && url.pathname === '/v1/inbox') return reply({version:1,messages:acknowledged ? [] : [{...inbound,id:'other-player',playerUuid:'44444444-4444-4444-8444-444444444444'},inbound],nextCursor:'cursor-1'});
     if (req.method === 'POST' && url.pathname === '/v1/inbox/ack') { acknowledged=JSON.parse(body).throughCursor; return reply({ok:true}); }
     if (req.method === 'POST' && url.pathname === '/v1/outbox') { const value=JSON.parse(body); outbox.push(value); return reply({id:value.id,replyTo:value.replyTo,playerUuid:value.playerUuid,maidUuid:value.maidUuid,state:'accepted'}); }
     if (req.method === 'GET' && url.pathname === '/v1/jobs') return reply({version:1,jobs:[{task:{jobId:'j',action:'wait',args:{}},playerUuid:player,maidUuid:maid,status:'running',detail:'3'}]});
@@ -37,6 +37,8 @@ test('Minecraft ingress stays source-locked, durable, private until an explicit 
   t.after(async () => { await nerve.close(); store.close(); });
   await nerve.open(); await nerve.poll(); await nerve.minecraftSync;
   assert.equal(acknowledged,'cursor-1');
+  assert.throws(()=>nerve.minecraft.read('other-player'),/Unknown Minecraft message/);
+  assert.equal(store.status().length,1);
   const event = store.event('minecraft:private-world:m-1');
   assert.equal(event.state,'pending'); assert.equal(event.payload.messageId,'m-1'); assert.equal(JSON.stringify(event.payload).includes(inbound.text),false);
   const api = makeServer(nerve,nerveToken); api.listen(0,'127.0.0.1'); await once(api,'listening'); t.after(() => api.close());

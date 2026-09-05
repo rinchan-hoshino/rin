@@ -25,7 +25,7 @@ function validateMessage(raw, lock) {
   if (!raw || raw.version !== 1) throw new Error('Unsupported Minecraft message version');
   const message = { version: 1, id:text(raw.id, 'message id', 512), serverId:text(raw.serverId, 'server id', 512), playerUuid:text(raw.playerUuid, 'player UUID', 64), maidUuid:text(raw.maidUuid, 'maid UUID', 64), conversationId:text(raw.conversationId, 'conversation id', 512), text: typeof raw.text === 'string' && raw.text.length <= 100000 ? raw.text : (() => { throw new Error('Invalid Minecraft text'); })(), occurredAt:text(raw.occurredAt, 'occurredAt', 128) };
   if (!UUID.test(message.playerUuid) || !UUID.test(message.maidUuid) || !Number.isFinite(Date.parse(message.occurredAt))) throw new Error('Invalid Minecraft identity or timestamp');
-  if (message.serverId !== lock.serverId || message.playerUuid !== lock.playerUuid || message.maidUuid !== lock.maidUuid) throw new Error('Minecraft source does not match configured server/player/maid lock');
+  if (lock && (message.serverId !== lock.serverId || message.playerUuid !== lock.playerUuid || message.maidUuid !== lock.maidUuid)) throw new Error('Minecraft source does not match configured server/player/maid lock');
   return Object.freeze(message);
 }
 
@@ -116,7 +116,11 @@ export class MinecraftTransport {
       if (!page || page.version !== 1 || !Array.isArray(page.messages) || typeof page.nextCursor !== 'string') throw new Error('Invalid Minecraft inbox response');
       const ids = [];
       for (const raw of page.messages) {
-        const message = validateMessage(raw, this.source);
+        const message = validateMessage(raw);
+        if (message.serverId !== this.source.serverId) throw new Error('Minecraft source does not match configured server lock');
+        // One game inbox may contain other players. Consume its cursor without
+        // admitting those identities or allowing them to block the bound owner.
+        if (message.playerUuid !== this.source.playerUuid || message.maidUuid !== this.source.maidUuid) continue;
         const fingerprint = hash(message);
         const old = this.state.inbox[message.id];
         if (old && old.fingerprint !== fingerprint) throw new Error(`Minecraft message ID conflict: ${message.id}`);

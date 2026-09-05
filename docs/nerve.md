@@ -39,7 +39,7 @@ Git 安装生成稳定入口 `<RIN_HOME>/nerve-mcp-run.mjs`。MCP 配置以 Node
 
 Minecraft 是同一常驻 persona 的一个本地输入源，不会创建第二个 Codex 任务。启用时，Nerve 以独立 Node transport 轮询游戏模组的 loopback HTTP 服务；游戏消息先在 `stateFile` 中原子持久化，再使用稳定事件 ID `minecraft:<serverId>:<messageId>` 交给已经配置的唯一 `codex` 或 `codex-app` target。ACK 只表示 Nerve 已可靠接手，绝不表示模型或游戏动作完成。进程在发送前崩溃的出站项保留 `uncertain`，不自动重放。
 
-`private/nerve.json` 必须显式加入以下配置；没有这一节即不会开启 Minecraft。`source` 是硬锁：`playerUuid` 必须来自目标服务器实际 `ServerPlayer` UUID 的管理员配置，不能以“任意进服玩家”或聊天文字识别主人。`MC_BRIDGE_TOKEN` 与 `NERVE_TOKEN` 是两个不同的随机密钥，前者至少32字符，只用于游戏 loopback 接口，不能放进公开配置。
+`private/nerve.json` 必须显式加入以下配置；没有这一节即不会开启 Minecraft。同一游戏收件箱中的其他玩家/女仆消息会被跳过并推进游标，不进入规范记录或 persona，也不会阻塞绑定玩家；服务器标识不匹配则停止同步。`source` 是硬锁：`playerUuid` 必须来自目标服务器实际 `ServerPlayer` UUID 的管理员配置，不能以“任意进服玩家”或聊天文字识别主人。`MC_BRIDGE_TOKEN` 与 `NERVE_TOKEN` 是两个不同的随机密钥，前者至少32字符，只用于游戏 loopback 接口，不能放进公开配置。
 
 ```json
 {

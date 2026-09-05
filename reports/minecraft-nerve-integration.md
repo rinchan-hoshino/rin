@@ -5,6 +5,7 @@ Minecraft can feed canonical player messages into the existing persona task and 
 ## Behavior
 
 - A dedicated loopback bearer token and configured server/player/maid identities bind the source. Canonical records are checked again against the current source lock when read or handed off, including after a configuration change.
+- Other player or maid messages from the same server are skipped without canonical storage or persona handoff, so they cannot block the bound player. A mismatched server identity still stops synchronization.
 - Inbox pages are persisted before persona handoff and acknowledged afterward. Stable IDs deduplicate events. Uncertain outgoing requests remain recorded and are not replayed automatically.
 - The combined daemon initializes the transport, resolves relative state paths from its configuration directory, and closes its durable state lock during shutdown.
 - Game polling runs independently. A slow or unavailable game server cannot delay Discord attention scanning or scheduled work.
