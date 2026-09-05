@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { CodexAppIpc } from '../src/codex-app-ipc.mjs';
 
 const threadId = '22222222-2222-4222-8222-222222222222';
+const unixSocketTest = process.platform === 'win32'
+  ? test.skip
+  : test;
 const encode = value => {
   const payload = Buffer.from(JSON.stringify(value));
   const header = Buffer.alloc(4); header.writeUInt32LE(payload.length);
@@ -50,7 +53,25 @@ function protocol(handler = () => {}) {
   };
 }
 
-test('steers using the exact local version 1 request shape', async t => {
+test('validates messages and local images before choosing the IPC transport', async t => {
+  const codexHome = await mkdtemp(join(tmpdir(), 'rin-app-ipc-validation-'));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+  const ipc = new CodexAppIpc({ codexHome });
+
+  await assert.rejects(ipc.steer(threadId, { text: '', cwd: '/work' }), /text or image required/);
+  await assert.rejects(ipc.steer(threadId, {
+    text: '', cwd: '/work', files: [{ path: join(codexHome, 'missing.png'), mimeType: 'image/png' }],
+  }), error => error.code === 'ENOENT');
+
+  const largePath = join(codexHome, 'large.png');
+  await writeFile(largePath, '');
+  await truncate(largePath, 20 * 1024 * 1024 + 1);
+  await assert.rejects(ipc.steer(threadId, {
+    text: '', cwd: '/work', files: [{ path: largePath, mimeType: 'image/png' }],
+  }), /exceeds 20 MiB/);
+});
+
+unixSocketTest('steers using the exact local version 1 request shape', async t => {
   const seen = [];
   const f = await fake(t, protocol(({ value }) => seen.push(value)));
   const ipc = new CodexAppIpc({ codexHome: f.codexHome });
@@ -71,7 +92,7 @@ test('steers using the exact local version 1 request shape', async t => {
   assert.equal(seen[2].params.restoreMessage.context.workspaceRoots[0], '/work');
 });
 
-test('steers local images with App input, attachment, and restore schemas', async t => {
+unixSocketTest('steers local images with App input, attachment, and restore schemas', async t => {
   const seen = [];
   const f = await fake(t, protocol(({ value }) => seen.push(value)));
   const ipc = new CodexAppIpc({ codexHome: f.codexHome });
@@ -98,7 +119,7 @@ test('steers local images with App input, attachment, and restore schemas', asyn
   assert.equal(request.params.restoreMessage.context.prompt, 'look');
 });
 
-test('accepts an image-only message and starts an idle owner with version 2', async t => {
+unixSocketTest('accepts an image-only message and starts an idle owner with version 2', async t => {
   const seen = [];
   const f = await fake(t, protocol(({ value }) => seen.push(value)));
   const ipc = new CodexAppIpc({ codexHome: f.codexHome });
@@ -123,7 +144,7 @@ test('accepts an image-only message and starts an idle owner with version 2', as
   });
 });
 
-test('keeps non-image attachments as local path text and validates images before connecting', async t => {
+unixSocketTest('keeps non-image attachments as local path text and validates images before connecting', async t => {
   const seen = [];
   const f = await fake(t, protocol(({ value }) => seen.push(value)));
   const ipc = new CodexAppIpc({ codexHome: f.codexHome });
@@ -145,7 +166,7 @@ test('keeps non-image attachments as local path text and validates images before
   }), /exceeds 20 MiB/);
 });
 
-test('malformed start receipt is uncertain', async t => {
+unixSocketTest('malformed start receipt is uncertain', async t => {
   const f = await fake(t, ({ value, send }) => {
     if (value.method === 'initialize') send({ type: 'response', requestId: value.requestId, resultType: 'success', result: { clientId: 'c' } });
     if (value.method === 'thread-owner-discovery') send({ type: 'response', requestId: value.requestId, resultType: 'success', handledByClientId: 'o' });
@@ -160,7 +181,7 @@ test('malformed start receipt is uncertain', async t => {
   }), error => error.code === 'CODEX_APP_IPC_UNCERTAIN');
 });
 
-test('handles fragmented frames and unrelated broadcasts', async t => {
+unixSocketTest('handles fragmented frames and unrelated broadcasts', async t => {
   const f = await fake(t, ({ socket, value }) => {
     const responses = [];
     responses.push(encode({ type: 'broadcast', event: 'ignored' }));
@@ -176,7 +197,7 @@ test('handles fragmented frames and unrelated broadcasts', async t => {
   assert.equal((await ipc.steer(threadId, { text: 'hi', cwd: '/x' })).turnId, 't');
 });
 
-test('returns null when socket is missing or owner reports no client', async t => {
+unixSocketTest('returns null when socket is missing or owner reports no client', async t => {
   const absent = await mkdtemp(join(tmpdir(), 'rin-app-ipc-absent-'));
   t.after(() => rm(absent, { recursive: true, force: true }));
   const ipcAbsent = new CodexAppIpc({ codexHome: absent });
@@ -193,7 +214,7 @@ test('returns null when socket is missing or owner reports no client', async t =
   assert.equal(steers, 0);
 });
 
-test('disconnect after steer send is uncertain and payload is redacted', async t => {
+unixSocketTest('disconnect after steer send is uncertain and payload is redacted', async t => {
   const f = await fake(t, protocol(({ socket, value }) => {
     if (value.method === 'thread-follower-steer-turn') socket.destroy();
   }));
@@ -202,7 +223,7 @@ test('disconnect after steer send is uncertain and payload is redacted', async t
     error.code === 'CODEX_APP_IPC_UNCERTAIN' && !error.message.includes('private payload') && !error.message.includes('/private/path'));
 });
 
-test('timeout and malformed receipt after steer are uncertain', async t => {
+unixSocketTest('timeout and malformed receipt after steer are uncertain', async t => {
   for (const malformed of [false, true]) {
     const f = await fake(t, ({ value, send }) => {
       if (value.method === 'initialize') send({ type: 'response', requestId: value.requestId, resultType: 'success', result: { clientId: 'c' } });
@@ -214,7 +235,7 @@ test('timeout and malformed receipt after steer are uncertain', async t => {
   }
 });
 
-test('stop cancels active steer, closes sockets, and disables later calls', async t => {
+unixSocketTest('stop cancels active steer, closes sockets, and disables later calls', async t => {
   let peer;
   let steerSeen = false;
   const f = await fake(t, ({ socket, value, send }) => {
@@ -233,7 +254,7 @@ test('stop cancels active steer, closes sockets, and disables later calls', asyn
   await assert.rejects(ipc.steer(threadId, { text: 'hi', cwd: '/x' }), /stopped/);
 });
 
-test('rejects insecure socket directories without changing permissions', async t => {
+unixSocketTest('rejects insecure socket directories without changing permissions', async t => {
   const f = await fake(t, protocol());
   await chmod(join(f.codexHome, 'ipc'), 0o722);
   const ipc = new CodexAppIpc({ codexHome: f.codexHome });
