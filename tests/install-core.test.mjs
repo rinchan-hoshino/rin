@@ -153,6 +153,23 @@ test('CLI routing reserves exact lifecycle commands and preserves ordinary Codex
   assert.throws(() => routeArgs(['restart', '--force']), /takes no arguments/);
 });
 
+test('stable MCP launcher follows release changes without rewriting the entrypoint', async t => {
+  const home = await temporary(t);
+  await writeLaunchers(home, { binDir: join(home, 'bin'), publish: false });
+  const launcher = join(home, 'nerve-mcp-run.mjs');
+  const original = await readFile(launcher, 'utf8');
+  for (const sha of ['a'.repeat(40), 'b'.repeat(40)]) {
+    const source = join(home, 'releases', sha, 'src');
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'nerve-mcp.mjs'), `export async function main(){console.log(JSON.stringify({release:${JSON.stringify(sha)},config:process.env.NERVE_CONFIG}));}`);
+    await writeFile(join(home, 'install.json'), JSON.stringify({ current: sha }));
+    const {stdout,stderr} = await execFileAsync(process.execPath, [launcher], { env: {...process.env, NERVE_CONFIG:'/unchanged/private/nerve.json'} });
+    assert.equal(stderr, '');
+    assert.deepEqual(JSON.parse(stdout), {release:sha,config:'/unchanged/private/nerve.json'});
+    assert.equal(await readFile(launcher, 'utf8'), original);
+  }
+});
+
 test('stable launchers load the selected release, pass argv, and gracefully stop the daemon', async t => {
   const home = await temporary(t);
   const sha = 'a'.repeat(40);

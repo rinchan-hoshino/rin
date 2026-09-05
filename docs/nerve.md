@@ -1,6 +1,6 @@
 # Nerve
 
-Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP 都属于 Rin；聊天桥和事件调度仍是两个独立服务，共用平台适配能力，不依赖旧 Rin、Pi 或旧 daemon。
+Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP 都属于 Rin；聊天桥和事件调度是两个独立模块，在安装版的同一个守护进程内运行，不依赖旧 Rin、Pi 或旧 daemon。
 
 ## 单一常驻代理
 
@@ -26,6 +26,8 @@ Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP �
 记录、待处理批次及事件准入持久化并事务提交。外部内容属于不可信聊天数据，不是系统指令；跨频道共用任务不授权将其他频道或私人资料复制出去。
 
 ## MCP 与接口
+
+Git 安装生成稳定入口 `<RIN_HOME>/nerve-mcp-run.mjs`。MCP 配置以 Node 运行此入口，并保留 `NERVE_CONFIG` 指向实际配置；不要将 MCP 绑定到某个 `releases/<sha>` 目录。每次新建 MCP 连接时，入口读取 `install.json.current` 并加载该发布的客户端。`rin update` 后，已有连接继续使用原客户端；重连后使用新版，不需要重启聊天守护进程。
 
 `nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`，默认9761。MCP提供10个工具：
 

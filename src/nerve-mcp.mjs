@@ -104,7 +104,7 @@ export function createHandler({ port, token, requestTimeoutMs = 15000 }) {
   };
 }
 
-async function main() {
+export async function main() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const configPath = resolve(process.env.NERVE_CONFIG ?? resolve(root, 'private/nerve.json'));
   const config = JSON.parse(await readFile(configPath, 'utf8'));

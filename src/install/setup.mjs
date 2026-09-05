@@ -80,9 +80,10 @@ export async function disableLegacy(legacy, { exec = run, platform = process.pla
 
 export async function writeLaunchers(home, { binDir, node = process.execPath, platform = process.platform, publish = true } = {}) {
   await mkdir(binDir, { recursive: true });
-  // Both stable entrypoints read the same atomic record. Updating never rewrites live source.
+  // Stable entrypoints read the same atomic record. Updating never rewrites live source.
   const load = `import{readFileSync}from'node:fs';import{join,dirname,delimiter}from'node:path';import{fileURLToPath,pathToFileURL}from'node:url';\nconst home=dirname(fileURLToPath(import.meta.url));process.env.PATH=dirname(process.execPath)+delimiter+(process.env.PATH||'');const state=JSON.parse(readFileSync(join(home,'install.json'),'utf8'));if(!/^[a-f0-9]{40}$/.test(state.current))throw Error('Invalid Rin release');\n`;
   await writeFile(join(home, 'launcher.mjs'), load + `const{main}=await import(pathToFileURL(join(home,'releases',state.current,'src/cli.mjs')));try{process.exitCode=await main(process.argv.slice(2),{home});}catch(e){console.error(e.message);process.exitCode=1;}\n`);
+  await writeFile(join(home, 'nerve-mcp-run.mjs'), load + `try{const{main}=await import(pathToFileURL(join(home,'releases',state.current,'src/nerve-mcp.mjs')));await main();}catch{process.stderr.write('Nerve MCP failed to start; check installation and private configuration.\\n');process.exitCode=1;}\n`);
   await writeFile(join(home, 'daemon-run.mjs'), load + `
 import{writeFileSync,renameSync,unlinkSync}from'node:fs';
 process.env.RIN_MANAGED_DAEMON='1';

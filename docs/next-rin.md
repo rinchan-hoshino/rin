@@ -17,6 +17,8 @@
 
 英文 Git 安装器与 `rin update/start/stop/restart` 入口见 [安装说明](installation.md)。普通 `rin` 调用透传 Codex。候选 Git 版本在独立目录完成依赖安装和测试，再切换原子安装记录；更新失败保留前版。只用 Codex 不需要后台服务，未配置聊天/Nerve 时守护进程保持停止。推荐配置尚待确定，安装器不复制私人设置。
 
+Nerve MCP 使用安装根目录的稳定 `nerve-mcp-run.mjs` 入口，新连接按同一安装记录选择客户端发布版本，避免把配置固定在旧 release。已有连接在重连后加载新版；不通过新增用户命令管理 MCP。
+
 ### Codex 接入
 
 App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，空闲时 start；允许显式开启 macOS 原生链接唤醒未加载任务。读到明确回执后跟踪对应 turn，不能把队列接收当作执行完成。
