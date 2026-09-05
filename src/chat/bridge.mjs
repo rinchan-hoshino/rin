@@ -77,7 +77,7 @@ export class ChatBridge {
     await this.submit();
   }
   async receive(config, message) {
-    if (!allowed(config,message)) return;
+    if (!allowed(config,message,{command:Boolean(parseCommand(message.text,this.commands))})) return;
     if(await this.command(config,message))return;
     const binding = this.config.bindings.find(b => b.adapter === config.id && String(b.chatId) === String(message.chatId) && b.kind === message.kind);
     if (!binding) { this.log.warn('message ignored: chat has no explicit binding', {adapter:config.id,chatId:message.chatId}); return; }

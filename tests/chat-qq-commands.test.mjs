@@ -20,6 +20,8 @@ function fixture(recordsByScope) {
   return{bot,calls};
 }
 
+test('QQ built-in group catalog includes usage',()=>{assert.deepEqual(qqCommandPanels()[1].panel.items.map(i=>i.name),['/help','/usage']);});
+
 test('QQ command panels expose the current registry and filter private commands in groups',()=>{
   const [c2c,group]=qqCommandPanels(commands);
   assert.equal(c2c.panel.remark,QQ_COMMAND_PANEL_REMARK);

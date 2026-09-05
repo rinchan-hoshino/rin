@@ -49,7 +49,7 @@ QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不�
 
 The authoritative catalog contains `/help`, `/usage`, and locally installed command extensions. The same catalog drives text invocation, execution, help, and platform registration. Existing `bindings` remain message routes and are independent of command discovery.
 
-Command permission is exactly chat admission: any user admitted by `allowUsers`, `dmOnly`, and the group mention rule can call commands. There is no second owner role. `privateOnly` restricts where results may be shown; `/usage` remains private-chat-only, even for an ephemeral group invocation. Recognized Discord controls do not enter the attention/model path.
+Command permission is exactly chat admission: any user admitted by `allowUsers`, `dmOnly`, and the group mention rule can call commands. There is no second owner role. `privateOnly` restricts where an extension result may be shown; the built-in `/usage` is available in admitted group chats. For a DM-only Discord adapter, `commandChatIds` can explicitly allow registered commands in selected group channels without changing ordinary-message routing; the same user allowlist and text-mention rule still apply. Recognized Discord controls do not enter the attention/model path.
 
 Command IDs are claimed durably before execution, so platform replay cannot invoke a handler twice. Interrupted commands are not automatically replayed. Discord private response handles exist only in memory: after restart or expiry, a reply fails closed instead of posting publicly.
 
@@ -73,7 +73,7 @@ export default {
 
 Only regular `.mjs` files are loaded, in filename order. Invalid definitions and import failures are skipped with a fixed warning. Extensions cannot replace a built-in name; if extensions share a name, all conflicting definitions are rejected. Unrelated valid extensions still load. No model turn or extra approval role is introduced by the command layer.
 
-Platform command APIs are reconciled to the complete catalog. Discord updates the application scope; configured guild scopes are handled explicitly. Telegram clears the known legacy private/group/admin scopes before maintaining its default catalog. QQ command panels are reconciled across supported scopes; unrelated non-command menu content is preserved. Failed or unavailable API operations produce a warning without holding daemon readiness indefinitely. Actual readback is needed to establish whether old commands were removed.
+Platform command APIs are reconciled to the complete catalog. Discord updates the global application catalog and clears overrides in the bot's actual guilds so they cannot shadow that catalog. Telegram clears the known legacy private/group/admin scopes before maintaining its default catalog. QQ command panels are reconciled across supported scopes; unrelated non-command menu content is preserved. Failed or unavailable API operations produce a warning without holding daemon readiness indefinitely. Actual readback is needed to establish whether old commands were removed.
 
 ### Usage
 

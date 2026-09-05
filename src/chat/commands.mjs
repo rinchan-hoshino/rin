@@ -1,7 +1,7 @@
 // One command contract for text ingress and platform menus.
 export const COMMANDS = Object.freeze([
   {name:'help',description:'Show available commands'},
-  {name:'usage',privateOnly:true,description:'Show account usage in a private chat',argument:'Options: current, history, card, text, --help'},
+  {name:'usage',description:'Show account usage',argument:'Options: current, history, card, text, --help'},
 ]);
 export function parseCommand(text, commands = COMMANDS) {
   const match=/^\/([a-z][a-z0-9_]*)(?:@[\w]+)?(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());

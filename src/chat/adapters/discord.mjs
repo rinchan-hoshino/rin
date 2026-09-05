@@ -1,7 +1,7 @@
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {COMMANDS, registerCommands} from '../commands.mjs';
+import {COMMANDS, parseCommand, registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -23,9 +23,9 @@ function commandText(commands, name, args = '') {
   return `/${command.name}${suffix ? ` ${suffix}` : ''}`;
 }
 
-function allowed(config, userId, kind) {
+function allowed(config, userId, kind, commandChatId) {
   const users = Array.isArray(config.allowUsers) ? config.allowUsers.map(String) : [];
-  return users.length > 0 && users.includes(String(userId)) && (!(config.dmOnly ?? true) || kind === 'dm');
+  return users.length > 0 && users.includes(String(userId)) && (!(config.dmOnly ?? true) || kind === 'dm' || config.commandChatIds?.includes(String(commandChatId))===true);
 }
 
 function cleanName(name = '') {
@@ -62,16 +62,16 @@ async function download(url, name, mimeType, dataDir, fetchImpl) {
   return {path: filePath, name: safe, mimeType: mimeType || undefined};
 }
 
-export function normalizeDiscordMessage(message, config, selfId = '') {
+export function normalizeDiscordMessage(message, config, selfId = '', commands = COMMANDS) {
   if (!message || message.author?.bot || String(message.author?.id || '') === String(selfId)) return null;
   const userId = String(message.author?.id || '');
   const kind = message.guildId ? 'group' : 'dm';
-  if (!userId || !allowed(config, userId, kind)) return null;
   const mentionTokens = selfId ? [`<@${selfId}>`, `<@!${selfId}>`] : [];
   const mentioned = kind === 'dm' || Boolean(message.mentions?.users?.has?.(String(selfId)));
   if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   let text = String(message.content || '').trim();
   if (mentioned && kind === 'group') for (const token of mentionTokens) text = text.split(token).join('').trim();
+  if (!userId || !allowed(config,userId,kind,parseCommand(text,commands)?message.channelId:undefined))return null;
   return {id: String(message.id), chatId: String(message.channelId), userId, kind, mentioned, text,
     replyTo: message.reference?.messageId ? String(message.reference.messageId) : undefined};
 }
@@ -87,7 +87,7 @@ export function createAdapter(config, context) {
   const capabilities = {edit: true, typing: true, maxText: 2000};
 
   async function receive(message) {
-    const incoming = normalizeDiscordMessage(message, config, client?.user?.id);
+    const incoming = normalizeDiscordMessage(message, config, client?.user?.id, commands);
     const bound = incoming && (!context.isBound || await context.isBound(incoming));
     let commandSource=String(message?.content || '').trim();
     for(const token of client?.user?.id ? [`<@${client.user.id}>`,`<@!${client.user.id}>`] : [])commandSource=commandSource.split(token).join('').trim();
@@ -129,7 +129,7 @@ export function createAdapter(config, context) {
     const userId = String(interaction.user?.id || '');
     const kind = interaction.guildId ? 'group' : 'dm';
     const text = commandText(commands, interaction.commandName, interaction.options?.getString?.('args'));
-    if (!text || !allowed(config, userId, kind) || interaction.user?.bot) return;
+    if (!text || !allowed(config, userId, kind, interaction.channelId) || interaction.user?.bot) return;
     const interactionId = String(interaction.id);
     if (pendingInteractions.has(interactionId) || interactions.has(interactionId)) return;
     pendingInteractions.add(interactionId);
@@ -152,9 +152,15 @@ export function createAdapter(config, context) {
   async function syncCommands() {
     const set = client?.application?.commands?.set;
     if (typeof set !== 'function') throw new Error('discord_application_command_api_missing');
-    const guildIds = Array.isArray(config.commandGuildIds) ? config.commandGuildIds.map(String).filter(Boolean) : [];
-    if (guildIds.length) for (const guildId of guildIds) await set.call(client.application.commands, discordCommands, guildId);
-    else await set.call(client.application.commands, discordCommands);
+    // Global is authoritative. Old guild commands shadow it in the picker.
+    await set.call(client.application.commands, discordCommands);
+    const guildIds=new Set((config.commandGuildIds || []).map(String));
+    for(const id of client.guilds?.cache?.keys?.() || [])guildIds.add(String(id));
+    if(typeof client.guilds?.fetch==='function') {
+      const guilds=await client.guilds.fetch();
+      for(const id of guilds.keys())guildIds.add(String(id));
+    }
+    for(const guildId of guildIds)await set.call(client.application.commands, [], guildId);
   }
 
   async function channel(chatId) {
