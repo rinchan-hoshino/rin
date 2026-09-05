@@ -1,5 +1,4 @@
 import { readFile, writeFile, mkdir, rename, realpath, rm } from 'node:fs/promises';
-import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
 import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -7,6 +6,10 @@ import { installHome, REPOSITORY, exists, run, withInstallLock, prepareRelease, 
 import { createService } from './service.mjs';
 import { installProducts, installHistoryTool, historySupport } from './products.mjs';
 import { applyRecommendedCodexProfile } from './profile.mjs';
+import {appendAgentsInstructions} from './instructions.mjs';
+import {collectChoices,confirmChoice,runSetupProgress,setupUI} from './setup-ui.mjs';
+export {collectChoices} from './setup-ui.mjs';
+export {appendAgentsInstructions,RIN_SUBAGENT_INSTRUCTIONS} from './instructions.mjs';
 
 const quoteSh = value => `'${value.replaceAll("'", "'\\''")}'`;
 export async function ensureCommandPath(binDir, { userHome = homedir(), platform = process.platform, env = process.env, exec = run } = {}) {
@@ -114,112 +117,60 @@ try{
   return file;
 }
 
-export const RIN_SUBAGENT_INSTRUCTIONS = `## Rin subagent guidance
-
-Choose subagent models from those currently available in the host, using their stated capabilities and relative cost. Use lower-cost models for bounded, straightforward work; reserve more capable models for difficult reasoning, uncertain requirements, and integration decisions. Do not assume model names or prices remain current.
-
-Delegate concrete, independent tasks in parallel when the expected benefit exceeds coordination and context costs. Keep dependent steps sequential, avoid concurrent edits to the same files, and do small tasks locally when delegation adds overhead. Give each subagent only the context and acceptance criteria it needs. Follow the host's available tools and model-selection rules; if a model override is unavailable, use the supported default.
-
-The primary agent owns the outcome: review and integrate subagent results, resolve conflicts, and verify the combined change before reporting completion.`;
-
-export async function appendAgentsInstructions(file, {agents = '', subagentGuidance = false} = {}) {
-  const previous = await exists(file) ? await readFile(file, 'utf8') : '';
-  let next = previous;
-  const append = text => { next += `${next && !next.endsWith('\n') ? '\n' : ''}${next ? '\n' : ''}${text}\n`; };
-  if (agents.trim()) append(agents);
-  if (subagentGuidance && !next.includes(RIN_SUBAGENT_INSTRUCTIONS)) append(RIN_SUBAGENT_INSTRUCTIONS);
-  if (next === previous) return false;
-  await mkdir(dirname(file), {recursive: true});
-  await writeFile(file, next, {mode: 0o600});
-  return true;
-}
-
-export async function collectChoices(ask, say, { hasAgents = false, legacy = null } = {}) {
-  say('Rin for Codex — Git installation');
-  if (legacy) {
-    say('An old Pi-based Rin installation was found. Continuing will disable its service and CLI launchers. Its private data will be retained.');
-    if (!/^y(?:es)?$/i.test((await ask('Continue with the old Rin cutover? [y/N] ')).trim())) throw new Error('Installation cancelled');
-  }
-  say('Products: 1) Codex CLI  2) ChatGPT desktop app. Select both with 1,2, or leave blank to use existing products.');
-  let selected;
-  while (true) {
-    const input = (await ask('Install products: ')).trim();
-    selected = input ? [...new Set(input.split(/[,\s]+/))] : [];
-    if (selected.every(x => ['1', '2'].includes(x))) break;
-    say('Enter 1, 2, 1,2, or leave blank.');
-  }
-  say('The optional Rin profile enables context management and memories; prevents sleep during work and keeps remote control awake while plugged in.');
-  say('It uses an empty Git branch prefix, squash merges, and best-effort worktree refresh, and disables Sites, Hotline, and Safety Settings connectors.');
-  say('It grants Codex full filesystem access and sets approval_policy to never, so Codex does not request execution approval. Other settings are preserved.');
-  const recommendations = /^y(?:es)?$/i.test((await ask('Apply the Rin recommended Codex profile? [y/N] ')).trim());
-  if(!recommendations)say('Existing Codex settings will be preserved.');
-  let agents = '';
-  if (!hasAgents || /^y(?:es)?$/i.test((await ask('Global AGENTS.md already exists. Append your new instructions? [y/N] ')).trim())) {
-    say('Write your initial global AGENTS instructions. Suggested topics: agent role, working principles, and communication preferences.');
-    say('Finish with a single period (.) on its own line. Leave empty to skip.');
-    const lines = [];
-    for (;;) { const line = await ask('> '); if (line === '.') break; lines.push(line); }
-    agents = lines.join('\n');
-  }
-  say('Optional subagent guidance chooses currently available models by cost and task difficulty, and delegates independent work in parallel.');
-  say('It is appended after your instructions; existing text is preserved. Preview:');
-  say(RIN_SUBAGENT_INSTRUCTIONS);
-  const subagentGuidance = /^y(?:es)?$/i.test((await ask('Append Rin subagent guidance to global AGENTS.md? [y/N] ')).trim());
-  const history = /^y(?:es)?$/i.test((await ask('Install the optional original-session text search tool (FFF MCP)? [y/N] ')).trim());
-  return { products: selected.map(x => x === '1' ? 'codex' : 'chatgpt'), recommendations, agents, subagentGuidance, history };
-}
-
 export async function setup({ home = installHome(), repository = REPOSITORY, binDir = join(homedir(), '.local/bin'), codexHome = process.env.CODEX_HOME || join(homedir(), '.codex') } = {}) {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Rin requires Node.js 24 or newer');
   if (!process.stdin.isTTY) throw new Error('Run the installer in an interactive terminal');
   if (await exists(join(home, 'install.json'))) throw new Error('Rin is already installed here. Use rin update.');
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const legacy = await inspectLegacy();
-    const agentsPath = join(codexHome, 'AGENTS.md');
-    const choices = await collectChoices(q => rl.question(q), console.log, { hasAgents: await exists(agentsPath), legacy });
-    if (choices.history && !historySupport().supported) throw new Error(historySupport().reason);
-    const destination = join(binDir, process.platform === 'win32' ? 'rin.cmd' : 'rin');
-    if (await exists(destination) && !legacy?.cli.includes(destination) && !(await readFile(destination, 'utf8')).includes(join(home, 'launcher.mjs'))) throw new Error(`An unrelated launcher already exists: ${destination}`);
-    return await withInstallLock(home, async () => {
-      const candidate = await prepareRelease(home, { repository });
-      // Finish downloads and candidate validation before disabling the legacy runtime.
-      await installProducts({ products: choices.products, home });
-      await mkdir(join(home, 'private/logs'), { recursive: true, mode: 0o700 });
-      await mkdir(codexHome, { recursive: true, mode: 0o700 });
-      if(choices.recommendations) {
-        const command=await codexCommand({env:{...process.env,CODEX_HOME:codexHome}});
-        await applyRecommendedCodexProfile({codexHome,command});
-        console.log('Rin recommended Codex profile applied, including approval_policy=never.');
+  const legacy = await inspectLegacy();
+  const agentsPath = join(codexHome, 'AGENTS.md');
+  const choices = await collectChoices({hasAgents: await exists(agentsPath), legacy, home, agentsPath});
+  if (!choices) return {home, cancelled: true};
+  if (choices.history && !historySupport().supported) throw new Error(historySupport().reason);
+  const destination = join(binDir, process.platform === 'win32' ? 'rin.cmd' : 'rin');
+  if (await exists(destination) && !legacy?.cli.includes(destination) && !(await readFile(destination, 'utf8')).includes(join(home, 'launcher.mjs'))) throw new Error(`An unrelated launcher already exists: ${destination}`);
+  return await withInstallLock(home, async () => {
+    const candidate = await runSetupProgress('Prepare and test the Rin release', () => prepareRelease(home, {repository, exec: (command,args,options) => run(command,args,{...options,capture:true})}));
+    // Finish downloads and candidate validation before disabling the legacy runtime.
+    if (choices.products.length) setupUI.log.step('Install selected products');
+    await installProducts({ products: choices.products, home });
+    await mkdir(join(home, 'private/logs'), { recursive: true, mode: 0o700 });
+    await mkdir(codexHome, { recursive: true, mode: 0o700 });
+    if(choices.recommendations) {
+      const command=await codexCommand({env:{...process.env,CODEX_HOME:codexHome}});
+      await runSetupProgress('Apply recommended Codex settings', () => applyRecommendedCodexProfile({codexHome,command}));
+      setupUI.log.success('Recommended Codex profile applied, including approval_policy=never.');
+    }
+    await appendAgentsInstructions(agentsPath, choices);
+    if (!await exists(join(home, 'private/daemon.json'))) await atomicJSON(join(home, 'private/daemon.json'), { chat: null, nerve: null });
+    await writeLaunchers(home, { binDir, publish: false });
+    const service = createService({ home, node: process.execPath, env: { ...process.env, PATH: [binDir, dirname(process.execPath), process.env.PATH || ''].join(process.platform === 'win32' ? ';' : ':') } });
+    await runSetupProgress('Register the Rin service', () => service.install());
+    if (choices.history) {
+      const tool = await installHistoryTool({ home, codexHome });
+      setupUI.log.success(tool.registered ? 'Original-session text search is registered.' : 'An existing session-history MCP entry was preserved. The downloaded tool has not replaced it.');
+    }
+    // Service registration and auxiliary setup must succeed before the old CLI is disabled.
+    await disableLegacy(legacy);
+    let launcher;
+    try {
+      launcher = await writeLaunchers(home, { binDir });
+      await atomicJSON(join(home, 'install.json'), { schema: 1, type: 'git', repository, current: candidate.sha, previous: null, node: process.execPath, binDir, recommendationsRequested: choices.recommendations });
+    } catch (error) {
+      for (const file of legacy?.cli || []) {
+        if (await exists(`${file}.pi-disabled`)) { await rm(file, { force: true }); await rename(`${file}.pi-disabled`, file); }
       }
-      await appendAgentsInstructions(agentsPath, choices);
-      if (!await exists(join(home, 'private/daemon.json'))) await atomicJSON(join(home, 'private/daemon.json'), { chat: null, nerve: null });
-      await writeLaunchers(home, { binDir, publish: false });
-      const service = createService({ home, node: process.execPath, env: { ...process.env, PATH: [binDir, dirname(process.execPath), process.env.PATH || ''].join(process.platform === 'win32' ? ';' : ':') } });
-      await service.install();
-      if (choices.history) {
-        const tool = await installHistoryTool({ home, codexHome });
-        console.log(tool.registered ? 'Original-session text search is registered.' : 'An existing session-history MCP entry was preserved. The downloaded tool has not replaced it.');
-      }
-      // Service registration and auxiliary setup must succeed before the old CLI is disabled.
-      await disableLegacy(legacy);
-      let launcher;
-      try {
-        launcher = await writeLaunchers(home, { binDir });
-        await atomicJSON(join(home, 'install.json'), { schema: 1, type: 'git', repository, current: candidate.sha, previous: null, node: process.execPath, binDir, recommendationsRequested: choices.recommendations });
-      } catch (error) {
-        for (const file of legacy?.cli || []) {
-          if (await exists(`${file}.pi-disabled`)) { await rm(file, { force: true }); await rename(`${file}.pi-disabled`, file); }
-        }
-        throw new Error(`Installation cutover failed: ${error.message}. Legacy CLI launchers were restored; its service remains stopped.`);
-      }
-      await ensureCommandPath(binDir);
-      const daemon = JSON.parse(await readFile(join(home, 'private/daemon.json'), 'utf8'));
-      if ((daemon.chat || daemon.nerve) && /^y(?:es)?$/i.test((await rl.question('Configured background services were found. Start Rin now? [y/N] ')).trim())) await service.start();
-      else console.log('The daemon is installed but stopped. Codex CLI use does not need it. Configure private/daemon.json, then run rin start when you need background work.');
-      console.log(`Rin installed: ${launcher}\nOpen a new terminal to load the command path. Run rin to use Codex; rin update updates this Git installation.`);
-      return { home, release: candidate.sha };
-    });
-  } finally { rl.close(); }
+      throw new Error(`Installation cutover failed: ${error.message}. Legacy CLI launchers were restored; its service remains stopped.`);
+    }
+    await ensureCommandPath(binDir);
+    const daemon = JSON.parse(await readFile(join(home, 'private/daemon.json'), 'utf8'));
+    if ((daemon.chat || daemon.nerve) && await confirmChoice('Configured background services were found. Start Rin now?', false)) await runSetupProgress('Start Rin', () => service.start());
+    else setupUI.log.info('The daemon is installed but stopped. Codex CLI use does not need it. Configure private/daemon.json, then run rin start when you need background work.');
+    setupUI.outro(`Rin installed: ${launcher}\nOpen a new terminal to load the command path. Run rin to use Codex; rin update updates this Git installation.`);
+    return { home, release: candidate.sha };
+  });
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) setup().catch(e => { console.error(e.message); process.exitCode = 1; });
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) setup().catch(error => {
+  if (error.code !== 'INSTALL_CANCELLED') console.error(error.message);
+  process.exitCode = 1;
+});

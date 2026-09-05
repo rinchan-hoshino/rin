@@ -77,8 +77,8 @@ if (-not (Test-Node24)) { Install-ManagedNode }
 if (-not (Test-Node24)) { throw 'Node.js 24 could not be prepared.' }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git installation did not complete. Run this installer again.' }
 
-if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'src/install/setup.mjs'))) {
-  & node (Join-Path $PSScriptRoot 'src/install/setup.mjs')
+if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'src/install/bootstrap.mjs'))) {
+  & node (Join-Path $PSScriptRoot 'src/install/bootstrap.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Rin installation failed (exit $LASTEXITCODE)." }
   return
 }
@@ -87,7 +87,7 @@ $rinBootstrapDir = Join-Path ([IO.Path]::GetTempPath()) ('rin-install-' + [guid]
 try {
   & git clone --depth 1 --branch main 'https://github.com/rinchan-hoshino/rin.git' $rinBootstrapDir
   if ($LASTEXITCODE -ne 0) { throw "Could not clone Rin (exit $LASTEXITCODE)." }
-  & node (Join-Path $rinBootstrapDir 'src/install/setup.mjs')
+  & node (Join-Path $rinBootstrapDir 'src/install/bootstrap.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Rin installation failed (exit $LASTEXITCODE)." }
 } finally {
   if (Test-Path $rinBootstrapDir) { Remove-Item -LiteralPath $rinBootstrapDir -Recurse -Force }

@@ -13,6 +13,7 @@
     "nerve": "node src/nerve.mjs"
   },
   "dependencies": {
+    "@clack/prompts": "0.10.1",
     "@larksuiteoapi/node-sdk": "1.73.3",
     "@tencent-connect/qqbot-nodejs": "1.0.4",
     "discord.js": "14.27.0",

@@ -128,11 +128,11 @@ command -v git >/dev/null 2>&1 || { printf '%s\n' 'Git installation did not comp
 
 RIN_SCRIPT_DIR=
 case $0 in */install.sh|install.sh) RIN_SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) ;; esac
-if [ -n "$RIN_SCRIPT_DIR" ] && [ -f "$RIN_SCRIPT_DIR/src/install/setup.mjs" ]; then
-  node "$RIN_SCRIPT_DIR/src/install/setup.mjs" </dev/tty
+if [ -n "$RIN_SCRIPT_DIR" ] && [ -f "$RIN_SCRIPT_DIR/src/install/bootstrap.mjs" ]; then
+  node "$RIN_SCRIPT_DIR/src/install/bootstrap.mjs" </dev/tty
   exit $?
 fi
 
 RIN_BOOTSTRAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rin-install.XXXXXX")
 git clone --depth 1 --branch main https://github.com/rinchan-hoshino/rin.git "$RIN_BOOTSTRAP_DIR/source"
-node "$RIN_BOOTSTRAP_DIR/source/src/install/setup.mjs" </dev/tty
+node "$RIN_BOOTSTRAP_DIR/source/src/install/bootstrap.mjs" </dev/tty

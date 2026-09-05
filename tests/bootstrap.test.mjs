@@ -17,7 +17,7 @@ function command(command,args) { return new Promise((resolveCommand,reject)=>{co
 
 async function fixture(t,{nodeOk=false,legacyNode=false,gitOk=true,validNode=false}={}) {
   const root=await mkdtemp(join(tmpdir(),'rin-bootstrap-'));t.after(()=>rm(root,{recursive:true,force:true}));
-  const bin=join(root,'bin'),home=join(root,'install'),log=join(root,'calls.log'),input=join(root,'terminal-input'),testInstaller=join(root,'install.sh');await mkdir(bin);await mkdir(join(root,'src','install'),{recursive:true});await writeFile(join(root,'src','install','setup.mjs'),'// fixture');
+  const bin=join(root,'bin'),home=join(root,'install'),log=join(root,'calls.log'),input=join(root,'terminal-input'),testInstaller=join(root,'install.sh');await mkdir(bin);await mkdir(join(root,'src','install'),{recursive:true});await writeFile(join(root,'src','install','bootstrap.mjs'),'// fixture');
   // Preserve installer control flow while replacing only its controlling-terminal
   // file descriptor, which the test sandbox denies even to a child PTY.
   const source=(await readFile(installer,'utf8')).replaceAll('>/dev/tty','>&2').replaceAll('</dev/tty','<"$RIN_TEST_INPUT"');
@@ -55,10 +55,10 @@ async function ptyRun(env,input='') {
   });
 }
 
-test('existing non-legacy Node 24 reaches setup without downloading a managed runtime',async t=>{
+test('existing non-legacy Node 24 reaches the dependency-aware bootstrap without downloading a managed runtime',async t=>{
   if(runtimeTest(t))return;
   const f=await fixture(t,{nodeOk:true});const result=await ptyRun(f.env);assert.equal(result.code,0,result.stderr);
-  const calls=await readFile(f.log,'utf8');assert.match(calls,/setup:.*src\/install\/setup\.mjs/);assert.doesNotMatch(calls,/curl:/);assert.equal(await missing(join(f.home,'runtime')),true);
+  const calls=await readFile(f.log,'utf8');assert.match(calls,/setup:.*src\/install\/bootstrap\.mjs/);assert.doesNotMatch(calls,/curl:/);assert.equal(await missing(join(f.home,'runtime')),true);
 });
 
 test('checksum mismatch never executes downloaded Node or launches setup and cleans staging',async t=>{
@@ -81,11 +81,11 @@ test('declining missing Git consent runs no package-manager command',async t=>{
   assert.equal(await missing(f.log),true);
 });
 
-test('empty machine installs stub Git, verifies and promotes managed Node, then runs setup with it',async t=>{
+test('empty machine installs stub Git, verifies and promotes managed Node, then runs bootstrap with it',async t=>{
   if(runtimeTest(t))return;
   const f=await fixture(t,{gitOk:false,validNode:true});const result=await ptyRun(f.env,'y\n');assert.equal(result.code,0,result.stdout+result.stderr);
   const calls=await readFile(f.log,'utf8');assert.match(calls,process.platform==='darwin'?/brew:install git/:/apt-get:update/);assert.match(calls,/SHASUMS256\.txt/);
-  const managed=join(f.home,'runtime','node-v24.18.0','bin','node');assert.equal(await missing(managed),false);assert.match(calls,new RegExp(`setup-managed:${managed.replaceAll(/[.*+?^${}()|[\]\\]/g,'\\$&')}:.*setup\\.mjs`));
+  const managed=join(f.home,'runtime','node-v24.18.0','bin','node');assert.equal(await missing(managed),false);assert.match(calls,new RegExp(`setup-managed:${managed.replaceAll(/[.*+?^${}()|[\]\\]/g,'\\$&')}:.*bootstrap\\.mjs`));
   assert.deepEqual(await readdir(join(f.home,'runtime')),['node-v24.18.0']);
 });
 
