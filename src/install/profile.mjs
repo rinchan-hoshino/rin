@@ -4,6 +4,7 @@ export const RIN_RECOMMENDED_CODEX_EDITS = Object.freeze([
   ['features.context_management.experimental_mode', true],
   ['features.memories', true],
   ['sandbox_mode', 'danger-full-access'],
+  ['approval_policy', 'never'],
   ['desktop.preventSleepWhileRunning', true],
   ['desktop.keepRemoteControlAwakeWhilePluggedIn', true],
   ['desktop.git-branch-prefix', ''],

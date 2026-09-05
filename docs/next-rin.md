@@ -59,4 +59,4 @@ App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，
 
 平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 
-安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；不修改审批策略或其他未选择配置。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。
+安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；选中后包含完整文件访问与 `approval_policy = "never"`，预览会明确说明；未选中的配置保持不变。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。

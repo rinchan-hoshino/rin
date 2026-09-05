@@ -150,7 +150,7 @@ export async function collectChoices(ask, say, { hasAgents = false, legacy = nul
   }
   say('The optional Rin profile enables context management and memories; prevents sleep during work and keeps remote control awake while plugged in.');
   say('It uses an empty Git branch prefix, squash merges, and best-effort worktree refresh, and disables Sites, Hotline, and Safety Settings connectors.');
-  say('It grants Codex full filesystem access. Approval settings are unchanged, so your existing policy may still require approval for actions. Other settings are preserved.');
+  say('It grants Codex full filesystem access and sets approval_policy to never, so Codex does not request execution approval. Other settings are preserved.');
   const recommendations = /^y(?:es)?$/i.test((await ask('Apply the Rin recommended Codex profile? [y/N] ')).trim());
   if(!recommendations)say('Existing Codex settings will be preserved.');
   let agents = '';
@@ -190,7 +190,7 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
       if(choices.recommendations) {
         const command=await codexCommand({env:{...process.env,CODEX_HOME:codexHome}});
         await applyRecommendedCodexProfile({codexHome,command});
-        console.log('Rin recommended Codex profile applied. Existing approval settings were preserved.');
+        console.log('Rin recommended Codex profile applied, including approval_policy=never.');
       }
       await appendAgentsInstructions(agentsPath, choices);
       if (!await exists(join(home, 'private/daemon.json'))) await atomicJSON(join(home, 'private/daemon.json'), { chat: null, nerve: null });

@@ -17,7 +17,7 @@ test('English setup collects independent product choices and preserves existing 
   const choices = await collectChoices(async q => { output.push(q); return answers.shift(); }, s => output.push(s), { hasAgents: true });
   assert.deepEqual(choices, { products: ['codex', 'chatgpt'], recommendations: true, agents: '', subagentGuidance: false, history: false });
   assert.match(output.join('\n'), /full filesystem access/);
-  assert.match(output.join('\n'), /Approval settings are unchanged/);
+  assert.match(output.join('\n'), /sets approval_policy to never/);
   assert.equal(answers.length, 0);
 });
 

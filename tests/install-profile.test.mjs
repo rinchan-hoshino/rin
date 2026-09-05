@@ -9,14 +9,15 @@ test('recommended profile batch-upserts only the reviewed keys',async()=>{
   assert.equal(request.reloadUserConfig,true);
   assert.deepEqual(request.edits,RIN_RECOMMENDED_CODEX_EDITS.map(edit=>({...edit})));
   assert.deepEqual(request.edits.map(edit=>edit.keyPath),[
-    'features.context_management.experimental_mode','features.memories','sandbox_mode',
+    'features.context_management.experimental_mode','features.memories','sandbox_mode','approval_policy',
     'desktop.preventSleepWhileRunning','desktop.keepRemoteControlAwakeWhilePluggedIn',
     'desktop.git-branch-prefix','desktop.git-pull-request-merge-method','desktop.worktree-upstream-refresh-mode',
     'apps.connector_20205bf7d4e99a89d7154bb849718324.enabled',
     'apps.connector_openai_hotline.enabled','apps.connector_openai_safety_settings.enabled',
   ]);
   assert.ok(request.edits.every(edit=>edit.mergeStrategy==='upsert'));
-  assert.ok(!request.edits.some(edit=>/approval|service_tier|chronicle/i.test(edit.keyPath)));
+  assert.equal(request.edits.find(edit=>edit.keyPath==='approval_policy').value,'never');
+  assert.ok(!request.edits.some(edit=>/service_tier|chronicle/i.test(edit.keyPath)));
 });
 
 test('declining recommendations remains a pure choice with an explicit preservation message',async()=>{
