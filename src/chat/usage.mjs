@@ -218,7 +218,7 @@ function pngCard(snapshot) {
     const duration=mins===null?'UNKNOWN':mins>0&&mins%1440===0?`${mins/1440}D`:mins>0&&mins%60===0?`${mins/60}H`:`${mins}M`;
     const bucket=limit.name || limit.id;
     const rawTitle=`${bucket} ${duration}`;
-    const title=rawTitle.length>25?`${rawTitle.slice(0,22)}...`:rawTitle;
+    const title=rawTitle.length>23?`${rawTitle.slice(0,20)}...`:rawTitle;
     const color=left===null?muted:left>=60?[74,222,128]:left>=25?[250,204,21]:[251,113,133];
     draw(title,64,top+14,2,text);
     draw(left===null?'UNKNOWN':`${left}% LEFT`,350,top+14,2,color);

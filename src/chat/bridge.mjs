@@ -389,14 +389,20 @@ export class ChatBridge {
         const route = this.route(item.route) || (payload.target && {...payload.target,adapter:JSON.parse(item.route)[0]}); const adapter = this.adapters.get(route?.adapter);
         if (!adapter) continue;
         this.store.sending(item.id);
+        const target = {...route,...this.store.cursor(`reply:${item.route}`),...payload.target};
         try {
-          const target = {...route,...this.store.cursor(`reply:${item.route}`),...payload.target};
           if(payload.delete) {if(item.message_id)await adapter.delete(target,item.message_id);this.store.sent(item.id,item.payload,null);continue;}
           const sent = await adapter.send(target,{...payload,...(item.message_id && adapter.capabilities.edit ? {editId:item.message_id} : {})});
           this.store.sent(item.id,item.payload,sent.id);
           this.retryAt.delete(item.id);
           if(payload.progress && route.threadId)this.typing(route.threadId);
         } catch (error) {
+          if(payload.files?.length && payload.fallbackText && error?.deliveryUncertain!==true) {
+            try {
+              const fallback=await adapter.send(target,{text:payload.fallbackText,...(payload.replyTo?{replyTo:payload.replyTo}:{})});
+              this.store.sent(item.id,item.payload,fallback.id);this.retryAt.delete(item.id);continue;
+            } catch(fallbackError) { error=fallbackError; }
+          }
           // Editing an identified message is safe to retry; a first send with unknown outcome isn't.
           this.store.failed(item.id,'Platform delivery failed; inspect redacted service log',Boolean(item.message_id) && error?.deliveryUncertain !== true);
           const delay=Math.min(30000,(this.retryAt.get(item.id)?.delay || 500)*2);

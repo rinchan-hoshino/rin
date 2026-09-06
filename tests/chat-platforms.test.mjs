@@ -105,6 +105,19 @@ test('Discord interaction sends only the attachment and uses fallback text only 
   await adapter.stop();
 });
 
+test('Discord interaction preserves the complete fallback across follow-ups', async () => {
+  const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};client.application={commands:{set:async()=>{}}};
+  const edits=[],followups=[];const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{dataDir:'/tmp',log:{},isBound:async()=>true});
+  await adapter.start(async()=>{});
+  client.emit('interactionCreate',{id:'long-fallback',channelId:'dm',user:{id:'allowed'},commandName:'help',isChatInputCommand:()=>true,options:{getString:()=>null},deferReply:async()=>{},editReply:async payload=>{edits.push(payload);if(payload.files?.length)throw new Error('upload');return{id:'response'};},followUp:async payload=>followups.push(payload)});
+  await new Promise(resolve=>setImmediate(resolve));
+  const fallback='额'.repeat(4500);
+  await adapter.send({commandInteraction:{id:'long-fallback'}},{fallbackText:fallback,files:[{path:'/tmp/a',name:'a'}]});
+  assert.equal(edits[1].content.length,2000);assert.deepEqual(followups.map(value=>value.content.length),[2000,500]);
+  assert.equal(edits[1].content+followups.map(value=>value.content).join(''),fallback);
+  await adapter.stop();
+});
+
 test('Discord command registration failure does not block startup', async () => {
   const warnings=[]; const client = new EventEmitter();
   client.user={id:'bot'}; client.login=async()=>{}; client.isReady=()=>true; client.destroy=async()=>{};

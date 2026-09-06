@@ -212,14 +212,16 @@ export function createAdapter(config, context) {
         const entry = interactions.get(String(interactionId));
         if (!entry) throw new Error('discord_command_interaction_unavailable');
         const {interaction, timer} = entry;
-        const chunks=[]; const content=payload.content;
+        let chunks=[]; const content=payload.content;
         for(let index=0;index<content.length;index+=2000)chunks.push(content.slice(index,index+2000));
         if(!chunks.length)chunks.push('');
         let edited;
         try { edited = await interaction.editReply({...payload,content:chunks[0]}); }
         catch {
           if (!payload.files?.length) throw new Error('discord_command_interaction_response_failed');
-          try { edited = await interaction.editReply({content:String(output.fallbackText || chunks[0] || '附件发送失败，请在 Codex 中查看。').slice(0,2000),allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
+          const fallback=String(output.fallbackText || chunks[0] || '附件发送失败，请在 Codex 中查看。');
+          chunks=[];for(let index=0;index<fallback.length;index+=2000)chunks.push(fallback.slice(index,index+2000));
+          try { edited = await interaction.editReply({content:chunks[0],allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
           catch { throw new Error('discord_command_interaction_response_failed'); }
         }
         for(const contentPart of chunks.slice(1)) {

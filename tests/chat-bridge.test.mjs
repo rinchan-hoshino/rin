@@ -25,6 +25,22 @@ test('usage cards stay image-only on every chat transport while retaining a deli
   }
 });
 
+test('usage card media failures fall back to complete text on every normal chat transport',async()=>{
+  for(const type of ['discord','telegram','qqbot','onebot','feishu']){
+    const dataDir=mkdtempSync(join(tmpdir(),`rin-usage-fallback-${type}-`));const sent=[];let receive;
+    const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})};
+    const adapter={capabilities:{edit:type==='discord',typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);if(output.files)throw new Error('media rejected');return{id:'fallback'};}};
+    const config={dataDir,adapters:[{id:'a',type,allowUsers:['owner']}],bindings:[]};
+    const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,usage:async()=>({files:[{path:'/tmp/card.png',name:'card.png',mimeType:'image/png'}],fallbackText:'完整额度文字'}),log:{info(){},warn(){},error(){}}});
+    try{
+      await bridge.start();await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[]});await bridge.flush();
+      assert.equal(sent.length,2,`${type} must make one text fallback after media failure`);
+      assert.ok(sent[0].files?.length);assert.deepEqual(sent[1],{text:'完整额度文字'});
+      assert.equal(bridge.store.outgoing().length,0);
+    }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
+  }
+});
+
 test('durable ingress queues once; commentary edits same remote message; tool events are suppressed',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-'));const sent=[],queued=[],deleted=[];
   let receive;
