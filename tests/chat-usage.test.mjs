@@ -106,7 +106,7 @@ test('default provider uses the stable read-only app-server method', async () =>
   };
   const provider = createCodexUsageProvider({ config: { command: ['/test/codex', 'shim'] }, spawnImpl });
   assert.equal((await provider.readRateLimits()).rateLimitsByLimitId.codex.limitId, 'codex');
-  assert.deepEqual(calls, ['initialize', 'account/rateLimits/read']);
+  assert.deepEqual(calls, ['initialize', 'account/rateLimits/read', 'account/read']);
 });
 
 test('empty fields stay unknown, parse errors are useful and legacy quota aliases history', async t => {
