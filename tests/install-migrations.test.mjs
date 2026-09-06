@@ -22,7 +22,9 @@ test('ordinary update runs managed migrations without applying the recommended p
 
 test('rin update runs migrations even when the release is already current',async t=>{
   const root=await mkdtemp(join(tmpdir(),'rin-update-current-'));
-  t.after(()=>rm(root,{recursive:true,force:true}));
+  // Git may finish detached maintenance after update returns. Retry transient
+  // ENOTEMPTY during fixture removal without weakening the migration checks.
+  t.after(()=>rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
   const home=join(root,'install'),codexHome=join(root,'codex');
   await mkdir(codexHome,{recursive:true});
   await writeFile(join(codexHome,'AGENTS.md'),`${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n`);
