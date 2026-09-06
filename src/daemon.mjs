@@ -1,12 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import {homedir} from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ChatBridge } from './chat/bridge.mjs';
 import { CodexBridge } from './chat/codex.mjs';
 import { Nerve, Store, makeServer, validateConfig as validateNerveConfig } from './nerve.mjs';
 import { adapterFactory, createLogger, readConfig as readChatConfig } from './rin.mjs';
-import {runUpdateMigrations} from './install/migrations.mjs';
 
 const defaultLog = Object.fromEntries(['info', 'warn', 'error'].map(level => [level, (message, ...details) => {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), level, message, details: details.map(value => value instanceof Error ? value.message : value) })}\n`);
@@ -170,25 +168,8 @@ export async function startDaemon(configFile, options = {}) {
     throw error;
   }
 
-  let activation={skipped:true};
-  if(env.RIN_MANAGED_DAEMON==='1') {
-    const migrate=options.runUpdateMigrations ?? runUpdateMigrations;
-    try {
-      activation=await migrate({
-        codexHome:options.codexHome ?? env.CODEX_HOME ?? join(homedir(),'.codex'),
-        binary:env.RIN_CODEX_BIN,
-        writeConfig:options.writeConfig,
-      });
-      log.info('Rin managed settings migration complete',activation);
-    } catch(error) {
-      await stop();
-      throw new Error(`Rin managed settings migration failed: ${error.message}`);
-    }
-  }
-
   return {
     stop,
-    activation:Promise.resolve(activation),
     chat,
     nerve,
     server: nerveServer,

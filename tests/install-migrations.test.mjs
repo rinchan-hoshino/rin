@@ -46,3 +46,22 @@ test('rin update runs migrations even when the release is already current',async
   assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`${RIN_SUBAGENT_INSTRUCTIONS}\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
 });
+
+test('rin update runs the verified candidate migration before switching releases',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'rin-update-candidate-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const home=join(root,'install'),release=join(root,'candidate'),current='a'.repeat(40),next='b'.repeat(40);
+  await mkdir(join(release,'src/install'),{recursive:true});
+  await mkdir(home,{recursive:true});
+  await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current,node:process.execPath}));
+  await writeFile(join(release,'src/install/migrations.mjs'),`export async function runUpdateMigrations(options){await options.writeConfig({source:'candidate'});}`);
+  const events=[];
+  assert.equal(await main(['update'],{
+    home,
+    serviceFactory:()=>({}),
+    prepare:async()=>({sha:next,release,changed:true}),
+    writeConfig:async request=>events.push(['migrate',request]),
+    switchTo:async(_home,candidate)=>events.push(['switch',candidate.sha]),
+  }),0);
+  assert.deepEqual(events,[['migrate',{source:'candidate'}],['switch',next]]);
+});

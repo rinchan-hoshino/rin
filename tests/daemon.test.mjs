@@ -34,40 +34,6 @@ test('rejects a daemon with no configured work', async t => {
   await assert.rejects(startDaemon(f.write('daemon.json', { chat: null, nerve: null })), /No configured work/);
 });
 
-test('managed daemon completes release migration before signaling startup',async t=>{
-  const f=fixture(t),calls=[];
-  const chatFile=f.write('chat.json',{});
-  const daemon=await startDaemon(f.write('daemon.json',{chat:chatFile,nerve:null}),{
-    env:{RIN_MANAGED_DAEMON:'1',CODEX_HOME:join(f.dir,'codex')},log:quietLog,
-    runUpdateMigrations:async options=>{calls.push(options);return{agentsChanged:true,obsoleteConfigRemoved:true};},
-    dependencies:{
-      readChatConfig:()=>({dataDir:join(f.dir,'chat-data'),codex:{},adapters:[],bindings:[]}),
-      createLogger:()=>quietLog,adapterFactory:async()=>{},
-      ChatBridge:class{async start(){}async stop(){}},CodexBridge:class{},
-    },
-  });
-  assert.equal(calls.length,1,'startDaemon does not return until migration succeeds');
-  assert.deepEqual(await daemon.activation,{agentsChanged:true,obsoleteConfigRemoved:true});
-  assert.equal(calls[0].codexHome,join(f.dir,'codex'));
-  await daemon.stop();
-});
-
-test('managed migration failure closes started work before startup rejects',async t=>{
-  const f=fixture(t);let stopped=0;
-  const chatFile=f.write('chat.json',{});
-  await assert.rejects(startDaemon(f.write('daemon.json',{chat:chatFile,nerve:null}),{
-    env:{RIN_MANAGED_DAEMON:'1'},log:quietLog,
-    runUpdateMigrations:async()=>{throw new Error('write rejected');},
-    dependencies:{
-      readChatConfig:()=>({dataDir:join(f.dir,'chat-data'),codex:{},adapters:[],bindings:[]}),
-      createLogger:()=>quietLog,adapterFactory:async()=>{},
-      ChatBridge:class{async start(){}async stop(){stopped++;}},CodexBridge:class{},
-    },
-  }),/managed settings migration failed: write rejected/);
-  assert.equal(stopped,1);
-  assert.equal(existsSync(join(f.dir,'chat-data/bridge.pid')),false);
-});
-
 test('starts Nerve before chat and stops chat before Nerve', async t => {
   const f = fixture(t);
   const events = [];
