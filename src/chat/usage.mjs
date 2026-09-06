@@ -120,7 +120,7 @@ export function renderCurrentUsage(snapshot) {
       lines.push(`${durationLabel(window.windowDurationMins)}：已用 ${used}，剩余 ${remaining}`, resetLabel(window.resetsAt));
     }
     if (limit.credits) {
-      const value = limit.credits.unlimited ? '无限' : limit.credits.hasCredits && limit.credits.balance !== null ? limit.credits.balance : '无可用余额';
+      const value = limit.credits.unlimited ? '无限' : limit.credits.balance !== null ? limit.credits.balance : '无可用余额';
       lines.push(`Credits：${value}`);
     }
     if (limit.spendControlReached === true) lines.push('已达到支出控制上限');
@@ -170,19 +170,6 @@ function renderHistory(rows, days) {
   return lines.join('\n');
 }
 
-function cardWindowName(limit, window) {
-  const minutes = window.windowDurationMins;
-  const duration = minutes === null ? 'unknown' : minutes >= 10080 && minutes % 10080 === 0 ? 'weekly' : minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60}_hour` : `${minutes ?? 'unknown'}_minute`;
-  if (limit.id === 'codex') return duration === 'weekly' ? 'weekly' : duration === '5_hour' ? 'five_hour' : duration;
-  return `${limit.id}_${duration}`;
-}
-
-function isoReset(seconds) {
-  if (seconds === null) return undefined;
-  const date = new Date(seconds > 1e11 ? seconds : seconds * 1000);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
 function accountName(response) {
   const account = response?.account ?? response?.accountInfo ?? response?.account_info ?? {};
   for (const value of [account.email, account.name, account.displayName, response?.email, response?.accountEmail]) {
@@ -191,53 +178,86 @@ function accountName(response) {
   return undefined;
 }
 
-function usageStatusForCard(snapshot) {
-  const windows = snapshot.limits.flatMap(limit => (limit.windows || []).map(window => ({
+function isSparkLimit(limit) { return limit.id === 'spark'; }
+function sparkPlanName(limit) {
+  // This is the product name, not the internal rate-limit id.
+  return isSparkLimit(limit) ? 'GPT-5.3-CODEX-SPARK' : limit.planType;
+}
+
+function cardWindowName(limit, window) {
+  const minutes = window.windowDurationMins;
+  const duration = minutes === null ? 'unknown' : minutes >= 10080 && minutes % 10080 === 0 ? 'weekly' : minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60}_hour` : `${minutes ?? 'unknown'}_minute`;
+  return duration === 'weekly' ? 'weekly' : duration === '5_hour' ? 'five_hour' : duration;
+}
+
+function isoReset(seconds) {
+  if (seconds === null) return undefined;
+  const date = new Date(seconds > 1e11 ? seconds : seconds * 1000);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function usageStatusForCard(snapshot, limits) {
+  const selected = limits || snapshot.limits;
+  const windows = selected.flatMap(limit => (limit.windows || []).map(window => ({
     name: cardWindowName(limit, window),
     percentLeft: window.remainingPercent === null ? undefined : window.remainingPercent,
     resetAt: isoReset(window.resetsAt),
   })));
-  const creditLines = snapshot.limits.flatMap(limit => {
+  const creditLines = selected.flatMap(limit => {
     if (!limit.credits) return [];
     if (limit.credits.unlimited) return [`${limit.id.toUpperCase()} UNLIMITED`];
-    if (limit.credits.hasCredits && limit.credits.balance !== null) return [`${limit.id.toUpperCase()} ${limit.credits.balance}`];
+    // A reported balance of 0 is a real value and must be shown.
+    if (limit.credits.balance !== null) return [`${limit.id.toUpperCase()} ${limit.credits.balance}`];
     return [];
   });
   return {
-    // The app-server account id is deliberately never rendered or persisted.
     accountId: 'ACCOUNT UNKNOWN',
     accountName: accountName(snapshot.source),
-    plan: snapshot.limits.find(limit => limit.id === 'codex')?.planType ?? snapshot.limits.find(limit => limit.planType)?.planType,
+    plan: selected.length === 1 ? sparkPlanName(selected[0]) : selected.find(limit => limit.id === 'codex')?.planType ?? selected.find(limit => limit.planType)?.planType,
     windows,
     credits: creditLines.length ? creditLines.join('  ') : undefined,
   };
 }
 
 function costHistoryPath(dataDir) { return join(dataDir, 'usage', 'cost-history.json'); }
+const localDay = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : null;
+const plusDays = (day, amount) => { const value = new Date(`${day}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + amount); return value.toISOString().slice(0, 10); };
+const compact = value => value >= 1_000_000_000 ? `${(value / 1_000_000_000).toFixed(1)}B` : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : String(Math.round(value));
 
 async function readCostTrend(dataDir, days = DEFAULT_DAYS) {
   let body;
   try { body = JSON.parse(await readFile(costHistoryPath(dataDir), 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
-  const rows = Array.isArray(body?.points) ? body.points : [];
-  const points = rows.filter(row => typeof row?.date === 'string' && Number.isFinite(Number(row.cost_total)) && Number(row.cost_total) >= 0)
-    .slice(-days).map(row => ({ timestamp: row.date, cost_total: Number(row.cost_total) }));
-  // A partial time series would draw invented zero gaps. Render a curve only when
-  // every requested daily observation is present and explicitly sourced.
-  if (points.length !== days) return null;
-  const total_cost = points.reduce((sum, point) => sum + point.cost_total, 0);
-  return { days, points, total_cost, peak_cost: Math.max(0, ...points.map(point => point.cost_total)) };
+  const deduped = new Map();
+  for (const row of Array.isArray(body?.points) ? body.points : []) {
+    if (!localDay(row?.date) || row.cost_total === null || !Number.isFinite(Number(row.cost_total)) || Number(row.cost_total) < 0) continue;
+    deduped.set(row.date, { timestamp: row.date, cost_total: Number(row.cost_total), input_tokens: Number(row.input_tokens) || 0, output_tokens: Number(row.output_tokens) || 0, cache_read_tokens: Number(row.cache_read_tokens) || 0, cache_write_tokens: Number(row.cache_write_tokens) || 0 });
+  }
+  const points = [...deduped.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const latest = points.at(-1)?.timestamp;
+  if (!latest) return null;
+  const run = [];
+  for (let index = 0; index < days; index++) {
+    const point = deduped.get(plusDays(latest, -(days - 1 - index)));
+    if (!point) return null;
+    run.push(point);
+  }
+  const total_cost = run.reduce((sum, point) => sum + point.cost_total, 0);
+  const raw = run.reduce((sum, point) => sum + point.input_tokens + point.output_tokens, 0);
+  const cached = run.reduce((sum, point) => sum + point.cache_read_tokens + point.cache_write_tokens, 0);
+  const source = body?.source === 'legacy-rin-usage-db' ? 'LEGACY' : 'RECORDED';
+  return { days, points: run, total_cost, peak_cost: Math.max(0, ...run.map(point => point.cost_total)), title: `USAGE VALUE ${run[0].timestamp.slice(5).replace('-', '/')}-${latest.slice(5).replace('-', '/')} - DAILY`, secondary: `${source} THRU ${latest.slice(5).replace('-', '/')}  RAW ${compact(raw)}  CACHE ${compact(cached)}` };
 }
 
-function pngCard(snapshot, trend) {
-  return renderCodexUsageCardPng(usageStatusForCard(snapshot), { trend: trend || undefined });
+function pngCard(snapshot, trend, limits) {
+  return renderCodexUsageCardPng(usageStatusForCard(snapshot, limits), { trend: trend || undefined, trendTitle: trend?.title, trendSecondary: trend?.secondary });
 }
 
-async function writeCard(dataDir, snapshot, trend) {
+async function writeCard(dataDir, snapshot, trend, limits, suffix = '') {
   const directory = join(dataDir, 'usage', 'cards');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const path = join(directory, `codex-usage-${snapshot.observedAt.replace(/[^0-9A-Za-z]/g, '')}.png`);
-  await writeFile(path, pngCard(snapshot, trend), { mode: 0o600 });
+  const path = join(directory, `codex-usage-${snapshot.observedAt.replace(/[^0-9A-Za-z]/g, '')}${suffix}.png`);
+  await writeFile(path, pngCard(snapshot, trend, limits), { mode: 0o600 });
   const stale = (await readdir(directory)).filter(name => name.endsWith('.png') && name !== basename(path)).sort().slice(0, -7);
   await Promise.all(stale.map(name => rm(join(directory, name), { force: true })));
   return { path, name: basename(path), mimeType: 'image/png' };
@@ -283,7 +303,7 @@ export function createCodexUsageProvider({ config = {}, spawnImpl = spawn, timeo
             // usable on app-server versions that do not expose account/read.
             request('account/read', undefined).catch(() => null),
           ]);
-          finish(null, account && typeof account === 'object' ? { ...limits, account } : limits);
+          finish(null, account && typeof account === 'object' ? { ...limits, account: account.account && typeof account.account === 'object' ? account.account : account } : limits);
         } catch (error) { finish(error); }
       })();
     });
@@ -292,7 +312,7 @@ export function createCodexUsageProvider({ config = {}, spawnImpl = spawn, timeo
 
 export async function migrateLegacyCostHistory({ dataDir, legacyDbPath, spawnImpl = spawn } = {}) {
   if (!dataDir || !legacyDbPath) throw new Error('dataDir and legacyDbPath are required');
-  const query = "SELECT strftime('%Y-%m-%d', timestamp, 'localtime') AS date, SUM(cost_total) AS cost_total, SUM(total_tokens) AS total_tokens, COUNT(*) AS rows FROM telemetry_events WHERE timestamp IS NOT NULL AND cost_total IS NOT NULL GROUP BY date ORDER BY date";
+  const query = "SELECT strftime('%Y-%m-%d', timestamp, 'localtime') AS date, SUM(cost_total) AS cost_total, SUM(total_tokens) AS total_tokens, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens, COUNT(*) AS rows FROM telemetry_events WHERE timestamp IS NOT NULL AND cost_total IS NOT NULL GROUP BY date ORDER BY date";
   const output = await new Promise((resolve, reject) => {
     const child = spawnImpl('sqlite3', ['-readonly', '-json', legacyDbPath, query], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
@@ -303,7 +323,7 @@ export async function migrateLegacyCostHistory({ dataDir, legacyDbPath, spawnImp
   });
   let rows;
   try { rows = JSON.parse(output); } catch { throw new Error('legacy usage migration returned invalid JSON'); }
-  const points = Array.isArray(rows) ? rows.filter(row => typeof row?.date === 'string' && Number.isFinite(Number(row.cost_total)) && Number(row.cost_total) >= 0).map(row => ({ date: row.date, cost_total: Number(row.cost_total), total_tokens: Number(row.total_tokens) || 0, rows: Number(row.rows) || 0 })) : [];
+  const points = Array.isArray(rows) ? rows.filter(row => typeof row?.date === 'string' && Number.isFinite(Number(row.cost_total)) && Number(row.cost_total) >= 0).map(row => ({ date: row.date, cost_total: Number(row.cost_total), total_tokens: Number(row.total_tokens) || 0, input_tokens: Number(row.input_tokens) || 0, output_tokens: Number(row.output_tokens) || 0, cache_read_tokens: Number(row.cache_read_tokens) || 0, cache_write_tokens: Number(row.cache_write_tokens) || 0, rows: Number(row.rows) || 0 })) : [];
   const directory = join(dataDir, 'usage');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const destination = costHistoryPath(dataDir);
@@ -336,8 +356,14 @@ export async function executeUsage(args = '', { config = {}, dataDir, provider, 
   }
   const trend = await readCostTrend(dataDir);
   await appendSnapshot(dataDir, { observedAt: snapshot.observedAt, limits: snapshot.limits });
-  const text = `${renderCurrentUsage(snapshot)}${trend ? `\n\nUSD-equivalent 历史：${trend.days} 天实际记录。` : '\n\nUSD-equivalent 历史 unknown：尚无完整的实际成本快照，未绘制曲线。'}`;
+  const text = `${renderCurrentUsage(snapshot)}${trend ? `\n\nUSD-equivalent 历史：${trend.points[0].timestamp} 至 ${trend.points.at(-1).timestamp} 的 ${trend.days} 天实际记录（${trend.secondary}）。` : '\n\nUSD-equivalent 历史 unknown：尚无连续 14 天的实际成本快照，未绘制曲线。'}`;
   if (options.mode === 'text') return { text };
-  try { return { files: [await writeCard(dataDir, snapshot, trend)], fallbackText: text }; }
+  try {
+    const primary = snapshot.limits.filter(limit => !isSparkLimit(limit));
+    const spark = snapshot.limits.filter(isSparkLimit);
+    const files = [await writeCard(dataDir, snapshot, trend, primary)];
+    if (spark.length) files.push(await writeCard(dataDir, snapshot, null, spark, '-spark'));
+    return { files, fallbackText: text };
+  }
   catch { return { text: `${text}\n\n额度卡片生成失败，以上为完整文字结果。` }; }
 }
