@@ -16,6 +16,7 @@ export type CodexUsageCardOptions = {
   trend?: UsageTrendSeries;
   trendTitle?: string;
   trendSecondary?: string;
+  trendFooter?: string;
 };
 
 const WIDTH = 1000;
@@ -217,7 +218,7 @@ export function buildUsageCostTrendView(trend: UsageTrendSeries) {
   return {
     title: `${trend.days}D USAGE VALUE - DAILY`,
     axisLabel: "USD/DAY",
-    summary: `TOTAL ${formatUsdEquivalent(trend.total_cost)}  PEAK ${formatUsdEquivalent(trend.peak_cost)}`,
+    summary: trend.points.some(point => point.cost_total !== null) ? `TOTAL ${formatUsdEquivalent(trend.total_cost)}  PEAK ${formatUsdEquivalent(trend.peak_cost)}` : "TOTAL UNKNOWN  PEAK UNKNOWN",
     values: trend.points.map((point) => point.cost_total),
     dateLabels,
     xAxisLabels,
@@ -297,7 +298,7 @@ export function renderCodexUsageCardPng(
   status: CodexUsageStatus,
   options: Pick<
     CodexUsageCardOptions,
-    "trend" | "trendTitle" | "trendSecondary"
+    "trend" | "trendTitle" | "trendSecondary" | "trendFooter"
   > = {},
 ): Buffer {
   const windows = status.windows.length
@@ -464,6 +465,7 @@ export function renderCodexUsageCardPng(
     for (let index = 1; index < points.length; index += 1) {
       const previous = points[index - 1];
       const current = points[index];
+      if (previous.cost_total === null || current.cost_total === null) continue;
       const denominator = Math.max(1, points.length - 1);
       const previousX = chartX + ((index - 1) / denominator) * chartWidth;
       const currentX = chartX + (index / denominator) * chartWidth;
@@ -488,6 +490,13 @@ export function renderCodexUsageCardPng(
         3,
       );
     }
+    // Isolated recorded days remain visible; missing days never become zero.
+    points.forEach((point, index) => {
+      if (point.cost_total === null || (points[index - 1]?.cost_total != null && points[index + 1]?.cost_total != null)) return;
+      const x = chartX + index / Math.max(1, points.length - 1) * chartWidth;
+      const y = chartY + chartHeight - (maximum > 0 ? point.cost_total / maximum * chartHeight : 0);
+      rect(pixels, height, x - 2, y - 2, 5, 5, accent);
+    });
     const labelDenominator = Math.max(1, costView.values.length - 1);
     for (const { index, label } of costView.xAxisLabels) {
       const centerX = chartX + (index / labelDenominator) * chartWidth;
@@ -505,7 +514,7 @@ export function renderCodexUsageCardPng(
   drawText(
     pixels,
     height,
-    options.trend ? "CODEX QUOTA + USD-EQUIV HISTORY" : "CODEX QUOTA - USD-EQUIV HISTORY UNKNOWN",
+    options.trendFooter || (options.trend ? "CODEX QUOTA + USD-EQUIV HISTORY" : "CODEX QUOTA - USD-EQUIV HISTORY UNKNOWN"),
     46,
     footerTop + 32,
     2,

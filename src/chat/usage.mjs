@@ -1,3 +1,4 @@
+import { readCodexTokenTrend, resolveCodexHome } from './codex-usage-history.mjs';
 import { spawn } from 'node:child_process';
 import { renderCodexUsageCardPng } from './usage-card.ts';
 import { appendFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -21,7 +22,7 @@ function usageHelp() {
     '  /usage history     Rin 启用此命令后记录的额度历史',
     '  /usage --quota     兼容旧命令，等同 history',
     '',
-    '历史由 Rin 新快照和一次性独立迁移的历史组成；没有记录时会明确显示 unknown。',
+    '额度历史由 Rin 快照组成；用量曲线仅统计本地 Codex 请求，按官方 API 价估值；缺失数据为 unknown。',
     '旧版 token telemetry 参数（--tokens、--events、--group-by、--filter 等）依赖 Pi 事件流，新桥不提供。',
   ].join('\n');
 }
@@ -218,37 +219,18 @@ function usageStatusForCard(snapshot, limits) {
 }
 
 function costHistoryPath(dataDir) { return join(dataDir, 'usage', 'cost-history.json'); }
-const localDay = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : null;
-const plusDays = (day, amount) => { const value = new Date(`${day}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + amount); return value.toISOString().slice(0, 10); };
 const compact = value => value >= 1_000_000_000 ? `${(value / 1_000_000_000).toFixed(1)}B` : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : String(Math.round(value));
 
-async function readCostTrend(dataDir, days = DEFAULT_DAYS) {
-  let body;
-  try { body = JSON.parse(await readFile(costHistoryPath(dataDir), 'utf8')); }
-  catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
-  const deduped = new Map();
-  for (const row of Array.isArray(body?.points) ? body.points : []) {
-    if (!localDay(row?.date) || row.cost_total === null || !Number.isFinite(Number(row.cost_total)) || Number(row.cost_total) < 0) continue;
-    deduped.set(row.date, { timestamp: row.date, cost_total: Number(row.cost_total), input_tokens: Number(row.input_tokens) || 0, output_tokens: Number(row.output_tokens) || 0, cache_read_tokens: Number(row.cache_read_tokens) || 0, cache_write_tokens: Number(row.cache_write_tokens) || 0 });
-  }
-  const points = [...deduped.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  const latest = points.at(-1)?.timestamp;
-  if (!latest) return null;
-  const run = [];
-  for (let index = 0; index < days; index++) {
-    const point = deduped.get(plusDays(latest, -(days - 1 - index)));
-    if (!point) return null;
-    run.push(point);
-  }
-  const total_cost = run.reduce((sum, point) => sum + point.cost_total, 0);
-  const raw = run.reduce((sum, point) => sum + point.input_tokens + point.output_tokens, 0);
-  const cached = run.reduce((sum, point) => sum + point.cache_read_tokens + point.cache_write_tokens, 0);
-  const source = body?.source === 'legacy-rin-usage-db' ? 'LEGACY' : 'RECORDED';
-  return { days, points: run, total_cost, peak_cost: Math.max(0, ...run.map(point => point.cost_total)), title: `USAGE VALUE ${run[0].timestamp.slice(5).replace('-', '/')}-${latest.slice(5).replace('-', '/')} - DAILY`, secondary: `${source} THRU ${latest.slice(5).replace('-', '/')}  RAW ${compact(raw)}  CACHE ${compact(cached)}` };
+function buildCodexCostTrend(native) {
+  if (!native) return null;
+  const firstObserved = native.points.findIndex(point => point.total_tokens !== null);
+  const points = firstObserved >= 0 ? native.points.slice(firstObserved) : native.points;
+  const first = points[0].timestamp, latest = points.at(-1).timestamp;
+  return { days: points.length, points, total_cost: points.reduce((sum, point) => sum + (point.cost_total || 0), 0), peak_cost: Math.max(0, ...points.map(point => point.cost_total || 0)), title: `USAGE VALUE ${first.slice(5).replace('-', '/')}-${latest.slice(5).replace('-', '/')} - DAILY`, secondary: `CODEX STANDARD EST${native.partial ? ' PARTIAL' : ''}  TODAY SO FAR`, footer: `LOCAL CODEX - ${native.unpricedRequests} UNPRICED - PRICES ${native.pricing.checkedAt.slice(5).replace('-', '/')}`, partial: native.partial };
 }
 
 function pngCard(snapshot, trend, limits) {
-  return renderCodexUsageCardPng(usageStatusForCard(snapshot, limits), { trend: trend || undefined, trendTitle: trend?.title, trendSecondary: trend?.secondary });
+  return renderCodexUsageCardPng(usageStatusForCard(snapshot, limits), { trend: trend || undefined, trendTitle: trend?.title, trendSecondary: trend?.secondary, trendFooter: trend?.footer });
 }
 
 async function writeCard(dataDir, snapshot, trend, limits, suffix = '') {
@@ -265,7 +247,7 @@ export function createCodexUsageProvider({ config = {}, spawnImpl = spawn, timeo
   return { async readRateLimits() {
     const command = Array.isArray(config.command) && config.command.length ? config.command : ['codex'];
     return new Promise((resolve, reject) => {
-      const child = spawnImpl(command[0], [...command.slice(1), 'app-server'], { env: { ...process.env, ...(config.codexHome ? { CODEX_HOME: config.codexHome } : {}) }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawnImpl(command[0], [...command.slice(1), 'app-server'], { env: { ...process.env, CODEX_HOME: resolveCodexHome(config.codexHome) }, stdio: ['pipe', 'pipe', 'pipe'] });
       let buffer = '', settled = false, nextId = 1;
       const pending = new Map();
       const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); error ? reject(error) : resolve(value); };
@@ -349,13 +331,19 @@ export async function executeUsage(args = '', { config = {}, dataDir, provider, 
   }
   const source = provider || createCodexUsageProvider({ config });
   const snapshot = normalizeUsageResponse(await source.readRateLimits(), now());
-  if (config.legacyUsageDbPath) {
-    try { await readFile(costHistoryPath(dataDir)); }
-    catch (error) { if (error?.code === 'ENOENT') await migrateLegacyCostHistory({ dataDir, legacyDbPath: config.legacyUsageDbPath }); else throw error; }
-  }
-  const trend = await readCostTrend(dataDir);
+  let tokenTrend = null, tokenError = false;
+  try { tokenTrend = await readCodexTokenTrend({ codexHome: config.codexHome, dataDir, now: now() }); }
+  catch { tokenError = true; }
+  const trend = buildCodexCostTrend(tokenTrend);
   await appendSnapshot(dataDir, { observedAt: snapshot.observedAt, limits: snapshot.limits });
-  const text = `${renderCurrentUsage(snapshot)}${trend ? `\n\nUSD-equivalent 历史：${trend.points[0].timestamp} 至 ${trend.points.at(-1).timestamp} 的 ${trend.days} 天实际记录（${trend.secondary}）。` : '\n\nUSD-equivalent 历史 unknown：尚无连续 14 天的实际成本快照，未绘制曲线。'}`;
+  let text = renderCurrentUsage(snapshot);
+  if (trend) {
+    const unpriced = Object.entries(tokenTrend.unpricedModels).map(([model, count]) => `${model}: ${count}`).join('，');
+    text += `\n\nUSD-equivalent 历史：${trend.points[0].timestamp} 至 ${trend.points.at(-1).timestamp} 的 ${trend.days} 天记录（${trend.secondary}）。按真实逐请求 tokens、记录中的模型及 ${tokenTrend.pricing.checkedAt} 官方 Standard API 价估值，不是订阅扣费。未定价 ${tokenTrend.unpricedRequests} 次${unpriced ? `（${unpriced}）；图中金额仅含已定价请求` : ''}。`;
+    text += `\n\n本地 Codex tokens：已记录 ${tokenTrend.points.some(point => point.total_tokens !== null) ? compact(tokenTrend.total_tokens) : 'unknown'} tokens${tokenTrend.pendingFiles || tokenTrend.warnings.length ? '（索引尚不完整，当前为部分统计）' : ''}。按北京时间归日，今天为截至当前的记录；包含缓存输入，缺失日期为 unknown；账户归属 unknown。`;
+  } else {
+    text += `\n\nUSD-equivalent 历史及本地 Codex tokens unknown${tokenError ? '：索引暂不可用' : ''}。`;
+  }
   if (options.mode === 'text') return { text };
   try {
     const files = [await writeCard(dataDir, snapshot, trend, ordinaryCodexLimits(snapshot))];

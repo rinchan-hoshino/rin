@@ -48,7 +48,7 @@ test('multi-bucket current view reports used, remaining and reset without accoun
 test('text reads injected provider and records only new private history', async t => {
   const dataDir = await fixture(t);
   let calls = 0;
-  const result = await executeUsage('text', { dataDir, provider: { readRateLimits: async () => { calls++; return response; } }, now: () => new Date('2026-09-05T01:00:00Z') });
+  const result = await executeUsage('text', { dataDir, config: { codexHome: dataDir }, provider: { readRateLimits: async () => { calls++; return response; } }, now: () => new Date('2026-09-05T01:00:00Z') });
   assert.equal(calls, 1);
   assert.equal(result.files, undefined);
   assert.match(result.text, /Codex 额度/);
@@ -60,13 +60,13 @@ test('text reads injected provider and records only new private history', async 
 test('card returns PNG with a failure-only text fallback and history uses the new snapshots', async t => {
   const dataDir = await fixture(t);
   const provider = { readRateLimits: async () => response };
-  const current = await executeUsage('card', { dataDir, provider, now: () => new Date('2026-09-05T01:00:00Z') });
+  const current = await executeUsage('card', { dataDir, config: { codexHome: dataDir }, provider, now: () => new Date('2026-09-05T01:00:00Z') });
   assert.equal(current.files?.[0].mimeType, 'image/png');
   assert.equal(current.files.length, 1);
   assert.equal(current.text, undefined);
   assert.match(current.fallbackText, /剩余 80%/);
   assert.deepEqual([...await readFile(current.files[0].path)].slice(0,8), [137,80,78,71,13,10,26,10]);
-  await executeUsage('text', { dataDir, provider: { readRateLimits: async () => ({ rateLimitsByLimitId: { codex: { ...response.rateLimitsByLimitId.codex, primary: { ...response.rateLimitsByLimitId.codex.primary, usedPercent: 25 } } } }) }, now: () => new Date('2026-09-05T02:00:00Z') });
+  await executeUsage('text', { dataDir, config: { codexHome: dataDir }, provider: { readRateLimits: async () => ({ rateLimitsByLimitId: { codex: { ...response.rateLimitsByLimitId.codex, primary: { ...response.rateLimitsByLimitId.codex.primary, usedPercent: 25 } } } }) }, now: () => new Date('2026-09-05T02:00:00Z') });
   const history = await executeUsage('history --days 2', { dataDir, now: () => new Date('2026-09-05T03:00:00Z') });
   assert.match(history.text, /共 2 次快照/);
   assert.match(history.text, /20% → 最新 25%/);
@@ -82,7 +82,7 @@ test('missing current and history fields are explicit unknowns', async t => {
   const dataDir = await fixture(t);
   const empty = await executeUsage('history', { dataDir, now: () => new Date('2026-09-05T00:00:00Z') });
   assert.match(empty.text, /unknown/);
-  const current = await executeUsage('text', { dataDir, provider: { readRateLimits: async () => ({ rateLimitsByLimitId: { codex: { limitId: 'codex', primary: {} } } }) } });
+  const current = await executeUsage('text', { dataDir, config: { codexHome: dataDir }, provider: { readRateLimits: async () => ({ rateLimitsByLimitId: { codex: { limitId: 'codex', primary: {} } } }) } });
   assert.match(current.text, /已用 unknown，剩余 unknown/);
   assert.match(current.text, /重置时间 unknown/);
 });
