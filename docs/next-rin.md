@@ -15,7 +15,7 @@
 
 ### 安装与生命周期
 
-英文 Git 安装器与 `rin update/start/stop/restart` 入口见 [安装说明](installation.md)。普通 `rin` 调用透传 Codex。候选 Git 版本在独立目录完成依赖安装和测试，再切换原子安装记录；更新失败保留前版。只用 Codex 不需要后台服务，未配置聊天/Nerve 时守护进程保持停止。推荐配置尚待确定，安装器不复制私人设置。
+英文 Git 安装器与 `rin update/start/stop/restart` 入口见 [安装说明](installation.md)。普通 `rin` 调用透传 Codex。候选 Git 版本在独立目录完成依赖安装和测试，再切换原子安装记录；更新失败保留前版。只用 Codex 不需要后台服务，未配置聊天/Nerve 时守护进程保持停止。推荐配置按用户选择合并指定键，包括单条工具历史输出上限 4,000 tokens；安装器不复制私人设置。
 
 Nerve MCP 使用安装根目录的稳定 `nerve-mcp-run.mjs` 入口，新连接按同一安装记录选择客户端发布版本，避免把配置固定在旧 release。已有连接在重连后加载新版；不通过新增用户命令管理 MCP。
 

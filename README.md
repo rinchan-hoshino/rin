@@ -18,7 +18,7 @@ Windows PowerShell：
 irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1 | iex
 ```
 
-安装器仅使用英文：检查旧版、选择 Codex CLI / ChatGPT App、询问推荐配置意愿、填写全局 AGENTS，再准备产品、服务与可选原文检索。推荐配置尚未定稿，本版不改变已有 Codex 设置；用户填写的 AGENTS 只在本机保存，已有内容默认保留。
+安装器仅使用英文：检查旧版、选择 Codex CLI / ChatGPT App、询问推荐配置意愿、填写全局 AGENTS，再准备产品、服务与可选原文检索。推荐配置仅在用户选择后合并指定键，包括单条工具历史输出上限 4,000 tokens；未选择则保留已有 Codex 设置；用户填写的 AGENTS 只在本机保存，已有内容默认保留。
 
 ```sh
 rin                    # Codex

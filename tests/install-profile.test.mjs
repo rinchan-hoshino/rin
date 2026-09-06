@@ -9,7 +9,7 @@ test('recommended profile batch-upserts only the reviewed keys',async()=>{
   assert.equal(request.reloadUserConfig,true);
   assert.deepEqual(request.edits,RIN_RECOMMENDED_CODEX_EDITS.map(edit=>({...edit})));
   assert.deepEqual(request.edits.map(edit=>edit.keyPath),[
-    'features.context_management.experimental_mode','features.memories','sandbox_mode','approval_policy',
+    'features.context_management.experimental_mode','features.memories','tool_output_token_limit','sandbox_mode','approval_policy',
     'desktop.preventSleepWhileRunning','desktop.keepRemoteControlAwakeWhilePluggedIn',
     'desktop.git-branch-prefix','desktop.git-pull-request-merge-method','desktop.worktree-upstream-refresh-mode',
     'apps.connector_20205bf7d4e99a89d7154bb849718324.enabled',
@@ -17,6 +17,7 @@ test('recommended profile batch-upserts only the reviewed keys',async()=>{
   ]);
   assert.ok(request.edits.every(edit=>edit.mergeStrategy==='upsert'));
   assert.equal(request.edits.find(edit=>edit.keyPath==='approval_policy').value,'never');
+  assert.equal(request.edits.find(edit=>edit.keyPath==='tool_output_token_limit').value,4000);
   assert.ok(!request.edits.some(edit=>/service_tier|chronicle/i.test(edit.keyPath)));
 });
 
