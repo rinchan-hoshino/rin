@@ -21,7 +21,7 @@ function apiFailure(value) {
 }
 function checked(result) {
   const failure=apiFailure(result);
-  if(failure)throw Object.assign(new Error(`Feishu API ${failure.code}: ${failure.message}`),{code:failure.code,msg:failure.message});
+  if(failure)throw Object.assign(new Error(`Feishu API ${failure.code}: ${failure.message}`),{code:failure.code,msg:failure.message,fallbackSafe:true});
   return result;
 }
 function missingEditableMessage(error) {
@@ -141,7 +141,7 @@ export function createAdapter(config, context) {
           ? await client.im.image.create({ data: { image_type: 'message', image: createReadStream(file.path) } })
           : await client.im.file.create({ data: { file_type: 'stream', file_name: file.name || path.basename(file.path), file: createReadStream(file.path) } });
         const key = unwrap(uploaded)?.[image ? 'image_key' : 'file_key'];
-        if(!key)throw new Error('Feishu upload returned no media key');
+        if(!key)throw Object.assign(new Error('Feishu upload returned no media key'),{fallbackSafe:true});
         const data={msg_type:image?'image':'file',content:JSON.stringify({[image?'image_key':'file_key']:key})};
         const media=output.replyTo && !result
           ? await client.im.message.reply({path:{message_id:String(output.replyTo)},data})

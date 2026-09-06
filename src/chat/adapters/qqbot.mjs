@@ -7,6 +7,11 @@ import { syncQQCommandPanels } from '../qq-commands.mjs';
 
 const capabilities = Object.freeze({ edit: false, delete: false, typing: true, maxText: 2000 });
 
+function explicitMediaRejection(error) {
+  const status=Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  return Number.isFinite(status) && status>=400 && status<500;
+}
+
 function logger(log = {}) {
   return {
     debug: (...args) => {
@@ -168,7 +173,9 @@ export function createAdapter(config, context) {
       for (const file of output.files || []) {
         const mime = file.mimeType || '';
         const method = mime.startsWith('image/') ? 'sendImage' : mime.startsWith('audio/') ? 'sendVoice' : mime.startsWith('video/') ? 'sendVideo' : 'sendFile';
-        const media = await bot[method](qqTarget, { localPath: file.path }, file.name ? { fileName: file.name } : undefined);
+        let media;
+        try { media=await bot[method](qqTarget, { localPath: file.path }, file.name ? { fileName: file.name } : undefined); }
+        catch(error) { if(explicitMediaRejection(error))error.fallbackSafe=true;throw error; }
         result ||= media?.message;
       }
       if (!result) throw new Error('QQ official send requires text or files');

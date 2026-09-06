@@ -8,6 +8,11 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const READY_TIMEOUT_MS = 30_000;
 
+function explicitMediaRejection(error) {
+  const status=Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  return Number.isFinite(status) && status>=400 && status<500;
+}
+
 function discordCommandDefinitions(commands) {
   return commands.map(command => ({
     name: command.name,
@@ -245,8 +250,8 @@ export function createAdapter(config, context) {
           catch (replacementError) { replacementError.deliveryUncertain = true; throw replacementError; }
         }
       }
-      const sent = await destination.send(payload);
-      return {id: String(sent.id)};
+      try { const sent = await destination.send(payload); return {id: String(sent.id)}; }
+      catch(error) { if(payload.files?.length && explicitMediaRejection(error))error.fallbackSafe=true;throw error; }
     },
     async typing(target) { const destination = await channel(target.chatId); await destination.sendTyping(); },
     async delete(target, messageId) {

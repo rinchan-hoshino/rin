@@ -78,7 +78,7 @@ export function createAdapter(config, context) {
     try { event = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); } catch { return; }
     if (event.echo != null && pending.has(String(event.echo))) {
       const call = pending.get(String(event.echo)); pending.delete(String(event.echo)); clearTimeout(call.timer);
-      if (event.status === 'failed' || (event.retcode != null && event.retcode !== 0)) call.reject(new Error(`OneBot RPC failed (${event.retcode}): ${event.message || event.wording || 'unknown error'}`));
+      if (event.status === 'failed' || (event.retcode != null && event.retcode !== 0)) call.reject(Object.assign(new Error(`OneBot RPC failed (${event.retcode}): ${event.message || event.wording || 'unknown error'}`),{fallbackSafe:true}));
       else call.resolve(event.data ?? {});
       return;
     }
@@ -142,9 +142,9 @@ export function createAdapter(config, context) {
     const response = await (config.fetch || fetch)(`${config.httpUrl.replace(/\/$/, '')}/${action}`, {
       method: 'POST', headers: { 'content-type': 'application/json', ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}) }, body: JSON.stringify(params),
     });
-    if (!response.ok) throw new Error(`OneBot HTTP ${action} failed: ${response.status}`);
+    if (!response.ok) throw Object.assign(new Error(`OneBot HTTP ${action} failed: ${response.status}`),{fallbackSafe:true});
     const body = await response.json();
-    if (body.status === 'failed' || (body.retcode != null && body.retcode !== 0)) throw new Error(`OneBot HTTP ${action} failed (${body.retcode})`);
+    if (body.status === 'failed' || (body.retcode != null && body.retcode !== 0)) throw Object.assign(new Error(`OneBot HTTP ${action} failed (${body.retcode})`),{fallbackSafe:true});
     return body.data || {};
   }
 

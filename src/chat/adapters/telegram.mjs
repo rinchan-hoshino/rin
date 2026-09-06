@@ -9,6 +9,11 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function explicitMediaRejection(error) {
+  const status=Number(error?.error_code ?? error?.status ?? error?.statusCode ?? error?.response?.status);
+  return Number.isFinite(status) && status>=400 && status<500;
+}
+
 function fileDescriptor(message) {
   if (message.document) return {id: message.document.file_id, name: message.document.file_name, mimeType: message.document.mime_type};
   if (message.video) return {id: message.video.file_id, name: 'video.mp4', mimeType: message.video.mime_type};
@@ -203,8 +208,11 @@ export function createAdapter(config, context) {
         let fileResult;
         try { fileResult = await sendFile(field); }
         catch (error) {
-          if (field !== 'photo' || !/PHOTO_INVALID_DIMENSIONS/i.test(String(error?.description || error?.message || ''))) throw error;
-          fileResult = await sendFile('document');
+          if (field !== 'photo' || !/PHOTO_INVALID_DIMENSIONS/i.test(String(error?.description || error?.message || ''))) {
+            if(explicitMediaRejection(error))error.fallbackSafe=true;throw error;
+          }
+          try { fileResult = await sendFile('document'); }
+          catch(documentError) { if(explicitMediaRejection(documentError))documentError.fallbackSafe=true;throw documentError; }
         }
         if (!result) result = fileResult;
       }

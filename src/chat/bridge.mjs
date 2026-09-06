@@ -397,7 +397,7 @@ export class ChatBridge {
           this.retryAt.delete(item.id);
           if(payload.progress && route.threadId)this.typing(route.threadId);
         } catch (error) {
-          if(payload.files?.length && payload.fallbackText && error?.deliveryUncertain!==true) {
+          if(payload.files?.length && payload.fallbackText && error?.fallbackSafe===true) {
             try {
               const fallback=await adapter.send(target,{text:payload.fallbackText,...(payload.replyTo?{replyTo:payload.replyTo}:{})});
               this.store.sent(item.id,item.payload,fallback.id);this.retryAt.delete(item.id);continue;
