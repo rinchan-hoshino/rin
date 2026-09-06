@@ -6,6 +6,25 @@ import { join } from 'node:path';
 import { ChatBridge } from '../src/chat/bridge.mjs';
 import { outputFiles } from '../src/chat/files.mjs';
 
+test('usage cards stay image-only on every chat transport while retaining a delivery fallback',async()=>{
+  for(const type of ['discord','telegram','qqbot','onebot','feishu']){
+    const dataDir=mkdtempSync(join(tmpdir(),`rin-usage-card-${type}-`));const sent=[];let receive;
+    const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})};
+    const adapter={capabilities:{edit:type==='discord',typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return{id:'card'};}};
+    const config={dataDir,adapters:[{id:'a',type,allowUsers:['owner']}],bindings:[]};
+    const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,usage:async()=>({files:[{path:'/tmp/card.png',name:'card.png',mimeType:'image/png'}],fallbackText:'完整额度文字'}),log:{info(){},warn(){},error(){}}});
+    try{
+      await bridge.start();
+      await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[],...(type==='discord'?{commandInteraction:{id:'usage'}}:{})});
+      await bridge.flush();
+      assert.equal(sent.length,1,`${type} must send one card response`);
+      assert.ok(!sent[0].text,`${type} must not repeat the fallback on success`);
+      assert.equal(sent[0].fallbackText,'完整额度文字');
+      assert.equal(sent[0].files?.[0].name,'card.png');
+    }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
+  }
+});
+
 test('durable ingress queues once; commentary edits same remote message; tool events are suppressed',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-'));const sent=[],queued=[],deleted=[];
   let receive;

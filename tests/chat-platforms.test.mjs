@@ -89,7 +89,7 @@ test('Discord registers and routes dynamic commands without exposing their imple
   await adapter.stop();
 });
 
-test('Discord interaction attachment failure safely edits the same private response without files', async () => {
+test('Discord interaction sends only the attachment and uses fallback text only after upload failure', async () => {
   const client=new EventEmitter(); client.user={id:'bot'}; client.login=async()=>{}; client.isReady=()=>true; client.destroy=async()=>{};
   const edits=[]; client.application={commands:{set:async()=>{}}};
   const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{dataDir:'/tmp',log:{},isBound:async()=>true});
@@ -99,8 +99,9 @@ test('Discord interaction attachment failure safely edits the same private respo
     deferReply:async()=>{},editReply:async payload=>{edits.push(payload);if(payload.files?.length)throw new Error('upload');return{id:'response'};},followUp:async()=>{},
   });
   await new Promise(resolve=>setImmediate(resolve));
-  assert.deepEqual(await adapter.send({commandInteraction:{id:'file-ix'}},{text:'caption',files:[{path:'/tmp/a',name:'a'}]}),{id:'response'});
-  assert.equal(edits.length,2); assert.deepEqual(edits[1].files,[]); assert.deepEqual(edits[1].attachments,[]); assert.equal(edits[1].content,'caption');
+  assert.deepEqual(await adapter.send({commandInteraction:{id:'file-ix'}},{text:'',fallbackText:'完整额度文字',files:[{path:'/tmp/a',name:'a'}]}),{id:'response'});
+  assert.equal(edits.length,2); assert.equal(edits[0].content,''); assert.ok(edits[0].files?.length);
+  assert.deepEqual(edits[1].files,[]); assert.deepEqual(edits[1].attachments,[]); assert.equal(edits[1].content,'完整额度文字');
   await adapter.stop();
 });
 

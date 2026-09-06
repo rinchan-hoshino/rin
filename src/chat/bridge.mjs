@@ -111,9 +111,10 @@ export class ChatBridge {
       else {
         const result=await command.run({args:parsed.args,message:{adapter:config.id,id:message.id,chatId:message.chatId,userId:message.userId,kind:message.kind,text:message.text},dataDir:this.config.dataDir});
         if(!result || typeof result!=='object' || (result.text!==undefined && typeof result.text!=='string') ||
+          (result.fallbackText!==undefined && typeof result.fallbackText!=='string') ||
           (result.files!==undefined && (!Array.isArray(result.files) || result.files.some(file=>!file || typeof file.path!=='string' || (file.name!==undefined && typeof file.name!=='string') || (file.mimeType!==undefined && typeof file.mimeType!=='string')))) ||
           (!result.text && !result.files?.length))throw new Error('Invalid command result');
-        output={text:result.text || '',...(result.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
+        output={text:result.text || '',...(result.fallbackText?{fallbackText:result.fallbackText}:{}),...(result.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
       }
     } catch {
       this.log.warn('command failed',{name:command.name});
@@ -125,8 +126,8 @@ export class ChatBridge {
       ? prepareText(config.type,output.text || '',this.adapters.get(config.id)?.capabilities.maxText || 1900)
       : splitText(stripMarkdownFormatting(output.text || ''),1900).map(text=>({text}));
     // Native interaction replies are one private response; adapters retain the handle in memory.
-    const parts=message.commandInteraction?[{text:output.text,...(output.files?.length?{files:output.files}:{})}]
-      : [...chunks,...(output.files?.length?[{files:output.files}]:[])];
+    const parts=message.commandInteraction?[{text:output.text,...(output.fallbackText?{fallbackText:output.fallbackText}:{}),...(output.files?.length?{files:output.files}:{})}]
+      : [...chunks,...(output.files?.length?[{files:output.files,...(output.fallbackText?{fallbackText:output.fallbackText}:{})}]:[])];
     for(const [index,part] of parts.entries())this.store.stage(stableId(key,index),JSON.stringify([config.id,String(message.chatId)]),{...part,target});
     this.store.setCursor(key,{state:'done'});
     if(message.commandInteraction)await this.flush();

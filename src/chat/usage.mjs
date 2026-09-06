@@ -105,7 +105,7 @@ function durationLabel(minutes) {
 function resetLabel(seconds, locale = 'zh-CN') {
   if (seconds === null) return '重置时间 unknown';
   const date = new Date(seconds > 1e11 ? seconds : seconds * 1000);
-  return Number.isNaN(date.getTime()) ? '重置时间 unknown' : `重置 ${date.toLocaleString(locale)}`;
+  return Number.isNaN(date.getTime()) ? '重置时间 unknown' : `重置 ${date.toLocaleString(locale, { timeZone: 'Asia/Shanghai' })}（北京时间）`;
 }
 
 export function renderCurrentUsage(snapshot) {
@@ -171,14 +171,22 @@ function renderHistory(rows, days) {
 }
 
 const FONT = {
-  ' ':['00000','00000','00000','00000','00000','00000','00000'], '-':['00000','00000','00000','11111','00000','00000','00000'], '.':['00000','00000','00000','00000','00000','01100','01100'], ':':['00000','01100','01100','00000','01100','01100','00000'], '/':['00001','00010','00010','00100','01000','01000','10000'], '%':['11001','11010','00100','01000','10110','00110','00000'],
+  ' ':['00000','00000','00000','00000','00000','00000','00000'], '+':['00000','00100','00100','11111','00100','00100','00000'], '-':['00000','00000','00000','11111','00000','00000','00000'], '.':['00000','00000','00000','00000','00000','01100','01100'], ':':['00000','01100','01100','00000','01100','01100','00000'], '/':['00001','00010','00010','00100','01000','01000','10000'], '%':['11001','11010','00100','01000','10110','00110','00000'],
   '0':['01110','10001','10011','10101','11001','10001','01110'], '1':['00100','01100','00100','00100','00100','00100','01110'], '2':['01110','10001','00001','00010','00100','01000','11111'], '3':['11110','00001','00001','01110','00001','00001','11110'], '4':['00010','00110','01010','10010','11111','00010','00010'], '5':['11111','10000','10000','11110','00001','00001','11110'], '6':['01110','10000','10000','11110','10001','10001','01110'], '7':['11111','00001','00010','00100','01000','01000','01000'], '8':['01110','10001','10001','01110','10001','10001','01110'], '9':['01110','10001','10001','01111','00001','00001','01110'],
   A:['01110','10001','10001','11111','10001','10001','10001'], B:['11110','10001','10001','11110','10001','10001','11110'], C:['01110','10001','10000','10000','10000','10001','01110'], D:['11110','10001','10001','10001','10001','10001','11110'], E:['11111','10000','10000','11110','10000','10000','11111'], F:['11111','10000','10000','11110','10000','10000','10000'], G:['01110','10001','10000','10111','10001','10001','01110'], H:['10001','10001','10001','11111','10001','10001','10001'], I:['01110','00100','00100','00100','00100','00100','01110'], J:['00111','00010','00010','00010','00010','10010','01100'], K:['10001','10010','10100','11000','10100','10010','10001'], L:['10000','10000','10000','10000','10000','10000','11111'], M:['10001','11011','10101','10101','10001','10001','10001'], N:['10001','11001','10101','10011','10001','10001','10001'], O:['01110','10001','10001','10001','10001','10001','01110'], P:['11110','10001','10001','11110','10000','10000','10000'], Q:['01110','10001','10001','10001','10101','10010','01101'], R:['11110','10001','10001','11110','10100','10010','10001'], S:['01111','10000','10000','01110','00001','00001','11110'], T:['11111','00100','00100','00100','00100','00100','00100'], U:['10001','10001','10001','10001','10001','10001','01110'], V:['10001','10001','10001','10001','01010','01010','00100'], W:['10001','10001','10001','10101','10101','10101','01010'], X:['10001','01010','00100','00100','00100','01010','10001'], Y:['10001','01010','00100','00100','00100','00100','00100'], Z:['11111','00001','00010','00100','01000','10000','11111'],
 };
 
 function pngCard(snapshot) {
   const windows = snapshot.limits.flatMap(limit => (limit.windows || []).map(window => ({ limit, window })));
-  const width = 1000, height = Math.max(280, 130 + Math.max(1, windows.length) * 125);
+  const credits = snapshot.limits.filter(limit => limit.credits).map(limit => {
+    const value = limit.credits.unlimited ? 'UNLIMITED' : limit.credits.hasCredits && limit.credits.balance !== null ? limit.credits.balance : 'NONE';
+    return `${limit.name || limit.id} CREDITS ${value}`;
+  });
+  const width = 1000, headerHeight = 160, rowHeight = 92;
+  const contentRows = Math.max(1, windows.length);
+  const creditsHeight = credits.length * 34;
+  const footerTop = headerHeight + contentRows * rowHeight + creditsHeight;
+  const height = footerTop + 64;
   const pixels = Buffer.alloc(width * height * 4);
   const rect = (x, y, w, h, color) => {
     for (let yy = Math.max(0,y); yy < Math.min(height,y+h); yy++) for (let xx = Math.max(0,x); xx < Math.min(width,x+w); xx++) {
@@ -192,26 +200,44 @@ function pngCard(snapshot) {
       x+=(glyph[0].length+1)*scale;
     }
   };
-  rect(0,0,width,height,[9,14,29]); rect(0,0,width,8,[56,189,248]);
-  draw('CODEX USAGE',42,32,6,[226,232,240]);
-  if (!windows.length) draw('CURRENT USAGE UNKNOWN',42,115,4,[148,163,184]);
+  const text=[226,232,240], muted=[148,163,184], panel=[20,29,49], border=[51,65,85], accent=[56,189,248];
+  rect(0,0,width,height,[9,14,29]); rect(0,0,width,8,accent);
+  draw('CHATGPT CODEX USAGE',44,34,4,text);
+  draw('REMAINING QUOTA',46,78,2,muted);
+  const plans=[...new Set(snapshot.limits.map(limit=>limit.planType).filter(Boolean))];
+  if(plans.length)draw(`PLAN ${plans.join(' / ')}`,46,104,2,accent);
+  rect(44,136,width-88,2,border);
+  if (!windows.length) {
+    rect(44,160,width-88,72,panel);
+    draw('CURRENT USAGE UNKNOWN',64,174,2,muted);
+  }
   windows.forEach(({limit,window},index)=>{
-    const top=100+index*125, used=window.usedPercent, left=window.remainingPercent;
-    rect(40,top,920,104,[20,29,49]);
-    const rawTitle=String(limit.name || limit.id);
-    const title=rawTitle.length>22?`${rawTitle.slice(0,19)}...`:rawTitle;
-    draw(title,60,top+12,3,[226,232,240]);
-    const color=left===null?[148,163,184]:left>=60?[74,222,128]:left>=25?[250,204,21]:[251,113,133];
-    draw(`USED ${used===null?'UNKNOWN':(Math.round(used*100)/100)+'%'}`,500,top+12,3,color);
-    draw(`LEFT ${left===null?'UNKNOWN':left+'%'}`,730,top+12,3,color);
-    let reset='UNKNOWN';
-    if(window.resetsAt!==null){const date=new Date(window.resetsAt>1e11?window.resetsAt:window.resetsAt*1000);if(!Number.isNaN(date.getTime()))reset=date.toISOString().slice(0,16).replace('T',' ');}
+    const top=160+index*rowHeight, left=window.remainingPercent;
+    rect(44,top,width-88,72,panel);
     const mins=window.windowDurationMins;
     const duration=mins===null?'UNKNOWN':mins>0&&mins%1440===0?`${mins/1440}D`:mins>0&&mins%60===0?`${mins/60}H`:`${mins}M`;
-    draw(`${window.name} ${duration}  RESET ${reset}${reset==='UNKNOWN'?'':' UTC'}`,60,top+45,2,[148,163,184]);
-    rect(60,top+78,860,12,[51,65,85]);
-    if(left!==null)rect(60,top+78,Math.round(860*left/100),12,left>=60?[74,222,128]:left>=25?[250,204,21]:[251,113,133]);
+    const bucket=limit.name || limit.id;
+    const rawTitle=`${bucket} ${duration}`;
+    const title=rawTitle.length>25?`${rawTitle.slice(0,22)}...`:rawTitle;
+    const color=left===null?muted:left>=60?[74,222,128]:left>=25?[250,204,21]:[251,113,133];
+    draw(title,64,top+14,2,text);
+    draw(left===null?'UNKNOWN':`${left}% LEFT`,350,top+14,2,color);
+    let reset='UNKNOWN';
+    if(window.resetsAt!==null){
+      const date=new Date(window.resetsAt>1e11?window.resetsAt:window.resetsAt*1000);
+      if(!Number.isNaN(date.getTime())){
+        const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date);
+        const part=type=>parts.find(value=>value.type===type)?.value;
+        reset=`${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+      }
+    }
+    draw(`RESET ${reset}${reset==='UNKNOWN'?'':' GMT+8'}`,570,top+14,2,muted);
+    rect(64,top+47,852,12,border);
+    if(left!==null)rect(64,top+47,Math.round(852*left/100),12,color);
   });
+  credits.forEach((value,index)=>draw(value.length>70?`${value.slice(0,67)}...`:value,48,headerHeight+contentRows*rowHeight+16+index*34,2,text));
+  rect(44,footerTop+12,width-88,2,border);
+  draw('CODEX QUOTA - ASIA/SHANGHAI',46,footerTop+32,2,muted);
   const crc32=input=>{let crc=0xffffffff;for(const byte of input){crc^=byte;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return(crc^0xffffffff)>>>0;};
   const chunk=(type,data)=>{const name=Buffer.from(type),body=Buffer.concat([name,data]),out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length,0);body.copy(out,4);out.writeUInt32BE(crc32(body),data.length+8);return out;};
   const raw=Buffer.alloc(height*(width*4+1));for(let y=0;y<height;y++){const at=y*(width*4+1);raw[at]=0;pixels.copy(raw,at+1,y*width*4,(y+1)*width*4);}
@@ -291,6 +317,6 @@ export async function executeUsage(args = '', { config = {}, dataDir, provider, 
   await appendSnapshot(dataDir, snapshot);
   const text = renderCurrentUsage(snapshot);
   if (options.mode === 'text') return { text };
-  try { return { text, files: [await writeCard(dataDir, snapshot)] }; }
+  try { return { files: [await writeCard(dataDir, snapshot)], fallbackText: text }; }
   catch { return { text: `${text}\n\n额度卡片生成失败，以上为完整文字结果。` }; }
 }

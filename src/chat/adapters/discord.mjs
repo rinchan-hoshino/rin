@@ -219,7 +219,7 @@ export function createAdapter(config, context) {
         try { edited = await interaction.editReply({...payload,content:chunks[0]}); }
         catch {
           if (!payload.files?.length) throw new Error('discord_command_interaction_response_failed');
-          try { edited = await interaction.editReply({content:chunks[0] || '附件发送失败，请在 Codex 中查看。',allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
+          try { edited = await interaction.editReply({content:String(output.fallbackText || chunks[0] || '附件发送失败，请在 Codex 中查看。').slice(0,2000),allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
           catch { throw new Error('discord_command_interaction_response_failed'); }
         }
         for(const contentPart of chunks.slice(1)) {

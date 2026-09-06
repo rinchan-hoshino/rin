@@ -41,6 +41,7 @@ test('multi-bucket current view reports used, remaining and reset without accoun
   assert.match(text, /1 周：已用 35.5%，剩余 64.5%/);
   assert.match(text, /Spark/);
   assert.match(text, /Credits：12.50/);
+  assert.match(text, /北京时间/);
   assert.doesNotMatch(text, /must-not-leak/);
 });
 
@@ -56,11 +57,13 @@ test('text reads injected provider and records only new private history', async 
   assert.doesNotMatch(stored, /must-not-leak/);
 });
 
-test('card returns PNG plus complete text fallback and history uses the new snapshots', async t => {
+test('card returns PNG with a failure-only text fallback and history uses the new snapshots', async t => {
   const dataDir = await fixture(t);
   const provider = { readRateLimits: async () => response };
   const current = await executeUsage('card', { dataDir, provider, now: () => new Date('2026-09-05T01:00:00Z') });
   assert.equal(current.files?.[0].mimeType, 'image/png');
+  assert.equal(current.text, undefined);
+  assert.match(current.fallbackText, /剩余 80%/);
   assert.deepEqual([...await readFile(current.files[0].path)].slice(0,8), [137,80,78,71,13,10,26,10]);
   await executeUsage('text', { dataDir, provider: { readRateLimits: async () => ({ rateLimitsByLimitId: { codex: { ...response.rateLimitsByLimitId.codex, primary: { ...response.rateLimitsByLimitId.codex.primary, usedPercent: 25 } } } }) }, now: () => new Date('2026-09-05T02:00:00Z') });
   const history = await executeUsage('history --days 2', { dataDir, now: () => new Date('2026-09-05T03:00:00Z') });
