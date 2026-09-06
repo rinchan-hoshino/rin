@@ -155,3 +155,13 @@ test("version one state migrates without restoring immediate owner steering",()=
   assert.equal(state.version,2);assert.deepEqual(state.chats,{});assert.equal(state.pending[0].priority,60);
   assert.equal(state.pending[0].latestCheckAt,'2026-09-04T12:06:23.000Z');
 });
+
+test('a non-owner mention and an awaited ambient reply bypass the ambient fixed window',()=>{
+  const options={ownerUserIds:new Set([ownerId]),mirrorDiscordChannelIds:new Set(),ambientWindowMs:900000};
+  for(const extra of [{mentionedBot:true},{awaitingReply:true}]) {
+    const item=classifyStoredMessage(message({mentionedBot:extra.mentionedBot===true}),{...options,awaitingReply:extra.awaitingReply===true});
+    assert.equal(item.nextCheckAt,message().receivedAt);
+    const state=createAttentionState();enqueueAttention(state,item);
+    assert.equal(prepareDueBatch(state,now+30000,{active:true}).items.length,1);
+  }
+});

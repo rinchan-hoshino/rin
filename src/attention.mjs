@@ -52,9 +52,9 @@ export function classifyStoredMessage(message, options) {
     priority,
     reason: mentioned ? "mentioned" : awaiting ? "awaiting_reply" : isOwner ? "owner" : "ambient",
     idleOnly: channel.idleOnly ?? ambient,
-    nextCheckAt: ambient && idleDelayMs === options.ambientWindowMs
+    nextCheckAt: priority >= 90 ? new Date(receivedMs).toISOString() : ambient && idleDelayMs === options.ambientWindowMs
       ? nextFixedWindow(message.receivedAt, idleDelayMs)
-      : new Date(receivedMs + (priority >= 90 ? 0 : idleDelayMs)).toISOString(),
+      : new Date(receivedMs + idleDelayMs).toISOString(),
     latestCheckAt: new Date(receivedMs + maxDelayMs).toISOString(),
   };
 }
@@ -89,10 +89,11 @@ export function enqueueAttention(state, item) {
   state.pending.push(item);
 }
 
-export function prepareDueBatch(state, nowMs, {active=false, chatModes={}} = {}) {
+export function prepareDueBatch(state, nowMs, {active=false, chatModes={}, notifiedMessageIds=new Set()} = {}) {
   if (state.emitting) return state.emitting;
   const due = state.pending
     .filter((item) => {
+      if (notifiedMessageIds.has(item.messageId)) return false;
       const mode = chatModes[item.chatKey];
       const busy = mode === "busy" ? true : mode === "idle" || mode === "waiting" ? false : active;
       const earliest = Date.parse(item.nextCheckAt);

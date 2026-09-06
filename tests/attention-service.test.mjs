@@ -138,3 +138,57 @@ test('stored version one attention state migrates on use',t=>{
   const {service}=setup(t);service.store.db.prepare('UPDATE attention_state SET state=? WHERE id=1').run(JSON.stringify({version:1,pending:[]}));
   service.accept(record());const state=service.state();assert.equal(state.version,2);assert.deepEqual(state.chats['discord/bot:room'],{});
 });
+
+test('new mentions reach an active turn while earlier notification completion is still pending',t=>{
+  const {service,store}=setup(t);
+  service.accept(record({id:'old',messageId:'100'}));
+  const first=service.scan(at+30000);
+  const running=store.claim(at+30000);
+  assert.equal(running.id,first.id);
+  service.accept(record({id:'new-mention',messageId:'101',mentionedBot:true,receivedAt:new Date(at+40000).toISOString()}));
+  assert.equal(service.scan(at+69999,{active:true}).emitted,false);
+  const next=service.scan(at+70000,{active:true});
+  assert.equal(next.emitted,true);
+  assert.equal(store.event(next.id).payload.priority,100);
+  assert.deepEqual(store.event(next.id).payload.messageIds,['new-mention']);
+  assert.equal(store.event(first.id).state,'running');
+  assert.equal(service.scan(at+400000,{active:true}).suppressed,true);
+  const resumed=new AttentionService(config,store);
+  assert.equal(resumed.scan(at+500000,{active:true}).emitted,false);
+  assert.equal(store.status().length,2);
+});
+
+test('new ordinary messages retain their busy deadline without inheriting another batch completion wait',t=>{
+  const {service,store}=setup(t);
+  service.accept(record({id:'old',messageId:'100'}));
+  service.scan(at+30000);
+  service.accept(record({id:'new',messageId:'101',receivedAt:new Date(at+40000).toISOString()}));
+  assert.equal(service.scan(at+339999,{active:true}).emitted,false);
+  const next=service.scan(at+340000,{active:true});
+  assert.equal(next.emitted,true);
+  assert.deepEqual(store.event(next.id).payload.messageIds,['new']);
+  assert.equal(store.event(next.id).payload.priority,60);
+});
+
+test('legacy in-flight ranges suppress only messages already covered by that chat range',t=>{
+  const {service,store}=setup(t);
+  service.accept(record({id:'a',messageId:'100'}));
+  store.enqueue('legacy','main',{groups:[{chatKey:'discord/bot:room',firstMessageId:'a',lastMessageId:'a'}]},at,'chat-attention');
+  service.accept(record({id:'b',messageId:'101',mentionedBot:true}));
+  const next=service.scan(at+30000,{active:true});
+  assert.equal(next.emitted,true);
+  assert.deepEqual(store.event(next.id).payload.messageIds,['b']);
+  assert.equal(service.state().pending.length,2);
+});
+
+test('another target cannot suppress this target and sequential mentions keep separate exact identities',t=>{
+  const {service,store}=setup(t);
+  store.enqueue('other-target','elsewhere',{messageIds:['a']},at,'chat-attention');
+  for (const [index,id] of ['a','b','c'].entries()) {
+    service.accept(record({id,messageId:String(100+index),mentionedBot:true,receivedAt:new Date(at+index*40000).toISOString()}));
+    const result=service.scan(at+index*40000+30000,{active:true});
+    assert.equal(result.emitted,true);
+    assert.deepEqual(store.event(result.id).payload.messageIds,[id]);
+  }
+  assert.equal(service.scan(at+180000,{active:true}).emitted,false);
+});
