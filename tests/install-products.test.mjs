@@ -87,7 +87,9 @@ test('FFF registers the verified binary with roots and flags as separate argv en
   const result=await installHistoryTool({codexCommand:'codex',home,codexHome,platform:'darwin',arch:'arm64',download:async(_url,path)=>writeFile(path,'verified fixture'),verify:async()=>{},run:async(command,args,options)=>{calls.push({command,args,options});return args[1]==='get'?{code:1,stdout:'',stderr:"No MCP server named 'session-history' found"}:{code:0,stdout:''};}});
   assert.equal(result.status,'installed');
   assert.equal(calls.length,2);assert.deepEqual(calls[0].args,['mcp','get','session-history','--json']);
+  assert.match(calls[0].options.cwd,/rin-codex-global-/);assert.notEqual(calls[0].options.cwd,home);
   const add=calls[1];assert.deepEqual(add.args.slice(0,4),['mcp','add','session-history','--']);
+  assert.match(add.options.cwd,/rin-codex-global-/);assert.notEqual(add.options.cwd,home);
   assert.equal(add.args[4],join(home,'tools','fff-mcp'));
   assert.deepEqual(add.args.slice(5),[join(home,'private','session-history'),'--follow-symlinks','--no-update-check','--no-warmup','--log-file',join(home,'private','logs','fff.log')]);
   assert.equal(calls[0].options.capture,true);assert.equal(calls[0].options.env.CODEX_HOME,codexHome);assert.equal(add.options.env.CODEX_HOME,codexHome);

@@ -146,7 +146,12 @@ export async function installHistoryTool({home,codexHome,platform=process.platfo
   const args=[root,'--follow-symlinks','--no-update-check','--no-warmup','--log-file',logFile];
   const commandEnv={...process.env,CODEX_HOME:codexHome};
   const codex=typeof codexCommand==='string'?{command:codexCommand,args:[]}:codexCommand??await resolveCodex({platform,env:commandEnv});
-  const current=await run(codex.command,[...codex.args,'mcp','get','session-history','--json'],{capture:true,allowFailure:true,env:commandEnv});
+  const runGlobalCodex=async(commandArgs,options={})=>{
+    const cwd=await mkdtemp(join(tmpdir(),'rin-codex-global-'));
+    try{return await run(codex.command,commandArgs,{...options,cwd,env:commandEnv});}
+    finally{await rm(cwd,{recursive:true,force:true});}
+  };
+  const current=await runGlobalCodex([...codex.args,'mcp','get','session-history','--json'],{capture:true,allowFailure:true});
   let conflict = false;
   if(current.code===0){
     let parsed; try{parsed=JSON.parse(current.stdout);}catch{throw new Error('Could not inspect existing session-history MCP configuration');}
@@ -173,7 +178,7 @@ export async function installHistoryTool({home,codexHome,platform=process.platfo
     }catch(error){if(error.code==='ENOENT') await makeLink(target,destination,platform==='win32'?'junction':'dir'); else throw error;}
   }
   if(current.code===0) return {status:'existing',binary,registered:true};
-  assertOk(await run(codex.command,[...codex.args,'mcp','add','session-history','--',binary,...args],{env:commandEnv}),'Registering session-history MCP');
+  assertOk(await runGlobalCodex([...codex.args,'mcp','add','session-history','--',binary,...args]),'Registering session-history MCP');
   return {status:'installed',binary,registered:true,version:FFF.version};
 }
 
