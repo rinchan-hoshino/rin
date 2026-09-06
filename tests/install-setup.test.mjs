@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import {pathToFileURL} from 'node:url';
 import { appendAgentsInstructions, RIN_SUBAGENT_INSTRUCTIONS, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../src/install/setup.mjs';
+import {migrateAgentsInstructions,RIN_LEGACY_SUBAGENT_INSTRUCTIONS} from '../src/install/instructions.mjs';
 
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'rin-setup-'));
@@ -43,7 +44,7 @@ test('Clack setup collects independent product choices and preserves existing AG
   const notes = ui.events.filter(([kind]) => kind === 'note').map(([, , body]) => body).join('\n');
   assert.match(notes, /full filesystem access/);
   assert.match(notes, /approval_policy=never/);
-  assert.match(notes, /120,000 tokens/);
+  assert.doesNotMatch(notes, /120,000 tokens|model_auto_compact_token_limit/);
   assert.match(notes, /GPT-6-Astra with medium reasoning/);
   assert.match(notes, /Original-session search: included \(FFF MCP\)/);
   assert.equal(ui.events.some(([kind, options]) => kind === 'confirm' && /FFF/.test(options.message)), false);
@@ -160,7 +161,23 @@ test('declining all AGENTS additions creates no file; guidance alone can create 
   assert.equal(await appendAgentsInstructions(file), false);
   await assert.rejects(readFile(file), {code: 'ENOENT'});
   assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), true);
-  assert.equal(await readFile(file, 'utf8'), 'Make active use of subagents: use Astra for work that can run in parallel, Terra for relatively independent, simple tasks, and Luna for purely execution-oriented tasks.\n');
+  assert.equal(await readFile(file, 'utf8'), RIN_SUBAGENT_INSTRUCTIONS + '\n');
+});
+
+test('update migrates only exact Rin-managed subagent guidance and avoids duplicates', async t => {
+  const file = join(await temporary(t), 'AGENTS.md');
+  const persona = '# Personal instructions\nKeep my original voice.\n\n';
+  await writeFile(file, persona + RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0] + '\n');
+  assert.equal(await migrateAgentsInstructions(file), true);
+  assert.equal(await readFile(file, 'utf8'), persona + RIN_SUBAGENT_INSTRUCTIONS + '\n');
+  assert.equal(await migrateAgentsInstructions(file), false);
+
+  await writeFile(file, `${persona}${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_SUBAGENT_INSTRUCTIONS}\n`);
+  assert.equal(await migrateAgentsInstructions(file), true);
+  const migrated = await readFile(file, 'utf8');
+  assert.ok(migrated.startsWith(persona));
+  assert.equal(migrated.includes(RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]), false);
+  assert.equal(migrated.split(RIN_SUBAGENT_INSTRUCTIONS).length - 1, 1);
 });
 
 test('setup CLI reports the non-interactive preflight failure once', async () => {

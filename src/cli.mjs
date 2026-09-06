@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installHome, readInstall, withInstallLock, prepareRelease, switchRelease, codexCommand } from './install/core.mjs';
 import { createService } from './install/service.mjs';
+import { runUpdateMigrations } from './install/migrations.mjs';
 
 export function routeArgs(args) {
   if (args[0] === '--') return { type: 'codex', args: args.slice(1) };
@@ -14,7 +16,7 @@ export function routeArgs(args) {
   }
   return { type: 'codex', args };
 }
-export async function main(args = process.argv.slice(2), { home = installHome(), serviceFactory = createService, codex = process.env.RIN_CODEX_BIN } = {}) {
+export async function main(args = process.argv.slice(2), { home = installHome(), serviceFactory = createService, codex = process.env.RIN_CODEX_BIN, codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'), writeConfig } = {}) {
   const route = routeArgs(args);
   if (route.type === 'codex') {
     const executable = await codexCommand({ binary: codex });
@@ -34,6 +36,7 @@ export async function main(args = process.argv.slice(2), { home = installHome(),
     const state = await readInstall(home);
     const service = serviceFactory({ home, node: state.node });
     if (route.command === 'update') {
+      await runUpdateMigrations({codexHome,binary:codex,writeConfig});
       const candidate = await prepareRelease(home, { repository: state.repository, current: state.current });
       if (!candidate.changed) { console.log('Rin is already up to date.'); return 0; }
       await switchRelease(home, candidate, state, service);

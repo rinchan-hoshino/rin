@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {codexCommand} from './core.mjs';
 
 export const RIN_RECOMMENDED_CODEX_EDITS = Object.freeze([
   ['features.context_management.experimental_mode', true],
   ['features.memories', true],
   ['tool_output_token_limit', 4000],
-  ['model_auto_compact_token_limit', 120000],
   ['model', 'gpt-6-astra'],
   ['model_reasoning_effort', 'medium'],
   ['sandbox_mode', 'danger-full-access'],
@@ -18,6 +20,18 @@ export const RIN_RECOMMENDED_CODEX_EDITS = Object.freeze([
   ['apps.connector_openai_hotline.enabled', false],
   ['apps.connector_openai_safety_settings.enabled', false],
 ].map(([keyPath,value])=>Object.freeze({keyPath,value,mergeStrategy:'upsert'})));
+
+export const RIN_OBSOLETE_CODEX_EDITS = Object.freeze([
+  Object.freeze({keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}),
+]);
+
+function hasObsoleteRootSetting(source) {
+  for (const line of source.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) return false;
+    if (/^\s*model_auto_compact_token_limit\s*=/.test(line)) return true;
+  }
+  return false;
+}
 
 export function createCodexConfigWriter({ command, codexHome, spawnImpl = spawn, timeoutMs = 15_000 }) {
   if(!command?.command)throw new TypeError('Codex command is required');
@@ -62,4 +76,22 @@ export async function applyRecommendedCodexProfile({ codexHome, command, writeCo
     edits:RIN_RECOMMENDED_CODEX_EDITS.map(edit=>({...edit})),
     reloadUserConfig:true,
   });
+}
+
+export async function removeObsoleteCodexSettings({ codexHome, command, writeConfig, binary, resolveCommand = codexCommand } = {}) {
+  if(!codexHome)throw new TypeError('codexHome is required');
+  let source;
+  try { source=await readFile(join(codexHome,'config.toml'),'utf8'); }
+  catch(error) { if(error.code==='ENOENT')return{status:'unchanged'};throw error; }
+  if(!hasObsoleteRootSetting(source))return{status:'unchanged'};
+  const resolved=command || (writeConfig ? undefined : await resolveCommand({binary,env:{...process.env,CODEX_HOME:codexHome}}));
+  const writer=writeConfig || createCodexConfigWriter({command:resolved,codexHome});
+  const result=await writer({
+    edits:RIN_OBSOLETE_CODEX_EDITS.map(edit=>({...edit})),
+    reloadUserConfig:true,
+  });
+  if(!writeConfig && hasObsoleteRootSetting(await readFile(join(codexHome,'config.toml'),'utf8'))) {
+    throw new Error('Codex reported success but the obsolete root setting remains');
+  }
+  return result;
 }
