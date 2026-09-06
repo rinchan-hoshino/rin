@@ -110,8 +110,9 @@ function resetLabel(seconds, locale = 'zh-CN') {
 
 export function renderCurrentUsage(snapshot) {
   const lines = ['Codex 额度'];
-  if (!snapshot.limits.length) return `${lines[0]}\n当前额度 unknown`;
-  for (const limit of snapshot.limits) {
+  const limits = ordinaryCodexLimits(snapshot);
+  if (!limits.length) return `${lines[0]}\n当前额度 unknown`;
+  for (const limit of limits) {
     lines.push('', `${limit.name || limit.id}${limit.planType ? ` · ${limit.planType}` : ''}`);
     if (!limit.windows.length) lines.push('额度窗口 unknown');
     for (const window of limit.windows) {
@@ -154,7 +155,7 @@ function renderHistory(rows, days) {
   if (!rows.length) return `Codex 额度历史（最近 ${days} 天）\n历史数据 unknown：Rin 尚未记录新的额度快照。`;
   const lines = [`Codex 额度历史（最近 ${days} 天，共 ${rows.length} 次快照）`];
   const series = new Map();
-  for (const row of rows) for (const limit of row.limits) for (const window of limit.windows || []) {
+  for (const row of rows) for (const limit of ordinaryCodexLimits(row)) for (const window of limit.windows || []) {
     const key = `${limit.id}/${window.name}`;
     const list = series.get(key) || [];
     list.push({ at: row.observedAt, ...window });
@@ -179,10 +180,7 @@ function accountName(response) {
 }
 
 function isSparkLimit(limit) { return limit.name === 'GPT-5.3-Codex-Spark' || limit.id === 'spark'; }
-function sparkPlanName(limit) {
-  // Prefer the service-provided product name; do not display its opaque limit id.
-  return isSparkLimit(limit) ? (limit.name || 'GPT-5.3-Codex-Spark') : limit.planType;
-}
+function ordinaryCodexLimits(snapshot) { return (snapshot.limits || []).filter(limit => !isSparkLimit(limit)); }
 
 function cardWindowName(limit, window) {
   const minutes = window.windowDurationMins;
@@ -197,7 +195,7 @@ function isoReset(seconds) {
 }
 
 function usageStatusForCard(snapshot, limits) {
-  const selected = limits || snapshot.limits;
+  const selected = limits || ordinaryCodexLimits(snapshot);
   const windows = selected.flatMap(limit => (limit.windows || []).map(window => ({
     name: cardWindowName(limit, window),
     percentLeft: window.remainingPercent === null ? undefined : window.remainingPercent,
@@ -213,7 +211,7 @@ function usageStatusForCard(snapshot, limits) {
   return {
     accountId: 'ACCOUNT UNKNOWN',
     accountName: accountName(snapshot.source),
-    plan: selected.length === 1 ? sparkPlanName(selected[0]) : selected.find(limit => limit.id === 'codex')?.planType ?? selected.find(limit => limit.planType)?.planType,
+    plan: selected.find(limit => limit.id === 'codex')?.planType ?? selected.find(limit => limit.planType)?.planType,
     windows,
     credits: creditLines.length ? creditLines.join('  ') : undefined,
   };
@@ -345,7 +343,8 @@ export async function executeUsage(args = '', { config = {}, dataDir, provider, 
     const directory = join(dataDir, 'usage', 'reports');
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const path = join(directory, `history-${new Date(now()).toISOString().replace(/[^0-9A-Za-z]/g,'')}.json`);
-    await writeFile(path, JSON.stringify({ days: options.days, snapshots: rows }, null, 2), { mode: 0o600 });
+    const reportRows = rows.map(row => ({ ...row, limits: ordinaryCodexLimits(row) }));
+    await writeFile(path, JSON.stringify({ days: options.days, snapshots: reportRows }, null, 2), { mode: 0o600 });
     return { text: rows.length ? `已导出最近 ${options.days} 天的 ${rows.length} 次额度快照。` : `最近 ${options.days} 天的历史数据 unknown；已导出空报告。`, files: [{ path, name: basename(path), mimeType: 'application/json' }] };
   }
   const source = provider || createCodexUsageProvider({ config });
@@ -359,10 +358,7 @@ export async function executeUsage(args = '', { config = {}, dataDir, provider, 
   const text = `${renderCurrentUsage(snapshot)}${trend ? `\n\nUSD-equivalent 历史：${trend.points[0].timestamp} 至 ${trend.points.at(-1).timestamp} 的 ${trend.days} 天实际记录（${trend.secondary}）。` : '\n\nUSD-equivalent 历史 unknown：尚无连续 14 天的实际成本快照，未绘制曲线。'}`;
   if (options.mode === 'text') return { text };
   try {
-    const primary = snapshot.limits.filter(limit => !isSparkLimit(limit));
-    const spark = snapshot.limits.filter(isSparkLimit);
-    const files = [await writeCard(dataDir, snapshot, trend, primary)];
-    if (spark.length) files.push(await writeCard(dataDir, snapshot, null, spark, '-spark'));
+    const files = [await writeCard(dataDir, snapshot, trend, ordinaryCodexLimits(snapshot))];
     return { files, fallbackText: text };
   }
   catch { return { text: `${text}\n\n额度卡片生成失败，以上为完整文字结果。` }; }

@@ -39,7 +39,7 @@ test('multi-bucket current view reports used, remaining and reset without accoun
   const text = renderCurrentUsage(snapshot);
   assert.match(text, /5 小时：已用 20%，剩余 80%/);
   assert.match(text, /1 周：已用 35.5%，剩余 64.5%/);
-  assert.match(text, /Spark/);
+  assert.doesNotMatch(text, /Spark/);
   assert.match(text, /Credits：12.50/);
   assert.match(text, /北京时间/);
   assert.doesNotMatch(text, /must-not-leak/);
@@ -62,6 +62,7 @@ test('card returns PNG with a failure-only text fallback and history uses the ne
   const provider = { readRateLimits: async () => response };
   const current = await executeUsage('card', { dataDir, provider, now: () => new Date('2026-09-05T01:00:00Z') });
   assert.equal(current.files?.[0].mimeType, 'image/png');
+  assert.equal(current.files.length, 1);
   assert.equal(current.text, undefined);
   assert.match(current.fallbackText, /剩余 80%/);
   assert.deepEqual([...await readFile(current.files[0].path)].slice(0,8), [137,80,78,71,13,10,26,10]);
@@ -72,7 +73,9 @@ test('card returns PNG with a failure-only text fallback and history uses the ne
   const json = await executeUsage('history --days 2 --json', { dataDir, now: () => new Date('2026-09-05T03:00:00Z') });
   assert.match(json.text, /已导出/);
   assert.equal(json.files[0].mimeType, 'application/json');
-  assert.equal(JSON.parse(await readFile(json.files[0].path, 'utf8')).snapshots.length, 2);
+  const report = JSON.parse(await readFile(json.files[0].path, 'utf8'));
+  assert.equal(report.snapshots.length, 2);
+  assert.doesNotMatch(JSON.stringify(report), /Spark/);
 });
 
 test('missing current and history fields are explicit unknowns', async t => {
