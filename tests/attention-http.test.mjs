@@ -15,7 +15,7 @@ test('Gateway admission through Nerve HTTP becomes a canonical range event and e
  assert.equal((await fetch(url,{method:'POST',body:JSON.stringify(record)})).status,401);
  const put=()=>fetch(url,{method:'POST',headers:{authorization:`Bearer ${token}`},body:JSON.stringify(record)});
  assert.equal((await (await put()).json()).inserted,true);assert.equal((await (await put()).json()).inserted,false);
- nerve.attention.scan();assert.equal(store.status().length,1);
+ nerve.attention.scan(Date.now()+30000);assert.equal(store.status().length,1);
  const event=store.event(store.status()[0].id);assert.match(event.payload.prompt,/nerve_read_chat/);assert.ok(!event.payload.prompt.includes('hello'));
  const mcp=createHandler({port,token});
  const call=(name,args)=>mcp({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}});

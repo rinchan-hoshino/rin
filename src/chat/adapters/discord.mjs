@@ -108,6 +108,7 @@ export function createAdapter(config, context) {
       await context.observeDiscord({id:`${chatKey}:${message.id}`,messageId:String(message.id),platform:'discord',platformInstance:instance,adapterId:config.id,
         chatKey,chatType:message.guildId?'group':'dm',userId:String(message.author.id),authorName:message.member?.displayName || message.author.globalName || message.author.username || '',
         role:'user',text:String(message.content || ''),receivedAt:new Date(message.createdTimestamp || Date.now()).toISOString(),disposition:bound?'actionable':'record_only',ancestorIds,
+        mentionedBot:Boolean(client?.user?.id && message.mentions?.users?.has?.(client.user.id)),
         attachments:[...(message.attachments?.values?.() || [])].map(a=>({name:a.name,url:a.url,mimeType:a.contentType})),replyTo:message.reference?.messageId ? String(message.reference.messageId):undefined});
     }
     if (!incoming || !bound) return;

@@ -34,15 +34,16 @@ test('MCP handshake, tool discovery and annotations reflect reads versus mutatio
   assert.equal(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   const result = await handle(rpc('tools/list'));
   assert.equal(result.result.tools.length, 14);
-  for (const tool of toolDefinitions) assert.equal(tool.annotations.readOnlyHint, ['nerve_read_chat','nerve_read_minecraft','nerve_read_minecraft_jobs','nerve_inspect_minecraft','nerve_status', 'nerve_list_triggers', 'nerve_list_events', 'nerve_get_event'].includes(tool.name));
+  for (const tool of toolDefinitions) assert.equal(tool.annotations.readOnlyHint, ['nerve_read_minecraft','nerve_read_minecraft_jobs','nerve_inspect_minecraft','nerve_status', 'nerve_list_triggers', 'nerve_list_events', 'nerve_get_event'].includes(tool.name));
+  assert.equal(toolDefinitions.find(tool=>tool.name==='nerve_read_chat').annotations.destructiveHint,false);
   assert.equal((await handle(rpc('missing'))).error.code, -32601);
 });
 
 test('all tools use loopback authenticated HTTP and encode IDs as one path component', async t => {
   const { handle, requests } = await fixture(t);
   const calls = [
-    ['nerve_read_chat', {chatKey:'discord/bot:123',limit:20}, 'GET', '/attention/messages?chatKey=discord%2Fbot%3A123&limit=20'],
-    ['nerve_send_chat', {id:'reply-once',chatKey:'discord/bot:123',text:'hello'}, 'POST', '/attention/send'],
+    ['nerve_read_chat', {chatKey:'discord/bot:123',limit:20,markViewed:false,attentionMode:'busy',attentionForMs:60000}, 'GET', '/attention/messages?chatKey=discord%2Fbot%3A123&limit=20&markViewed=false&attentionMode=busy&attentionForMs=60000'],
+    ['nerve_send_chat', {id:'reply-once',chatKey:'discord/bot:123',text:'hello',awaitingReply:true}, 'POST', '/attention/send'],
     ['nerve_read_minecraft', {messageId:'mc/a ?'}, 'GET', '/minecraft/messages/mc%2Fa%20%3F'],
     ['nerve_send_minecraft', {id:'mc-reply',messageId:'mc/a',kind:'chat',text:'hello'}, 'POST', '/minecraft/send'],
     ['nerve_read_minecraft_jobs', {messageId:'mc/a'}, 'GET', '/minecraft/messages/mc%2Fa/jobs'],
@@ -80,6 +81,8 @@ test('rejects ambiguous schedules, arbitrary output commands and malformed check
     { id: '..', target: 'codex', everySeconds: 1 },
   ]) assert.equal((await handle(rpc('tools/call', { name: 'nerve_upsert_trigger', arguments: args }))).error.code, -32602);
   assert.equal(requests.length, 0);
+  assert.equal((await handle(rpc('tools/call',{name:'nerve_read_chat',arguments:{chatKey:'discord/bot:room',attentionMode:'later'}}))).error.code,-32602);
+  assert.equal(requests.length,0);
 });
 
 test('HTTP failures are tool errors and never forward secrets from diagnostics', async t => {

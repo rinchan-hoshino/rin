@@ -12,13 +12,13 @@ test('accept derives owner trust, dedupes canonical records, persists pending an
   assert.deepEqual(service.accept(record()),{inserted:true,attention:true});
   assert.deepEqual(service.accept(record()),{inserted:false});
   const resumed = new AttentionService(config,store);
-  const result = resumed.scan(at);
+  const result = resumed.scan(at+30000);
   assert.equal(result.emitted,true);
-  assert.equal(store.event(result.id).payload.priority,100);
+  assert.equal(store.event(result.id).payload.priority,60);
   assert.match(store.event(result.id).payload.prompt,/nerve_read_chat/);
   assert.match(store.event(result.id).payload.prompt,/nerve_send_chat/);
   assert.equal(JSON.stringify(store.event(result.id).payload).includes('secret message text'),false);
-  assert.deepEqual(resumed.scan(at),{emitted:false});
+  assert.deepEqual(resumed.scan(at+30000),{emitted:false,suppressed:true});
   assert.equal(resumed.read({chatKey:'discord/bot:room'}).messages[0].text,'secret message text');
 });
 test('bot/self/assistant excluded, forged trust not owner, ignored and mirrored channels never stimulate',t=>{
@@ -39,11 +39,11 @@ test('failed event enqueue rolls state back and can be retried without losing pe
   service.accept(record());
   const enqueue = store.enqueue;
   store.enqueue = (...args)=>{enqueue.apply(store,args);throw new Error('storage fault');};
-  assert.throws(()=>service.scan(at),/storage fault/);
+  assert.throws(()=>service.scan(at+30000),/storage fault/);
   assert.equal(service.state().pending.length,1);
   assert.equal(store.status().length,0);
   store.enqueue = enqueue;
-  assert.equal(service.scan(at).emitted,true);
+  assert.equal(service.scan(at+30000).emitted,true);
   assert.equal(store.status().length,1);
 });
 test('read pagination stays inside one chat and returns chronological messages',t=>{
@@ -88,4 +88,53 @@ test('canonical read preserves reply and attachment metadata without fetching UR
   assert.deepEqual(saved.attachments,attachments);
   assert.equal(saved.replyTo,'456');
   assert.throws(()=>service.accept(record({id:'bad-url',attachments:[{url:'file:///tmp/secret'}]})),/URL/);
+});
+
+test('reading marks only the returned page viewed and survives restart',t=>{
+  const {service,store}=setup(t);
+  service.accept(record({id:'a'}));service.accept(record({id:'b'}));service.accept(record({id:'c'}));
+  assert.equal(service.state().pending.length,3);
+  assert.deepEqual(service.read({chatKey:'discord/bot:room',limit:2}).messages.map(x=>x.id),['b','c']);
+  assert.deepEqual(service.state().pending.map(x=>x.messageId),['a']);
+  const resumed=new AttentionService(config,store);
+  assert.equal(resumed.read({chatKey:'discord/bot:room',limit:1,markViewed:false}).markedViewed,false);
+  assert.deepEqual(resumed.state().pending.map(x=>x.messageId),['a']);
+  resumed.read({chatKey:'discord/bot:room',before:'b'});
+  assert.equal(resumed.state().pending.length,0);
+});
+
+test('mentions and explicitly awaited replies are prioritized without making every send awaiting',async t=>{
+  const {service}=setup(t,{send:async()=>({id:'receipt'})});
+  service.accept(record({id:'seed'}));service.read({chatKey:'discord/bot:room'});
+  await service.send({id:'ordinary-send',chatKey:'discord/bot:room',text:'hello'});
+  service.accept(record({id:'ordinary-reply',messageId:'124',userId:'visitor',receivedAt:new Date(at+1000).toISOString()}));
+  assert.equal(service.state().pending[0].reason,'ambient');service.read({chatKey:'discord/bot:room'});
+  await service.send({id:'question',chatKey:'discord/bot:room',text:'question?',awaitingReply:true});
+  service.accept(record({id:'answer',messageId:'125',userId:'visitor',receivedAt:new Date(Date.now()+100).toISOString()}));
+  assert.equal(service.state().pending[0].reason,'awaiting_reply');assert.equal(service.state().pending[0].priority,90);
+  service.read({chatKey:'discord/bot:room'});
+  service.accept(record({id:'mention',messageId:'126',userId:'visitor',mentionedBot:true,receivedAt:new Date(at+3000).toISOString()}));
+  assert.equal(service.state().pending[0].reason,'mentioned');assert.equal(service.state().pending[0].priority,100);
+});
+
+test('pending and running attention events suppress duplicate wakeups while unread remains queued',t=>{
+  const {service,store}=setup(t);service.accept(record());
+  const first=service.scan(at+30000);assert.equal(first.emitted,true);assert.equal(service.state().pending.length,1);
+  assert.equal(service.scan(at+330000).suppressed,true);
+  const event=store.claim(at+30000);assert.equal(event.source,'chat-attention');assert.equal(service.scan(at+330000).suppressed,true);
+  store.finish(event.id,{ok:true});
+  assert.equal(service.scan(at+330000).emitted,true);
+});
+
+test('channel policy and bounded attention mode override the detected busy state',t=>{
+  const configured={...config,channels:{'discord/bot:room':{mode:'normal',idleDelayMs:1000,maxDelayMs:10000,idleOnly:false}}};
+  const store=new Store(':memory:');t.after(()=>store.close());const service=new AttentionService(configured,store);
+  service.accept(record());assert.equal(service.scan(at+1000,{active:true}).emitted,false);
+  service.read({chatKey:'discord/bot:room',limit:1,markViewed:false,attentionMode:'idle',attentionForMs:5000});
+  assert.equal(service.scan(at+1000,{active:true}).emitted,true);
+});
+
+test('stored version one attention state migrates on use',t=>{
+  const {service}=setup(t);service.store.db.prepare('UPDATE attention_state SET state=? WHERE id=1').run(JSON.stringify({version:1,pending:[]}));
+  service.accept(record());const state=service.state();assert.equal(state.version,2);assert.deepEqual(state.chats['discord/bot:room'],{});
 });

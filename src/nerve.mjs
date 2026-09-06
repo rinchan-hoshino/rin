@@ -196,6 +196,12 @@ export class Nerve {
     return this.upsertTrigger({...trigger,enabled:false});
   }
   async close() { this.stopping=true;cancelCommands();await this.codex?.stop();await Promise.allSettled([...this.running]);await this.minecraftSync;await this.minecraft?.close(); }
+  personaActive() {
+    const target=Object.values(this.config.targets).find(candidate=>candidate.type==='codex-app');
+    if (!target) return this.busy;
+    this.codex ||= new CodexAppExec({command:target.command,codexHome:target.codexHome,cwd:target.cwd || this.config.cwd,timeoutMs:target.timeoutMs || 1800000});
+    return Boolean(this.codex.bridge.activeThread(target.threadId));
+  }
   async scan(now = Date.now()) {
     for (const trigger of this.triggers()) {
       if (this.stopping) break;
@@ -260,7 +266,7 @@ export class Nerve {
           .catch(error=>log('minecraft_sync_failed',{error:error.message}))
           .finally(()=>{this.minecraftSync=undefined;});
       }
-      this.attention?.scan(); await this.scan();
+      this.attention?.scan(Date.now(),{active:this.personaActive()}); await this.scan();
     } finally { this.scanning=false; }
   }
   async tick() {
@@ -302,7 +308,9 @@ export function makeServer(nerve, token) {
         if(path==='/attention/messages') {
           if(!nerve.attention)return reply(404,{error:'Attention not configured'});
           const params=new URL(req.url,'http://localhost').searchParams;
-          return reply(200,nerve.attention.read({chatKey:params.get('chatKey'),limit:params.has('limit')?Number(params.get('limit')):50,before:params.get('before') || undefined}));
+          return reply(200,nerve.attention.read({chatKey:params.get('chatKey'),limit:params.has('limit')?Number(params.get('limit')):50,before:params.get('before') || undefined,
+            markViewed:params.has('markViewed') ? params.get('markViewed')==='true' : true,attentionMode:params.get('attentionMode') || undefined,
+            attentionForMs:params.has('attentionForMs') ? Number(params.get('attentionForMs')) : 300000}));
         }
         if(path==='/health')return reply(200,{ok:true,targets:Object.keys(nerve.config.targets),codexTransport:Object.values(nerve.config.targets).some(target=>target.type==='codex-app') ? 'codex-app' : 'native-exec',minecraft:Boolean(nerve.minecraft),executionCompletionTracked:true});
         if(path.startsWith('/minecraft/messages/') && path.endsWith('/inspect')) { if(!nerve.minecraft)return reply(404,{error:'Minecraft not configured'}); return reply(200,await nerve.minecraft.inspect(decodeURIComponent(path.slice(20,-8)))); }

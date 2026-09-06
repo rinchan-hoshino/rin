@@ -35,24 +35,51 @@ export function classifyStoredMessage(message, options) {
     message.trust === "OWNER" &&
     typeof message.userId === "string" &&
     options.ownerUserIds.has(message.userId);
+  const channel = options.channels?.[message.chatKey] || {};
+  const ambient = channel.mode === "ambient" || !isOwner;
+  const mentioned = message.mentionedBot === true;
+  const awaiting = options.awaitingReply === true;
+  const idleDelayMs = channel.idleDelayMs ?? (ambient ? options.ambientWindowMs : 30_000);
+  const maxDelayMs = channel.maxDelayMs ?? (ambient ? options.ambientWindowMs : 300_000);
+  const priority = mentioned ? 100 : awaiting ? 90 : isOwner ? 60 : 20;
+  const receivedMs = Date.parse(message.receivedAt);
+  if (!Number.isFinite(receivedMs)) throw new Error("chat_attention_time_invalid");
   return {
     messageId: message.id,
     ...(message.messageId ? { platformMessageId: message.messageId } : {}),
     chatKey: message.chatKey,
-    priority: isOwner ? 100 : 20,
-    reason: isOwner ? "owner" : "ambient",
-    nextCheckAt: isOwner
-      ? new Date(Date.parse(message.receivedAt)).toISOString()
-      : nextFixedWindow(message.receivedAt, options.ambientWindowMs),
+    receivedAt: new Date(receivedMs).toISOString(),
+    priority,
+    reason: mentioned ? "mentioned" : awaiting ? "awaiting_reply" : isOwner ? "owner" : "ambient",
+    idleOnly: channel.idleOnly ?? ambient,
+    nextCheckAt: ambient && idleDelayMs === options.ambientWindowMs
+      ? nextFixedWindow(message.receivedAt, idleDelayMs)
+      : new Date(receivedMs + (priority >= 90 ? 0 : idleDelayMs)).toISOString(),
+    latestCheckAt: new Date(receivedMs + maxDelayMs).toISOString(),
   };
 }
 
 export function createAttentionState(lastMessageId) {
   return {
-    version: 1,
+    version: 2,
     ...(lastMessageId ? { lastMessageId } : {}),
     pending: [],
+    chats: {},
   };
+}
+
+export function normalizeAttentionState(value) {
+  const state = value && typeof value === "object" ? value : createAttentionState();
+  state.version = 2;
+  state.pending = Array.isArray(state.pending) ? state.pending : [];
+  state.chats = state.chats && typeof state.chats === "object" ? state.chats : {};
+  for (const item of state.pending) {
+    item.receivedAt ||= item.nextCheckAt;
+    if (item.reason === "owner" && item.priority === 100) item.priority = 60;
+    item.idleOnly ??= item.reason === "ambient";
+    item.latestCheckAt ||= new Date(Date.parse(item.nextCheckAt) + (item.reason === "ambient" ? 0 : 300_000)).toISOString();
+  }
+  return state;
 }
 
 export function enqueueAttention(state, item) {
@@ -62,17 +89,23 @@ export function enqueueAttention(state, item) {
   state.pending.push(item);
 }
 
-export function prepareDueBatch(state, nowMs) {
+export function prepareDueBatch(state, nowMs, {active=false, chatModes={}} = {}) {
   if (state.emitting) return state.emitting;
   const due = state.pending
-    .filter((item) => Date.parse(item.nextCheckAt) <= nowMs)
+    .filter((item) => {
+      const mode = chatModes[item.chatKey];
+      const busy = mode === "busy" ? true : mode === "idle" || mode === "waiting" ? false : active;
+      const earliest = Date.parse(item.nextCheckAt);
+      const latest = Date.parse(item.latestCheckAt || item.nextCheckAt);
+      if (item.priority >= 90) return nowMs >= Math.min(latest, earliest + (busy ? 30_000 : 0));
+      if (item.idleOnly && busy) return nowMs >= latest;
+      return nowMs >= (busy ? latest : earliest);
+    })
     .sort((left, right) => left.messageId.localeCompare(right.messageId));
   if (due.length === 0) return undefined;
-  const dueIds = new Set(due.map((item) => item.messageId));
-  state.pending = state.pending.filter((item) => !dueIds.has(item.messageId));
   const digest = crypto
     .createHash("sha256")
-    .update(due.map((item) => item.messageId).join("\n"))
+    .update(due.map((item) => `${item.messageId}\0${item.nextCheckAt}`).join("\n"))
     .digest("hex");
   state.emitting = {
     id: digest,
@@ -81,6 +114,7 @@ export function prepareDueBatch(state, nowMs) {
     maxPriority: Math.max(...due.map((item) => item.priority)),
     items: due,
   };
+  for (const item of due) item.nextCheckAt = new Date(nowMs + (item.reason === "ambient" ? 900_000 : 300_000)).toISOString();
   return state.emitting;
 }
 

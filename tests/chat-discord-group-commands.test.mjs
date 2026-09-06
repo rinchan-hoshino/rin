@@ -38,3 +38,14 @@ test('Discord group text commands retain addressing and recognize extension regi
   assert.equal(normalizeDiscordMessage({...message,mentions:{users:{has:()=>false}}},config,'bot',commands),null);
   assert.equal(normalizeDiscordMessage({...message,author:{id:'stranger'}},config,'bot',commands),null);
 });
+
+test('Discord attention records an actual bot mention as transport metadata',async()=>{
+  const observed=[];const client=new EventEmitter();Object.assign(client,{user:{id:'bot'},login:async()=>{},isReady:()=>true,destroy:async()=>{},
+    application:{commands:{set:async()=>{}}},guilds:{cache:new Map(),fetch:async()=>new Map()}});
+  const adapter=createAdapter({id:'d',type:'discord',token:'test',allowUsers:['owner'],requireMention:false,__client:client},{
+    commands:[],dataDir:'/tmp',observeDiscord:record=>observed.push(record),isBound:()=>false,log:{warn(){},error(){}}});
+  await adapter.start(async()=>{});
+  client.emit('messageCreate',{id:'m',guildId:'g',channelId:'room',createdTimestamp:1,channel:{},author:{id:'owner',username:'Owner'},content:'<@bot> hello',mentions:{users:{has:id=>id==='bot'}},attachments:new Map()});
+  await new Promise(resolve=>setImmediate(resolve));await adapter.stop();
+  assert.equal(observed.length,1);assert.equal(observed[0].mentionedBot,true);assert.equal(observed[0].disposition,'record_only');
+});

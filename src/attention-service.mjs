@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {classifyStoredMessage, createAttentionState, enqueueAttention, prepareDueBatch, completeEmittingBatch} from './attention.mjs';
+import {classifyStoredMessage, createAttentionState, normalizeAttentionState, enqueueAttention, prepareDueBatch, completeEmittingBatch} from './attention.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const keyChatId = key => key.slice(key.indexOf(':') + 1);
@@ -15,6 +15,10 @@ export class AttentionService {
     this.ignored = new Set(config.ignoredChatKeys || []);
     this.mirrors = new Set(config.mirrorDiscordChannelIds || []);
     if (!this.owners.size || !config.target || !Number.isSafeInteger(config.ambientWindowMs) || config.ambientWindowMs < 1) throw new Error('Invalid attention configuration');
+    if (config.channels !== undefined && (!config.channels || typeof config.channels !== 'object' || Array.isArray(config.channels) || Object.values(config.channels).some(channel=>
+      !channel || typeof channel !== 'object' || !['normal','ambient'].includes(channel.mode || 'normal') ||
+      ['idleDelayMs','maxDelayMs'].some(key=>channel[key] !== undefined && (!Number.isSafeInteger(channel[key]) || channel[key] < 1)) ||
+      channel.idleOnly !== undefined && typeof channel.idleOnly !== 'boolean'))) throw new Error('Invalid attention channels');
     this.db.exec(`CREATE TABLE IF NOT EXISTS attention_messages (
       id TEXT PRIMARY KEY, chat_key TEXT NOT NULL, received_at TEXT NOT NULL, record TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS attention_messages_chat ON attention_messages(chat_key,received_at,id);
@@ -29,7 +33,7 @@ export class AttentionService {
     try { const result = fn(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  state() { return JSON.parse(this.db.prepare('SELECT state FROM attention_state WHERE id=1').get().state); }
+  state() { return normalizeAttentionState(JSON.parse(this.db.prepare('SELECT state FROM attention_state WHERE id=1').get().state)); }
   save(state) { this.db.prepare('UPDATE attention_state SET state=? WHERE id=1').run(JSON.stringify(state)); }
   excluded(record) {
     return this.ignored.has(record.chatKey) || this.mirrors.has(keyChatId(record.chatKey)) ||
@@ -52,30 +56,41 @@ export class AttentionService {
       return {name:String(attachment.name || '').slice(0,512),url:url.href,mimeType:String(attachment.mimeType || '').slice(0,256)};
     });
     if (input.replyTo !== undefined && (typeof input.replyTo !== 'string' || input.replyTo.length > 512)) throw new Error('Invalid attention replyTo');
+    if (input.mentionedBot !== undefined && typeof input.mentionedBot !== 'boolean') throw new Error('Invalid attention mentionedBot');
     if (input.userId === input.platformInstance) return {inserted:false, ignored:true};
     const record = {
       id:input.id,messageId:input.messageId,platform:'discord',platformInstance:input.platformInstance,
       chatKey:input.chatKey,chatType:input.chatType || 'group',userId:input.userId,authorName:String(input.authorName || ''),
       text:input.text,receivedAt:new Date(input.receivedAt).toISOString(),disposition:input.disposition,
       attachments,...(input.replyTo ? {replyTo:input.replyTo} : {}),
+      mentionedBot:input.mentionedBot === true,
       ancestorIds:input.ancestorIds || [],role:'user',trust:this.owners.has(input.userId) ? 'OWNER' : 'USER',
     };
     return this.transaction(()=>{
       if (this.db.prepare('SELECT id FROM attention_messages WHERE id=?').get(record.id)) return {inserted:false};
       this.db.prepare('INSERT INTO attention_messages VALUES(?,?,?,?)').run(record.id,record.chatKey,record.receivedAt,JSON.stringify(record));
       const state = this.state();
+      const chat=state.chats[record.chatKey] ||= {};
+      const receivedAt=Date.parse(record.receivedAt);
+      const awaiting=chat.awaitingReplyUntil && Date.parse(chat.awaitingReplyUntil)>=receivedAt &&
+        (!chat.awaitingReplySince || receivedAt>=Date.parse(chat.awaitingReplySince));
+      if(awaiting) {delete chat.awaitingReplyUntil;delete chat.awaitingReplySince;}
       const item = this.excluded(record) ? undefined : classifyStoredMessage(record, {
         ownerUserIds:this.owners,mirrorDiscordChannelIds:this.mirrors,ignoredChatKeys:this.ignored,ambientWindowMs:this.config.ambientWindowMs,
+        channels:this.config.channels || {},awaitingReply:awaiting,
       });
       enqueueAttention(state,item);
       this.save(state);
       return {inserted:true,attention:Boolean(item)};
     });
   }
-  scan(now = Date.now()) {
+  scan(now = Date.now(), {active=false} = {}) {
     return this.transaction(()=>{
       const state = this.state();
-      const batch = prepareDueBatch(state,now);
+      if(this.db.prepare("SELECT 1 FROM events WHERE source='chat-attention' AND state IN ('pending','running') LIMIT 1").get()) return {emitted:false,suppressed:true};
+      const chatModes=Object.fromEntries(Object.entries(state.chats).flatMap(([key,chat])=>
+        chat.attentionMode && Date.parse(chat.attentionModeUntil)>now ? [[key,chat.attentionMode]] : []));
+      const batch = prepareDueBatch(state,now,{active,chatModes});
       if (!batch) return {emitted:false};
       const grouped = new Map();
       // Match the old trigger's canonical-id ordering and compact range-only payload.
@@ -102,8 +117,9 @@ export class AttentionService {
       return {emitted:inserted,id:batch.dedupeKey,groups};
     });
   }
-  read({chatKey,limit=50,before} = {}) {
-    if (typeof chatKey !== 'string' || !chatKey || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error('Invalid chat_read arguments');
+  read({chatKey,limit=50,before,markViewed=true,attentionMode,attentionForMs=300000} = {}) {
+    if (typeof chatKey !== 'string' || !chatKey || !Number.isSafeInteger(limit) || limit < 1 || limit > 200 || typeof markViewed !== 'boolean' ||
+      attentionMode !== undefined && !['busy','waiting','idle'].includes(attentionMode) || !Number.isSafeInteger(attentionForMs) || attentionForMs < 1 || attentionForMs > 86_400_000) throw new Error('Invalid chat_read arguments');
     let rows;
     if (before) {
       const cursor = this.db.prepare('SELECT received_at,id FROM attention_messages WHERE id=? AND chat_key=?').get(before,chatKey);
@@ -115,17 +131,28 @@ export class AttentionService {
       const {disposition,...message} = JSON.parse(row.record);
       return message;
     });
-    return {chatKey,messages,before:messages[0]?.id || null};
+    if(markViewed && messages.length || attentionMode) this.transaction(()=>{
+      const state=this.state();
+      const chat=state.chats[chatKey] ||= {};
+      if(markViewed && messages.length) {
+        const ids=new Set(messages.map(message=>message.id));
+        state.pending=state.pending.filter(item=>!ids.has(item.messageId));
+        chat.lastViewedAt=new Date().toISOString();chat.lastViewedId=messages.at(-1).id;
+      }
+      if(attentionMode) {chat.attentionMode=attentionMode;chat.attentionModeUntil=new Date(Date.now()+attentionForMs).toISOString();}
+      this.save(state);
+    });
+    return {chatKey,messages,before:messages[0]?.id || null,markedViewed:Boolean(markViewed && messages.length)};
   }
-  async send({id,chatKey,text,replyTo} = {}) {
+  async send({id,chatKey,text,replyTo,awaitingReply=false,awaitingReplyMs=3600000} = {}) {
     if (typeof id !== 'string' || !id || id.length > 512 || typeof chatKey !== 'string' || typeof text !== 'string' || !text.trim() || text.length > 2000 ||
-      replyTo !== undefined && (typeof replyTo !== 'string' || !/^\d+$/.test(replyTo))) throw new Error('Invalid chat_send arguments');
+      replyTo !== undefined && (typeof replyTo !== 'string' || !/^\d+$/.test(replyTo)) || typeof awaitingReply!=='boolean' || !Number.isSafeInteger(awaitingReplyMs) || awaitingReplyMs<1) throw new Error('Invalid chat_send arguments');
     const raw = this.db.prepare('SELECT record FROM attention_messages WHERE chat_key=? ORDER BY received_at DESC,id DESC LIMIT 1').get(chatKey);
     if (!raw) throw new Error('chat_send requires a recorded chat');
     const record = JSON.parse(raw.record);
     if (this.excluded(record)) throw new Error('chat_send destination excluded');
     if (replyTo && !this.db.prepare("SELECT id FROM attention_messages WHERE chat_key=? AND json_extract(record,'$.messageId')=?").get(chatKey,replyTo)) throw new Error('chat_send replyTo must belong to the same recorded chat');
-    const fingerprint = hash(JSON.stringify({chatKey,text,replyTo:replyTo || null}));
+    const fingerprint = hash(JSON.stringify({chatKey,text,replyTo:replyTo || null,awaitingReply,awaitingReplyMs}));
     const existing = this.db.prepare('SELECT * FROM attention_sends WHERE id=?').get(id);
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw new Error('chat_send id reused with different content');
@@ -140,6 +167,7 @@ export class AttentionService {
       if (typeof messageId !== 'string' || !messageId) throw new Error('Missing Discord message receipt');
       const result = {messageId};
       this.db.prepare("UPDATE attention_sends SET state='sent',result=?,updated=? WHERE id=?").run(JSON.stringify(result),Date.now(),id);
+      if(awaitingReply) this.transaction(()=>{const state=this.state();const chat=state.chats[chatKey] ||= {};const now=Date.now();chat.awaitingReplySince=new Date(now).toISOString();chat.awaitingReplyUntil=new Date(now+awaitingReplyMs).toISOString();this.save(state);});
       return {id,state:'sent',...result};
     } catch {
       this.db.prepare("UPDATE attention_sends SET state='uncertain',updated=? WHERE id=?").run(Date.now(),id);

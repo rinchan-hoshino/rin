@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, Nerve, scheduleSlot, runCommand, makeServer, validateConfig } from '../src/nerve.mjs';
 
+test('attention scheduling reads the real Codex App thread activity',()=>{
+ const store=new Store(':memory:');const threadId='11111111-1111-1111-1111-111111111111';
+ const n=new Nerve({targets:{main:{type:'codex-app',threadId}},attention:{target:'main',ownerUserIds:['owner'],ambientWindowMs:900000}},store);
+ let active=true;n.codex={bridge:{activeThread:id=>active&&id===threadId?{cwd:'/project'}:null},stop:async()=>{}};
+ assert.equal(n.personaActive(),true);active=false;assert.equal(n.personaActive(),false);store.close();
+});
+
 test('a slow or unavailable Minecraft server does not block other events',async()=>{
  const store=new Store(':memory:');
  const nerve=new Nerve({targets:{out:{type:'command',argv:['true']}},triggers:[]},store);

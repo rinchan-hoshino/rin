@@ -5,6 +5,7 @@ import {
   classifyStoredMessage,
   completeEmittingBatch,
   createAttentionState,
+  normalizeAttentionState,
   enqueueAttention,
   prepareDueBatch,
 } from "../src/attention.mjs";
@@ -29,20 +30,15 @@ function message(overrides = {}) {
   };
 }
 
-test("owner record-only messages stay immediate without channel allowlists", () => {
+test("ordinary owner messages batch briefly while idle and have a five minute busy deadline", () => {
   const classified = classifyStoredMessage(message({ userId: ownerId, trust: "OWNER" }), {
     ownerUserIds: new Set([ownerId]),
     mirrorDiscordChannelIds: new Set(),
     ambientWindowMs: 15 * 60_000,
   });
-  assert.deepEqual(classified, {
-    messageId: "message-a",
-    platformMessageId: "platform-a",
-    chatKey: "discord/bot-id:ambient-room",
-    priority: 100,
-    reason: "owner",
-    nextCheckAt: "2026-09-04T12:01:23.000Z",
-  });
+  assert.equal(classified.priority,60);assert.equal(classified.reason,"owner");assert.equal(classified.idleOnly,false);
+  assert.equal(classified.nextCheckAt,"2026-09-04T12:01:53.000Z");
+  assert.equal(classified.latestCheckAt,"2026-09-04T12:06:23.000Z");
 });
 
 test("an exact owner-note chat exclusion suppresses even owner messages", () => {
@@ -106,11 +102,12 @@ test("pending messages dedupe by canonical Chat id and emit one stable recoverab
   assert.equal(batch.items.length, 1);
   assert.equal(batch.maxPriority, 20);
   assert.match(batch.dedupeKey, /^chat-attention:[a-f0-9]{64}$/);
-  assert.equal(state.pending.length, 0);
+  assert.equal(state.pending.length, 1);
   assert.deepEqual(prepareDueBatch(state, dueAt), batch);
 
   completeEmittingBatch(state, batch.id);
   assert.equal(state.emitting, undefined);
+  assert.equal(prepareDueBatch(state,dueAt),undefined);
 });
 
 test("owner urgency requires both trusted identity and exact owner id", () => {
@@ -134,9 +131,27 @@ test("fixed-window boundary is due immediately without pulling later ambient mes
   enqueueAttention(state, classifyStoredMessage(message({ id: "later", receivedAt: "2026-09-04T12:15:00.001Z" }), options));
   const batch = prepareDueBatch(state, Date.parse("2026-09-04T12:15:00.000Z"));
   assert.deepEqual(batch.items.map(item => item.messageId), ["boundary"]);
-  assert.deepEqual(state.pending.map(item => item.messageId), ["later"]);
+  assert.deepEqual(state.pending.map(item => item.messageId), ["boundary","later"]);
   enqueueAttention(state, batch.items[0]);
-  assert.equal(state.pending.length, 1);
+  assert.equal(state.pending.length, 2);
   completeEmittingBatch(state, "wrong-batch");
   assert.equal(state.emitting.id, batch.id);
+});
+
+test("busy work defers ordinary owner messages but mentions use a short safety boundary",()=>{
+  const options={ownerUserIds:new Set([ownerId]),mirrorDiscordChannelIds:new Set(),ambientWindowMs:900000};
+  const state=createAttentionState();
+  enqueueAttention(state,classifyStoredMessage(message({id:'ordinary',userId:ownerId,trust:'OWNER'}),options));
+  assert.equal(prepareDueBatch(state,Date.parse('2026-09-04T12:01:53Z'),{active:true}),undefined);
+  assert.equal(prepareDueBatch(state,Date.parse('2026-09-04T12:06:23Z'),{active:true}).items[0].messageId,'ordinary');
+  const urgent=createAttentionState();
+  enqueueAttention(urgent,classifyStoredMessage(message({id:'mention',userId:ownerId,trust:'OWNER',mentionedBot:true}),options));
+  assert.equal(prepareDueBatch(urgent,Date.parse('2026-09-04T12:01:52Z'),{active:true}),undefined);
+  assert.equal(prepareDueBatch(urgent,Date.parse('2026-09-04T12:01:53Z'),{active:true}).maxPriority,100);
+});
+
+test("version one state migrates without restoring immediate owner steering",()=>{
+  const state=normalizeAttentionState({version:1,pending:[{messageId:'old',chatKey:'discord/bot:room',priority:100,reason:'owner',nextCheckAt:'2026-09-04T12:01:23Z'}]});
+  assert.equal(state.version,2);assert.deepEqual(state.chats,{});assert.equal(state.pending[0].priority,60);
+  assert.equal(state.pending[0].latestCheckAt,'2026-09-04T12:06:23.000Z');
 });
