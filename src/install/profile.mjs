@@ -4,6 +4,7 @@ export const RIN_RECOMMENDED_CODEX_EDITS = Object.freeze([
   ['features.context_management.experimental_mode', true],
   ['features.memories', true],
   ['tool_output_token_limit', 4000],
+  ['model_auto_compact_token_limit', 120000],
   ['sandbox_mode', 'danger-full-access'],
   ['approval_policy', 'never'],
   ['desktop.preventSleepWhileRunning', true],

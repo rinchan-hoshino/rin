@@ -61,7 +61,7 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
     {value:'codex',label:'Codex CLI'},
     {value:'chatgpt',label:'ChatGPT desktop app'},
   ],required:false,initialValues:[]}),ui);
-  note(ui,'Enables context management and memories; limits each tool output stored in history to 4,000 tokens; grants full filesystem access and sets approval_policy=never. Prevents sleep during work and keeps remote control awake while plugged in. Uses an empty Git branch prefix, squash merges and best-effort worktree refresh. Disables Sites, Hotline and Safety Settings connectors. Other settings are preserved.','Recommended Codex profile');
+  note(ui,'Enables context management and memories; limits each tool output stored in history to 4,000 tokens; starts automatic context compaction at 120,000 tokens; grants full filesystem access and sets approval_policy=never. Prevents sleep during work and keeps remote control awake while plugged in. Uses an empty Git branch prefix, squash merges and best-effort worktree refresh. Disables Sites, Hotline and Safety Settings connectors. Other settings are preserved.','Recommended Codex profile');
   const recommendations = await confirmChoice('Apply the Rin recommended Codex profile?',false,ui);
   if (!recommendations) ui.log.info('Existing Codex settings will be preserved.');
   let agents = '';

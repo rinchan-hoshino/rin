@@ -43,6 +43,7 @@ test('Clack setup collects independent product choices and preserves existing AG
   const notes = ui.events.filter(([kind]) => kind === 'note').map(([, , body]) => body).join('\n');
   assert.match(notes, /full filesystem access/);
   assert.match(notes, /approval_policy=never/);
+  assert.match(notes, /120,000 tokens/);
   assert.match(notes, /Original-session search: included \(FFF MCP\)/);
   assert.equal(ui.events.some(([kind, options]) => kind === 'confirm' && /FFF/.test(options.message)), false);
 });
