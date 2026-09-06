@@ -178,10 +178,10 @@ function accountName(response) {
   return undefined;
 }
 
-function isSparkLimit(limit) { return limit.id === 'spark'; }
+function isSparkLimit(limit) { return limit.name === 'GPT-5.3-Codex-Spark' || limit.id === 'spark'; }
 function sparkPlanName(limit) {
-  // This is the product name, not the internal rate-limit id.
-  return isSparkLimit(limit) ? 'GPT-5.3-CODEX-SPARK' : limit.planType;
+  // Prefer the service-provided product name; do not display its opaque limit id.
+  return isSparkLimit(limit) ? (limit.name || 'GPT-5.3-Codex-Spark') : limit.planType;
 }
 
 function cardWindowName(limit, window) {
