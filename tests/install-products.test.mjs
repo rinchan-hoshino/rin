@@ -7,19 +7,29 @@ import {historySupport,installHistoryTool,installProducts,productSources} from '
 
 const temp=async t=>{const dir=await mkdtemp(join(tmpdir(),'rin-install-test-'));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;};
 
-test('Codex installation passes an argv array to npm without shell interpolation',async()=>{
+test('Codex installs into the user prefix without consulting or changing an unwritable POSIX global prefix',async()=>{
   const calls=[];const result=await installProducts({products:['codex'],home:'/safe home',userHome:'/users/test',node:'/node 24/bin/node',npmCli:'/node 24/npm-cli.js',run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/fresh/npm'};}});
   assert.deepEqual(calls.map(({command,args})=>({command,args})),[
-    {command:'/node 24/bin/node',args:['/node 24/npm-cli.js','prefix','--global']},
-    {command:'/node 24/bin/node',args:['/node 24/npm-cli.js','install','--global','@openai/codex']},
+    {command:'/node 24/bin/node',args:['/node 24/npm-cli.js','install','--global','--prefix','/users/test/.local','@openai/codex']},
   ]);
   assert.equal(result[0].status,'installed');
+  assert.equal(result[0].command,'/users/test/.local/bin/codex');
 });
 
-test('Codex refuses an npm global prefix inside legacy Rin',async()=>{
+test('Windows keeps its configured npm user prefix and refuses a legacy Rin prefix',async()=>{
   const calls=[];
-  await assert.rejects(installProducts({products:['codex'],home:'/new/rin',userHome:'/users/test',node:'/node',npmCli:'/npm-cli.js',run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/users/test/.rin/node'};}}),/old ~\/\.rin/);
+  await assert.rejects(installProducts({products:['codex'],home:'/new/rin',userHome:'/users/test',platform:'win32',node:'/node',npmCli:'/npm-cli.js',run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/users/test/.rin/node'};}}),/old ~\/\.rin/);
   assert.equal(calls.length,1);assert.deepEqual(calls[0].args,['/npm-cli.js','prefix','--global']);
+});
+
+test('Windows retains npm configured prefix installation behavior',async()=>{
+  const calls=[];
+  const result=await installProducts({products:['codex'],home:'/new/rin',userHome:'/users/test',platform:'win32',node:'/node',npmCli:'/npm-cli.js',run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/users/test/npm'};}});
+  assert.deepEqual(calls.map(({command,args})=>({command,args})),[
+    {command:'/node',args:['/npm-cli.js','prefix','--global']},
+    {command:'/node',args:['/npm-cli.js','install','--global','@openai/codex']},
+  ]);
+  assert.equal(result[0].command,'/users/test/npm/codex.cmd');
 });
 
 test('Windows ChatGPT uses the official Microsoft Store winget identifier',async()=>{

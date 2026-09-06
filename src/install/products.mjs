@@ -91,12 +91,15 @@ export async function installProducts({products,home,userHome=homedir(),platform
   for(const product of requested){
     if(product==='codex'){
       const npmScript=npmCli??await findNpmCli({node,platform});
-      const prefix=(await run(node,[npmScript,'prefix','--global'],{capture:true})).stdout.trim();
+      const prefix=platform==='win32'
+        ? (await run(node,[npmScript,'prefix','--global'],{capture:true})).stdout.trim()
+        : join(userHome,'.local');
       if(!prefix) throw new Error('npm returned an empty global installation prefix');
       const legacy=join(userHome,'.rin'),fromLegacy=relative(legacy,resolve(prefix));
       if(fromLegacy===''||(!fromLegacy.startsWith('..')&&!isAbsolute(fromLegacy))) throw new Error('npm global prefix points inside the old ~/.rin installation; choose a fresh Node.js/npm installation and retry');
-      assertOk(await run(node,[npmScript,'install','--global','@openai/codex']), 'Codex npm installation');
-      results.push({product,status:'installed',command:node});
+      const args=['install','--global',...(platform==='win32'?[]:['--prefix',prefix]),'@openai/codex'];
+      assertOk(await run(node,[npmScript,...args]), 'Codex npm installation');
+      results.push({product,status:'installed',command:platform==='win32'?join(prefix,'codex.cmd'):join(prefix,'bin','codex')});
       continue;
     }
     if(platform==='win32'){
