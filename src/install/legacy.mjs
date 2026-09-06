@@ -6,9 +6,13 @@ import { exists, run } from './core.mjs';
 
 const present = async file => { try { await lstat(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 const normalized = (value, platform) => platform === 'win32' ? value.replaceAll('\\', '/').toLowerCase() : value;
-async function recordAt(file) {
+async function recordAt(file, { inaccessibleIsMissing = false } = {}) {
   try { return JSON.parse(await readFile(file, 'utf8')); }
-  catch (e) { if (e.code === 'ENOENT') return null; throw new Error(`Cannot inspect the old Rin installation record: ${file}`); }
+  catch (e) {
+    if (e.code === 'ENOENT') return null;
+    if (inaccessibleIsMissing && (e.code === 'EACCES' || e.code === 'EPERM')) return undefined;
+    throw new Error(`Cannot inspect the old Rin installation record: ${file}`);
+  }
 }
 
 // Paths and fields follow legacy/pi paths.ts, persist.ts and fs-utils.ts.
@@ -21,10 +25,13 @@ export async function inspectLegacy({ userHome = homedir(), env = process.env, p
   const rootValue = record?.installDir || record?.defaultInstallDir || join(userHome, '.rin');
   if (typeof rootValue !== 'string' || !isAbsolute(rootValue)) throw new Error('The legacy installation directory must be absolute');
   const root = resolve(rootValue);
-  const installedManifest = root === join(userHome, '.rin') ? manifest : await recordAt(join(root, 'installer.json'));
+  const installedManifest = root === join(userHome, '.rin') ? manifest : await recordAt(join(root, 'installer.json'), { inaccessibleIsMissing: true });
+  const inaccessibleRoot = installedManifest === undefined;
   if (!record && !installedManifest && !await exists(join(root, 'app/current'))) return null;
-  const records = [];
-  for (const file of new Set([locator, metadata, join(root, 'installer.json')])) if (await exists(file)) records.push(file);
+  const records = [], rootRecord = join(root, 'installer.json');
+  for (const file of new Set([locator, metadata, rootRecord])) {
+    if (!(inaccessibleRoot && file === rootRecord) && await exists(file)) records.push(file);
+  }
   let service = installedManifest?.service || manifest?.service;
   const targetUser = installedManifest?.targetUser || record?.targetUser || record?.defaultTargetUser;
   if (!service && typeof targetUser === 'string' && targetUser) {
@@ -51,7 +58,12 @@ export async function inspectLegacy({ userHome = homedir(), env = process.env, p
       } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'EISDIR') throw e; }
     }
   }
-  return { root, service, cli, records };
+  // A legacy launcher installed for this account may intentionally target a
+  // different service account.  Its private root is not ours to inspect or
+  // stop; only the exact generated launchers and metadata in this user's home
+  // are eligible for cutover.
+  if (inaccessibleRoot && cli.length === 0) return null;
+  return { root, service, cli, records, inaccessibleRoot };
 }
 
 export async function disableLegacy(legacy, { exec = run, platform = process.platform, uid = process.getuid?.() } = {}) {
@@ -79,7 +91,7 @@ export async function disableLegacy(legacy, { exec = run, platform = process.pla
     if (!await exists(node) || !entry) throw new Error('The legacy Windows CLI is missing; stop its daemon before continuing');
     await exec(node, [entry, 'stop'], { env: { ...process.env, RIN_DIR: legacy.root } });
     if (await present(startup)) await rename(startup, `${startup}.pi-disabled`);
-  } else throw new Error('The legacy service record is missing or unsupported. Inspect its shutdown and autostart before retrying.');
+  } else if (!(legacy.inaccessibleRoot && !service)) throw new Error('The legacy service record is missing or unsupported. Inspect its shutdown and autostart before retrying.');
   for (const file of legacy.records || []) await copyFile(file, `${file}.pi-disabled`, constants.COPYFILE_EXCL);
   for (const file of legacy.cli) await rename(file, `${file}.pi-disabled`);
 }

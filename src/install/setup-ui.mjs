@@ -51,7 +51,10 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
   ui.intro('Rin for Codex — Git installation');
   note(ui,'Install the Codex-based Rin independently. Old data is retained, not imported. Chat and background work stay stopped until configured.','Before you begin');
   if (legacy) {
-    note(ui,'An old Pi-based Rin installation was found. Continuing will disable its recognized service and CLI launchers. Its private data will be retained.','Legacy replacement');
+    const action = legacy.inaccessibleRoot
+      ? 'Its private runtime belongs to another account and will not be inspected or stopped. Continuing will only retire the recognized legacy CLI launchers and metadata owned by this account.'
+      : 'Continuing will disable its recognized service and CLI launchers. Its private data will be retained.';
+    note(ui,`An old Pi-based Rin installation was found. ${action}`,'Legacy replacement');
     if (!await confirmChoice('Continue with the old Rin cutover?',false,ui)) { ui.outro('Nothing installed.'); return null; }
   }
   const products = checked(await ui.multiselect({message:'Products to install', options:[

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectLegacy, disableLegacy } from '../src/install/legacy.mjs';
@@ -70,6 +70,31 @@ test('rin-install companion is retired along with rin and Windows startup collis
   let calls = 0;
   await assert.rejects(disableLegacy({ root: f.root, cli: [], service: { kind: 'windows-startup', servicePath: startup } }, { platform: 'win32', exec: async () => calls++ }), /already exists/);
   assert.equal(calls, 0);
+});
+test('inaccessible cross-user root retires only this users confirmed legacy launchers and metadata', async t => {
+  const f = await fixture(t);
+  const metadata = join(f.userHome, '.config/rin/install.json');
+  await f.put(metadata, JSON.stringify({
+    defaultTargetUser: 'rin', defaultInstallDir: f.root, installedBy: 'THE_cattail'
+  }));
+  await chmod(join(f.root, 'installer.json'), 0o000).catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  // fixture normally has no root manifest, so make the inaccessible record
+  // explicit after its launcher has already been generated.
+  await f.put(join(f.root, 'installer.json'), '{}');
+  await chmod(join(f.root, 'installer.json'), 0o000);
+  t.after(() => chmod(join(f.root, 'installer.json'), 0o600).catch(() => {}));
+
+  const legacy = await inspectLegacy(f);
+  assert.equal(legacy.inaccessibleRoot, true);
+  assert.deepEqual(legacy.cli, [f.cli]);
+  assert.deepEqual(legacy.records, [metadata]);
+  let calls = 0;
+  await disableLegacy(legacy, { exec: async () => { calls++; } });
+  assert.equal(calls, 0, 'a different accounts service must not be stopped');
+  assert.match(await readFile(f.cli + '.pi-disabled', 'utf8'), /installed runtime/);
+  assert.equal(await readFile(metadata + '.pi-disabled', 'utf8'), await readFile(metadata, 'utf8'));
 });
 for (const platform of ['linux', 'win32']) test(`${platform}: recognized old launcher can be replaced in the same binDir without importing private settings`, async t => {
   const f = await fixture(t, platform);
