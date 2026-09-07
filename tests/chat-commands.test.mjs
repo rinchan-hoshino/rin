@@ -40,7 +40,7 @@ test('command-like text never becomes a prompt, and only private unknown command
 });
 
 test('text command replies quote the source only once on every transport',async()=>{
-  for(const type of ['discord','telegram','qqbot','onebot','feishu']){
+  for(const type of ['discord','telegram','qqbot','onebot']){
     const dataDir=mkdtempSync(join(tmpdir(),`rin-command-quote-${type}-`));const sent=[];let receive;
     const bridge=new ChatBridge({dataDir,bindings:[],adapters:[{id:'a',type,allowUsers:['owner']}]},{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},usage:async()=>({text:'x'.repeat(4000)}),
       adapterFactory:async()=>({capabilities:{edit:false,typing:false,maxText:1900},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return{id:String(sent.length)};}}),log:{info(){},warn(){},error(){}}});

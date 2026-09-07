@@ -1,6 +1,8 @@
 # Rin 聊天桥
 
-独立 Node.js 24 进程，包含五个适配器，无旧 Rin/Pi/cc-connect 运行依赖。
+飞书适配已移除；配置仅接受 Discord、Telegram、QQ 官方和 OneBot v11。旧配置中的飞书条目需要删除，启动时会明确报告不支持该类型。
+
+独立 Node.js 24 进程，包含四个适配器，无旧 Rin/Pi/cc-connect 运行依赖。
 
 ```sh
 npm ci
@@ -16,7 +18,7 @@ node src/rin.mjs status /absolute/path/to/private/chat.json
 
 所有直接入口要求 `allowUsers` 匹配平台提供的用户 ID。Discord 默认仅私聊；其他平台的群消息默认要求提及机器人。先准入与检查绑定，再下载附件。
 
-`ownerUsers` 是可选的旧身份迁移字段，不能从 `allowUsers` 推导，也不会给命令或普通消息增加准入权限。它只允许适配器在每条群消息上取得完整成员证明后，把“唯一非机器人成员正是该显式 owner”的群按私聊规则处理；传输类型仍为群。成功结果不缓存，失败、接口缺失或成员不完整都按普通群，失败结果最多缓存十分钟。Telegram 使用 `getChatMemberCount = 2` 加上 bot 与发件人的在群证明；OneBot 使用完整 `get_group_member_list`（且必须含本机 bot）；飞书逐页读取全部成员并核对用户/机器人总数。Discord 当前缓存、线程已加入成员和频道可见成员都不能证明完整成员集合，QQ 官方没有完整群成员 API，所以两者安全地保持群规则。
+`ownerUsers` 是可选的旧身份迁移字段，不能从 `allowUsers` 推导，也不会给命令或普通消息增加准入权限。它只允许适配器在每条群消息上取得完整成员证明后，把“唯一非机器人成员正是该显式 owner”的群按私聊规则处理；传输类型仍为群。成功结果不缓存，失败、接口缺失或成员不完整都按普通群，失败结果最多缓存十分钟。Telegram 使用 `getChatMemberCount = 2` 加上 bot 与发件人的在群证明；OneBot 使用完整 `get_group_member_list`（且必须含本机 bot）。Discord 当前缓存、线程已加入成员和频道可见成员都不能证明完整成员集合，QQ 官方没有完整群成员 API，所以两者安全地保持群规则。
 
 直接路由由私有 `bindings` 配置提供，一个任务只能绑定一个聊天。`mirror:true` 表示该任务之后所有公开输出都会同步，包括在 App 中直接开展工作的输出；不会回放已有历史。
 
@@ -38,7 +40,6 @@ QQ 官方平台使用 OpenID，不能把普通 QQ 数字号或 OneBot 用户 ID 
 | Telegram | getUpdates | 有，共享进度槽与最终清理 | 有 | 图片与文件 |
 | QQ 官方 | 官方 SDK WebSocket | 无，发送完整消息快照 | 仅 C2C | SDK 图片/语音/视频/文件接口 |
 | OneBot v11 | 正向 WebSocket，可选 HTTP action | 无；可删除 | 无标准能力 | base64 媒体；普通文件依赖扩展 action |
-| 飞书 | 官方 SDK 长连接 | 无，发送完整消息快照 | 无 | post、图片与文件 |
 
 QQ 官方回复受被动消息时限和额度限制，不能随意去掉 msg_id 改为主动群消息。OneBot 不绑定 NapCat；其普通文件上传 action 并非所有 v11 实现都支持。完整实测边界见 [能力审计](chat-parity-audit.md)，不能用连接成功替代端到端验收。
 

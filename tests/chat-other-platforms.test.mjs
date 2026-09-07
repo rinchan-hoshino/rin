@@ -4,11 +4,9 @@ import { EventEmitter } from 'node:events';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { QQBot } from '@tencent-connect/qqbot-nodejs';
 import { createAdapter as createQQ } from '../dist/chat/adapters/qqbot.js';
 import { createAdapter as createOneBot } from '../dist/chat/adapters/onebot.js';
-import { createAdapter as createFeishu } from '../dist/chat/adapters/feishu.js';
 
 async function context() {
   return { dataDir: await mkdtemp(path.join(tmpdir(), 'rin-chat-')), log: {}, getCursor() {}, setCursor() {} };
@@ -158,108 +156,6 @@ test('OneBot marks a complete owner-and-self member list private-like', async ()
   await adapter.stop();
 });
 
-class FakeDispatcher {
-  register(map) { this.map = map; FakeDispatcher.instance = this; return this; }
-}
-class FakeWSClient {
-  async start(options) { this.options = options; FakeWSClient.instance = this; }
-  async close() {}
-}
-
-test('Feishu long connection gates resources and uses official message endpoints', async () => {
-  let resources = 0;
-  const calls = [];
-  const client = { im: {
-    messageResource: { get: async () => { resources++; return { headers: { 'content-length': '1' }, getReadableStream: () => Readable.from([Buffer.from('x')]) }; } },
-    messageReaction: { create: async request => { calls.push(['reaction-create', request]); return {code: 0, data: {reaction_id: 'r-1'}}; }, delete: async request => { calls.push(['reaction-delete', request]); return {code: 0}; } },
-    message: {
-      create: async (request) => { calls.push(['create', request]); return { data: { message_id: 'fs-1' } }; },
-      reply: async (request) => { calls.push(['reply', request]); return { data: { message_id: 'fs-reply' } }; },
-      delete: async (request) => { calls.push(['delete', request]); },
-    },
-    image: { create: async () => ({ data: { image_key: 'img' } }) },
-    file: { create: async () => ({ data: { file_key: 'file' } }) },
-  } };
-  const sdk = { Client: class {}, EventDispatcher: FakeDispatcher, WSClient: FakeWSClient, AppType: {}, Domain: {}, LoggerLevel: {} };
-  const adapter = createFeishu({ id: 'fs', appId: 'a', appSecret: 's', allowUsers: ['owner'], dmOnly: true, sdk, client }, await context());
-  const incoming = [];
-  await adapter.start(async (event) => incoming.push(event));
-  await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'stranger' } }, message: { message_id: 'bad', chat_id: 'c', chat_type: 'p2p', message_type: 'image', content: JSON.stringify({ image_key: 'secret' }) } });
-  assert.equal(resources, 0);
-  await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'm', chat_id: 'c', chat_type: 'p2p', content: JSON.stringify({ text: 'hello' }) } });
-  assert.equal(incoming[0].text, 'hello');
-  await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'post', chat_id: 'c', chat_type: 'p2p', content: JSON.stringify({post:{zh_cn:{content:[[{tag:'text',text:'before '},{tag:'at',id:'other',user_name:'Other'},{tag:'a',text:' link',href:'https://example.test'},{tag:'img',image_key:'post-image',alt:'post.png'}]]}}}) } });
-  assert.equal(incoming[1].text, 'before @Other[ link](https://example.test)[image: post.png]');
-  assert.equal(incoming[1].files.length, 1);
-  assert.deepEqual(await adapter.send({ chatId: 'c', userId: 'owner', kind: 'dm' }, { text: 'reply' }), { id: 'fs-1' });
-  assert.equal(calls[0][1].params.receive_id_type, 'chat_id');
-  assert.equal(calls[0][1].data.receive_id, 'c');
-  assert.deepEqual(await adapter.send({ chatId: 'c', kind: 'group' }, { text: 'thread reply', replyTo: 'parent' }), { id: 'fs-reply' });
-  assert.equal(calls[1][0], 'reply');
-  assert.equal(calls[1][1].path.message_id, 'parent');
-  await assert.rejects(() => adapter.send({ chatId: 'c', kind: 'group' }, { text: 'updated', editId: 'old' }), /does not support editing/);
-  await adapter.delete({ chatId: 'c', kind: 'dm' }, 'fs-1');
-  assert.equal(calls[2][0], 'delete');
-  assert.equal(calls[2][1].path.message_id, 'fs-1');
-  await assert.rejects(() => adapter.typing({ chatId: 'c', kind: 'dm' }), /does not support typing/);
-  assert.deepEqual(await adapter.startReaction({chatId:'c', kind:'dm', messageId:'m'}), {id:'r-1'});
-  await adapter.endReaction({chatId:'c', kind:'dm', messageId:'m'}, 'r-1');
-  assert.deepEqual(calls.at(-1)[1].path, {message_id:'m', reaction_id:'r-1'});
-  await adapter.stop();
-});
-
-test('Feishu admits only recognized group commands through dmOnly', async () => {
-  const client={im:{}};
-  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
-  const adapter=createFeishu({id:'fs-command',appId:'a',appSecret:'s',allowUsers:['owner'],dmOnly:true,botOpenId:'bot',sdk,client},ctx);
-  const incoming=[];
-  await adapter.start(async event=>incoming.push(event));
-  const receive=FakeDispatcher.instance.map['im.message.receive_v1'];
-  for(const event of [
-    {userId:'owner',id:'1',text:'/ping'},
-    {userId:'stranger',id:'2',text:'/ping'},
-    {userId:'owner',id:'3',text:'/help'},
-  ]) await receive({sender:{sender_id:{open_id:event.userId}},message:{message_id:event.id,chat_id:'g',chat_type:'group',mentions:[{key:'@_user_1',id:{open_id:'bot'}}],content:JSON.stringify({text:`@_user_1 ${event.text}`})}});
-  await receive({sender:{sender_id:{open_id:'owner'}},message:{message_id:'4',chat_id:'g',chat_type:'group',mentions:[],content:JSON.stringify({text:'/ping@bot'})}});
-  assert.deepEqual(incoming.map(event=>event.id),['1','4']);
-  assert.equal(incoming[0].text,'/ping');
-  assert.equal(incoming[1].commandTarget,'self');
-  await adapter.stop();
-});
-
-test('Feishu requires every member page and bot count before marking private-like', async () => {
-  const client={im:{
-    chatMembers:{get:async request => ({code:0,data:{member_total:1,items:[{member_id:'owner'}],has_more:false}})},
-    chat:{get:async () => ({code:0,data:{user_count:'1',bot_count:'1'}})},
-  }};
-  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  const adapter=createFeishu({id:'fs-private-like',appId:'a',appSecret:'s',allowUsers:['owner'],ownerUsers:['owner'],dmOnly:true,sdk,client},await context());
-  const incoming=[];
-  await adapter.start(async event=>incoming.push(event));
-  await FakeDispatcher.instance.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'1',chat_id:'g',chat_type:'group',mentions:[],content:JSON.stringify({text:'bare'})}});
-  assert.equal(incoming.length,1);
-  assert.equal(incoming[0].kind,'group');
-  assert.equal(incoming[0].privateLike,true);
-  await adapter.stop();
-});
-
-test('Feishu preserves slash-prefixed unknown and other-target commands for the bridge', async () => {
-  const client={im:{}};
-  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
-  const adapter=createFeishu({id:'fs-command-like',appId:'a',appSecret:'s',allowUsers:['owner'],botOpenId:'bot',sdk,client},ctx);
-  const incoming=[];
-  await adapter.start(async event=>incoming.push(event));
-  const receive=FakeDispatcher.instance.map['im.message.receive_v1'];
-  for(const [id,text] of [['unknown','/unknown'],['other','/ping@other']]) {
-    await receive({sender:{sender_id:{open_id:'owner'}},message:{message_id:id,chat_id:'g',chat_type:'group',mentions:[{key:'@_user_1',id:{open_id:'bot'}}],content:JSON.stringify({text:`@_user_1 ${text}`})}});
-  }
-  assert.deepEqual(incoming.map(event=>event.text),['/unknown','/ping@other']);
-  assert.equal(incoming[1].commandTarget,'other');
-  await adapter.stop();
-});
-
 test('OneBot treats CQ-looking string messages as plain text', async () => {
   const adapter = createOneBot({ id: 'ob-cq', wsUrl: 'ws://onebot', allowUsers: ['42'], dmOnly: true, WebSocket: FakeWebSocket }, await context());
   const incoming = [];
@@ -296,7 +192,6 @@ test('all enabled adapters reject an empty allowlist before creating transports'
   const ctx = await context();
   assert.throws(() => createQQ({ appId: 'a', appSecret: 's', allowUsers: [] }, ctx), /non-empty allowUsers/);
   assert.throws(() => createOneBot({ wsUrl: 'ws://x', allowUsers: [] }, ctx), /non-empty allowUsers/);
-  assert.throws(() => createFeishu({ appId: 'a', appSecret: 's', allowUsers: [] }, ctx), /non-empty allowUsers/);
 });
 
 test('all adapters check binding before attachment download', async () => {
@@ -317,35 +212,6 @@ test('all adapters check binding before attachment download', async () => {
   assert.equal(obFetches, 0);
   await ob.stop();
 
-  let fsDownloads = 0;
-  const fsClient = { im: { messageResource: { get: async () => { fsDownloads++; } }, message: {}, image: {}, file: {} } };
-  const sdk = { Client: class {}, EventDispatcher: FakeDispatcher, WSClient: FakeWSClient, AppType: {}, Domain: {}, LoggerLevel: {} };
-  const fs = createFeishu({ id: 'fs-unbound', appId: 'a', appSecret: 's', allowUsers: ['owner'], dmOnly: true, sdk, client: fsClient }, { ...(await context()), isBound: async () => false });
-  await fs.start(async () => assert.fail('unbound Feishu message reached callback'));
-  await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'f', chat_id: 'c', chat_type: 'p2p', content: JSON.stringify({ image_key: 'img' }) } });
-  assert.equal(fsDownloads, 0);
-  await fs.stop();
-});
-
-test('Feishu group admission matches only the configured bot mention before downloading', async () => {
-  const ctx = await context();
-  let downloads = 0;
-  const client = { im: {
-    messageResource: { get: async () => { downloads++; return { headers: {}, getReadableStream: () => Readable.from([Buffer.from('ok')]) }; } },
-    message: {}, image: {}, file: {},
-  } };
-  const sdk = { Client: class {}, EventDispatcher: FakeDispatcher, WSClient: FakeWSClient, AppType: {}, Domain: {}, LoggerLevel: {} };
-  const adapter = createFeishu({ id: 'fs-group', appId: 'a', appSecret: 's', allowUsers: ['owner'], botOpenId: 'bot', sdk, client }, ctx);
-  const incoming = [];
-  await adapter.start(async (event) => incoming.push(event));
-  const fixture = (mentions) => ({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'm/../unsafe', chat_id: 'group', chat_type: 'group', mentions, content: JSON.stringify({ image_key: 'img' }) } });
-  await FakeDispatcher.instance.map['im.message.receive_v1'](fixture([{ id: { open_id: 'someone-else' } }]));
-  assert.equal(downloads, 0);
-  await FakeDispatcher.instance.map['im.message.receive_v1'](fixture([{ id: { open_id: 'bot' } }]));
-  assert.equal(downloads, 1);
-  assert.equal(incoming.length, 1);
-  assert.equal(path.dirname(incoming[0].files[0].path).includes('..'), false);
-  await adapter.stop();
 });
 
 test('OneBot media uses portable base64 with image/record/video and standalone file upload',async()=>{
@@ -363,51 +229,4 @@ test('OneBot media uses portable base64 with image/record/video and standalone f
     assert.deepEqual(await adapter.send({chatId:'group',kind:'group'},{files:[{path:filePath,name:'report.pdf',mimeType:'application/pdf'}]}),{id:'uploaded'});
     assert.equal(calls.at(-1).url,'http://api/upload_group_file');assert.equal(calls.at(-1).payload.file,'base64://Ynl0ZXM=');assert.equal(calls.at(-1).payload.name,'report.pdf');
   }finally{await adapter.stop();}
-});
-
-test('Feishu preserves Markdown post styles and media-only quote while refusing edits',async()=>{
-  const calls=[];const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  const client={im:{message:{
-    create:async request=>{calls.push(['create',request]);return {data:{message_id:'new'}}},
-    reply:async request=>{calls.push(['reply',request]);return {data:{message_id:'quoted'}}},
-  },image:{create:async({data})=>{data.image.destroy();return {data:{image_key:'image'}}}},file:{create:async()=>({data:{file_key:'file'}})}}};
-  const ctx=await context();const {writeFile}=await import('node:fs/promises');const local=path.join(ctx.dataDir,'image.png');await writeFile(local,'image');
-  const adapter=createFeishu({id:'fs',appId:'a',appSecret:'s',allowUsers:['owner'],sdk,client},ctx);await adapter.start(async()=>{});
-  try{
-    await adapter.send({chatId:'c',kind:'dm'},{text:'**Bold** and [link](https://example.com)',replyTo:'source'});
-    const request=calls[0][1];assert.equal(request.data.msg_type,'post');assert.equal(request.path.message_id,'source');
-    assert.deepEqual(JSON.parse(request.data.content).zh_cn.content[0],[{tag:'text',text:'Bold',style:['bold']},{tag:'text',text:' and '},{tag:'a',text:'link',href:'https://example.com'}]);
-    await assert.rejects(() => adapter.send({chatId:'c',kind:'dm'},{text:'... Working...',editId:'old'}),/does not support editing/);
-    await adapter.send({chatId:'c',kind:'dm'},{files:[{path:local,mimeType:'image/png'}],replyTo:'source'});
-    assert.equal(calls[1][0],'reply');assert.equal(calls[1][1].path.message_id,'source');assert.equal(calls[1][1].data.msg_type,'image');
-  }finally{await adapter.stop();}
-});
-
-test('Feishu registers recovery gates before subscription, then drains live FIFO', async () => {
-  const received=[]; let dispatcher; let wsStarted=false; let historyCalledAfterStart=false;
-  class WS { async start({eventDispatcher}) { wsStarted=true; dispatcher=eventDispatcher; } async close() {} }
-  class Dispatcher { register(map) { return {map}; } }
-  const ctx={...(await context()), getCursor: () => ({c:{messageId:'head',createTime:1000,kind:'dm'}})};
-  const client={im:{message:{list:async () => {
-    historyCalledAfterStart=wsStarted;
-    void dispatcher.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'live',chat_id:'c',chat_type:'p2p',create_time:'3',content:JSON.stringify({text:'live'})}});
-    return {code:0,data:{items:[{message_id:'head',chat_id:'c',create_time:'1',sender:{id:'owner',id_type:'open_id'},body:{content:JSON.stringify({text:'head'})}},{message_id:'history',chat_id:'c',create_time:'2',sender:{id:'owner',id_type:'open_id'},body:{content:JSON.stringify({text:'history'})}}],has_more:false}};
-  }}}};
-  const sdk={Client:class{},EventDispatcher:Dispatcher,WSClient:WS,AppType:{},Domain:{},LoggerLevel:{}};
-  const adapter=createFeishu({id:'fs-recovery',appId:'a',appSecret:'s',allowUsers:['owner'],sdk,client},ctx);
-  await adapter.start(async event=>received.push(event.id));
-  assert.equal(historyCalledAfterStart,true);
-  assert.deepEqual(received,['history','live']);
-  await adapter.stop();
-});
-
-test('Feishu parses top-level post title, user_id mention, link and image in order', async () => {
-  const client={im:{messageResource:{get:async()=>({headers:{'content-length':'1'},getReadableStream:()=>Readable.from([Buffer.from('x')])})}}};
-  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  const adapter=createFeishu({id:'fs-top-post',appId:'a',appSecret:'s',allowUsers:['owner'],botOpenId:'bot',sdk,client},await context()); const incoming=[];
-  await adapter.start(async event=>incoming.push(event));
-  await FakeDispatcher.instance.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'post-top',chat_id:'c',chat_type:'p2p',content:JSON.stringify({title:'Title',content:[[{tag:'text',text:'A'},{tag:'at',user_id:'other',user_name:'Other'},{tag:'a',href:'https://example.test'},{tag:'at',user_id:'bot',user_name:'Bot'},{tag:'img',image_key:'image',alt:'x.png'}]]})}});
-  assert.equal(incoming[0].text,'Title\nA@Otherhttps://example.test[image: x.png]');
-  assert.equal(incoming[0].files[0].mimeType,'image/*');
-  await adapter.stop();
 });

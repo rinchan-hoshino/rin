@@ -1,6 +1,6 @@
 import type { ChatConfig, AdapterConfig, ChatMessage } from './types.js';
 import {isAbsolute} from 'node:path';
-export const adapterTypes = ['discord', 'telegram', 'qqbot', 'onebot', 'feishu'];
+export const adapterTypes = ['discord', 'telegram', 'qqbot', 'onebot'];
 
 export function validateConfig(config: ChatConfig) {
   if (!Array.isArray(config.adapters) || !Array.isArray(config.bindings)) throw new Error('adapters and bindings must be arrays');

@@ -6,7 +6,7 @@
 
 - 聊天桥与通用事件投递是两个解耦模块。Nerve 只提供队列、脚本目录和 command/http 投递；事件源与个人策略由外部脚本维护。
 - 只保留旧版确有价值的协议与呈现逻辑，身份配置、人格、凭证与私人资料不进入公共源码。
-- Discord、Telegram、QQ 官方、OneBot v11、飞书是五种独立适配器。QQ 官方和 OneBot 不合并，OneBot 不预设特定网关软件。
+- Discord、Telegram、QQ 官方、OneBot v11 是四种独立适配器。QQ 官方和 OneBot 不合并，OneBot 不预设特定网关软件。
 - 直接聊天绑定只对应一个已有 Codex 任务；明确启用镜像后，该任务的后续公开输出会发到所绑定聊天。
 - Nerve 不拥有模型执行生命周期。独立输入命令可向共享 app-server 中的已有任务提交事件，提交回执与业务完成分开。
 - Nerve 的 command 目标可保留默认任务，并按稳定 producer source 绑定其他任务；绑定以 target/source 联合持久化，入队时固定任务快照。显式创建后绑定只调用共享 Codex 服务建立原生任务，不启动模型轮次。来源规则、私人正文与平台收发继续留在生产者层。
@@ -30,7 +30,7 @@ Nerve MCP 使用安装根目录的稳定 `nerve-mcp-run.mjs` 入口，新连接�
 
 准入、附件下载、持久入队、Codex 投递和公开输出转发分层。平台 ID 白名单与群提及条件先于附件下载；输出文件经过真实路径及大小校验。生成图片限制在当前任务的生成目录。
 
-Discord、Telegram 有编辑能力时使用共享进度消息；异步提问切分进度段，后续进度保持在问题之后；最终消息清理进度。QQ、OneBot 与飞书发送完整快照，飞书保留 post 富文本、附件和引用。首次发送结果不确定时不盲目重试。
+Discord、Telegram 有编辑能力时使用共享进度消息；异步提问切分进度段，后续进度保持在问题之后；最终消息清理进度。QQ 与 OneBot 发送完整快照，保留附件和引用。首次发送结果不确定时不盲目重试。
 
 ### 私有事件源
 
@@ -54,7 +54,7 @@ Discord、Telegram 有编辑能力时使用共享进度消息；异步提问切�
 
 ### 统一命令与可选安装配置
 
-聊天命令的当前目录默认含 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。旧桥的目录曾由运行时动态提供，不能把这两个当前内建命令当作旧目录的完整历史。五种适配器共用显式 `allowUsers` 准入，不恢复旧身份库、主人角色或频道白名单；`dmOnly` 只控制普通消息路由，已注册文字命令可在群内裸发，不再要求提及。未知的斜杠文字在准入后的私聊回复帮助提示，在群聊静默；`/name@其他机器人` 不会执行本机命令。`privateOnly` 只限制结果呈现场景。额度及活动直接读取 Codex 原生 account/read、account/rateLimits/read、account/usage/read，只美化 PNG；提供 daily、weekly、cumulative 和文字视图。原生摘要不重算，不另建统计库、不按 API 价格估值，不读取旧历史。普通消息 `bindings` 路由保持独立。
+聊天命令的当前目录默认含 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。旧桥的目录曾由运行时动态提供，不能把这两个当前内建命令当作旧目录的完整历史。四种适配器共用显式 `allowUsers` 准入，不恢复旧身份库、主人角色或频道白名单；`dmOnly` 只控制普通消息路由，已注册文字命令可在群内裸发，不再要求提及。未知的斜杠文字在准入后的私聊回复帮助提示，在群聊静默；`/name@其他机器人` 不会执行本机命令。`privateOnly` 只限制结果呈现场景。额度及活动直接读取 Codex 原生 account/read、account/rateLimits/read、account/usage/read，只美化 PNG；提供 daily、weekly、cumulative 和文字视图。原生摘要不重算，不另建统计库、不按 API 价格估值，不读取旧历史。普通消息 `bindings` 路由保持独立。
 
 平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 
