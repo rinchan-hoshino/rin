@@ -53,18 +53,24 @@ export class Store {
     if(source!==null)validateSource(source);
     if(defaultThreadId!==null)validateTaskId(defaultThreadId);
     const body = json(payload);
-    this.db.exec('BEGIN IMMEDIATE');
+    // Producers may atomically enqueue with their own cursor changes.
+    const nested = this.db.isTransaction;
+    const commit = nested ? 'RELEASE SAVEPOINT nerve_enqueue' : 'COMMIT';
+    this.db.exec(nested ? 'SAVEPOINT nerve_enqueue' : 'BEGIN IMMEDIATE');
     try {
       const existing = this.db.prepare('SELECT target,payload,source FROM events WHERE id=?').get(id);
       if (existing) {
         if (existing.target !== target || existing.payload !== body || existing.source !== source) throw new Error('Event id reused with different content');
-        this.db.exec('COMMIT');return false;
+        this.db.exec(commit);return false;
       }
       const binding=source===null?undefined:this.db.prepare('SELECT threadId FROM event_task_bindings WHERE target=? AND source=?').get(target,source);
       const threadId=binding?.threadId ?? defaultThreadId;
       this.db.prepare('INSERT INTO events(id,target,payload,available,created,updated,source,threadId) VALUES(?,?,?,?,?,?,?,?)').run(id,target,body,now,now,now,source,threadId);
-      this.db.exec('COMMIT');return true;
-    } catch(error){this.db.exec('ROLLBACK');throw error;}
+      this.db.exec(commit);return true;
+    } catch(error){
+      this.db.exec(nested ? 'ROLLBACK TO SAVEPOINT nerve_enqueue; RELEASE SAVEPOINT nerve_enqueue' : 'ROLLBACK');
+      throw error;
+    }
   }
   claim(now = Date.now(), target: string | null | undefined = null) {
     return this.db.prepare(`UPDATE events SET state='running',attempts=attempts+1,updated=?

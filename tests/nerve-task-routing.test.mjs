@@ -100,3 +100,28 @@ test('task routing is explicit and only valid on command targets',()=>{
  for(const taskRouting of [{defaultThreadId:'bad'},{defaultThreadId:A,command:['sh']},{defaultThreadId:A,codexHome:'relative'}])assert.throws(()=>validateConfig({targets:{one:{type:'command',argv:['true'],taskRouting}}}));
  assert.throws(()=>validateConfig({targets:{one:{type:'http',url:'https://example.invalid',taskRouting:{defaultThreadId:A}}}}),/command/);
 });
+
+
+test('producer cursor and enqueue share outer commit or rollback without closing its transaction',()=>{
+ const store=new Store(':memory:');
+ store.db.exec('CREATE TABLE cursor(value TEXT); BEGIN IMMEDIATE');
+ store.db.prepare('INSERT INTO cursor VALUES(?)').run('first');
+ store.enqueue('rolled-back','one',{},1,'timer',A);
+ assert.equal(store.db.isTransaction,true);
+ store.db.exec('ROLLBACK');
+ assert.equal(store.event('rolled-back'),null);
+ assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cursor').get().n,0);
+ store.enqueue('existing','one',{original:true},1,'timer',A);
+ store.db.exec('BEGIN IMMEDIATE');
+ store.db.prepare('INSERT INTO cursor VALUES(?)').run('kept');
+ assert.throws(()=>store.enqueue('existing','one',{changed:true},2,'timer',B),/different content/);
+ assert.equal(store.db.isTransaction,true);
+ assert.equal(store.enqueue('existing','one',{original:true},2,'timer',B),false);
+ assert.equal(store.db.isTransaction,true);
+ store.enqueue('committed','one',{},2,'timer',B);
+ store.db.exec('COMMIT');
+ assert.equal(store.event('existing').threadId,A);
+ assert.equal(store.event('committed').threadId,B);
+ assert.equal(store.db.prepare('SELECT value FROM cursor').get().value,'kept');
+ store.close();
+});
