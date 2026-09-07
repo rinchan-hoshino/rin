@@ -55,7 +55,7 @@ Copy [examples/chat.json](../examples/chat.json) to the private directory when c
 
 Do not run this installer against a live transitional chat/Nerve deployment as an implicit migration. The new Git installation does not stop or copy that deployment. A deliberate cutover must stop its exact service entries, carry over its selected private configuration and state, and verify that no second bot receiver exists. This packaging change itself does not perform that cutover.
 
-Agents replacing a Pi-based or transitional Rin should follow the [legacy migration guide](legacy-migration.md). It is a self-contained agent runbook: obtaining both source branches, detecting actual installation and data paths, inventorying private assets, rebuilding selected behavior, and verifying a single-receiver cutover. Users can give its [raw Markdown URL](https://raw.githubusercontent.com/rinchan-hoshino/rin/main/docs/legacy-migration.md) directly to an agent.
+Agents replacing a Pi-based or transitional Rin should follow the [legacy migration guide](legacy-migration.md). It gives agents both source branches, the default installation and data directories, and a short migration workflow. Users can give its [raw Markdown URL](https://raw.githubusercontent.com/rinchan-hoshino/rin/main/docs/legacy-migration.md) directly to an agent.
 
 Windows task settings explicitly remove the default execution time limit, allow battery operation, avoid duplicate instances, and request up to 999 one-minute failure restarts. Startup also requires a live, matching-release readiness marker written only after module initialization. These settings are checked by generated-configuration tests; Windows real-machine installation remains unverified.
 
