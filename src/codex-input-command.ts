@@ -1,10 +1,12 @@
 import {CodexInput} from './codex-input.js';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {validateTaskId} from './nerve-config.js';
 
 /** A command target for generic event producers; exits at host admission. */
-export async function submitEvent(threadId:string,event:{id:string;payload:{prompt:string}},bridge=new CodexInput()) {
-  if(!threadId || !/^[\da-f-]{36}$/i.test(threadId))throw new Error('An existing task UUID is required');
+export async function submitEvent(defaultThreadId:string,event:{id:string;payload:{prompt:string};threadId?:string},bridge=new CodexInput()) {
+  const threadId=event.threadId ?? defaultThreadId;
+  validateTaskId(threadId);
   if(typeof event.id!=='string' || typeof event.payload?.prompt!=='string' || !event.payload.prompt.trim())throw new Error('Event id and payload.prompt required');
   let submitted=false;
   try {

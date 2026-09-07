@@ -10,6 +10,8 @@ import { createServer } from 'node:http';
 import { readFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {createAndBindTask,validateExistingTask,validateSource,validateTaskId} from './nerve-task-routing.js';
+import type {CreationReceipt,TaskCreation} from './nerve-task-routing.js';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const json = (value: unknown) => JSON.stringify(value);
@@ -29,17 +31,40 @@ export class Store {
         error TEXT, result TEXT);
       CREATE INDEX IF NOT EXISTS pending_events ON events(state,available);`);
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(x=>x.name==='source')) this.db.exec('ALTER TABLE events ADD COLUMN source TEXT');
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(x=>x.name==='threadId')) this.db.exec('ALTER TABLE events ADD COLUMN threadId TEXT');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS event_task_bindings (
+      target TEXT NOT NULL, source TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(target,source));
+      CREATE TABLE IF NOT EXISTS task_creations (
+        id TEXT PRIMARY KEY, definition TEXT NOT NULL, state TEXT NOT NULL, threadId TEXT, error TEXT);`);
   }
-  enqueue(id: string, target: string, payload: unknown, now = Date.now(), source: string | null = null) {
-    if (typeof id !== 'string' || !id || id.length > 512) throw new Error('Invalid event id');
-    const existing = this.db.prepare('SELECT target,payload FROM events WHERE id=?').get(id);
-    const body = json(payload);
-    if (existing) {
-      if (existing.target !== target || existing.payload !== body) throw new Error('Event id reused with different content');
-      return false;
+  bindTask(target:string,source:string,threadId:string|null){
+    validateSource(source);
+    if(threadId===null)this.db.prepare('DELETE FROM event_task_bindings WHERE target=? AND source=?').run(target,source);
+    else {
+      validateTaskId(threadId);
+      this.db.prepare('INSERT INTO event_task_bindings(target,source,threadId) VALUES(?,?,?) ON CONFLICT(target,source) DO UPDATE SET threadId=excluded.threadId').run(target,source,threadId);
     }
-    this.db.prepare('INSERT INTO events(id,target,payload,available,created,updated,source) VALUES(?,?,?,?,?,?,?)').run(id,target,body,now,now,now,source);
-    return true;
+    return {target,source,threadId};
+  }
+  taskBindings(){return this.db.prepare('SELECT target,source,threadId FROM event_task_bindings ORDER BY target,source').all();}
+  taskCreation(id:string){return this.db.prepare('SELECT * FROM task_creations WHERE id=?').get(id) as unknown as CreationReceipt|undefined || null;}
+  enqueue(id: string, target: string, payload: unknown, now = Date.now(), source: string | null = null, defaultThreadId:string|null=null) {
+    if (typeof id !== 'string' || !id || id.length > 512) throw new Error('Invalid event id');
+    if(source!==null)validateSource(source);
+    if(defaultThreadId!==null)validateTaskId(defaultThreadId);
+    const body = json(payload);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.db.prepare('SELECT target,payload,source FROM events WHERE id=?').get(id);
+      if (existing) {
+        if (existing.target !== target || existing.payload !== body || existing.source !== source) throw new Error('Event id reused with different content');
+        this.db.exec('COMMIT');return false;
+      }
+      const binding=source===null?undefined:this.db.prepare('SELECT threadId FROM event_task_bindings WHERE target=? AND source=?').get(target,source);
+      const threadId=binding?.threadId ?? defaultThreadId;
+      this.db.prepare('INSERT INTO events(id,target,payload,available,created,updated,source,threadId) VALUES(?,?,?,?,?,?,?,?)').run(id,target,body,now,now,now,source,threadId);
+      this.db.exec('COMMIT');return true;
+    } catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   claim(now = Date.now(), target: string | null | undefined = null) {
     return this.db.prepare(`UPDATE events SET state='running',attempts=attempts+1,updated=?
@@ -56,7 +81,7 @@ export class Store {
     this.db.prepare('UPDATE events SET state=?,error=?,available=?,updated=? WHERE id=?')
       .run(again ? 'pending' : retry ? 'failed' : 'uncertain',String(error).slice(0,2048),Date.now()+Math.min(60000,1000*2**event.attempts),Date.now(),event.id);
   }
-  status() { return this.db.prepare('SELECT id,target,state,attempts,created,updated,error,source FROM events ORDER BY created DESC LIMIT 100').all(); }
+  status() { return this.db.prepare('SELECT id,target,state,attempts,created,updated,error,source,threadId FROM events ORDER BY created DESC LIMIT 100').all(); }
   retry(id: string) {
     return this.db.prepare("UPDATE events SET state='pending',attempts=0,available=?,error=NULL WHERE id=? AND state IN ('failed','uncertain')").run(Date.now(),id).changes;
   }
@@ -93,16 +118,39 @@ export function runCommand(argv: string[], input: string, { cwd, timeoutMs = 300
 export class Nerve {
   stopping=false;
   running=new Set<Promise<void>>();
+  setupOperations=new Set<Promise<unknown>>();
   delivering=new Set<string>();
   nextTarget=0;
   constructor(public config:NerveConfig,public store:Store){validateConfig(config);}
-  async close(){this.stopping=true;cancelCommands();await Promise.allSettled([...this.running]);}
+  enqueue(id:string,target:string,payload:unknown,source:string|null=null){
+    const destination=this.config.targets[target];
+    if(!destination)throw new Error('Unknown target');
+    return this.store.enqueue(id,target,payload,Date.now(),source,destination.taskRouting?.defaultThreadId ?? null);
+  }
+  taskRouting(target:string){
+    const route=this.config.targets[target]?.taskRouting;
+    if(!route)throw new Error('Target has no taskRouting configuration');
+    return route;
+  }
+  bindTask(target:string,source:string,threadId:string|null){
+    const config=this.taskRouting(target);validateSource(source);
+    if(threadId!==null)validateExistingTask(threadId,config);
+    return this.store.bindTask(target,source,threadId);
+  }
+  createTask(input:TaskCreation){
+    if(this.stopping)throw new Error('Service stopping');
+    const operation=createAndBindTask(this.store,input,this.taskRouting(input.target));
+    this.setupOperations.add(operation);
+    void operation.finally(()=>this.setupOperations.delete(operation)).catch(()=>{});
+    return operation;
+  }
+  async close(){this.stopping=true;cancelCommands();await Promise.allSettled([...this.running,...this.setupOperations]);}
   async deliver(event:NerveEvent){
     const target=this.config.targets[event.target];
     if(!target)throw new Error('Configured target no longer exists');
     const payload=JSON.parse(event.payload);
     if(target.type==='command'){
-      const output=await runCommand(target.argv!,json({id:event.id,payload}),{cwd:target.cwd || this.config.cwd,timeoutMs:target.timeoutMs || 30000,maxBytes:target.maxBytes || 1048576});
+      const output=await runCommand(target.argv!,json({id:event.id,payload,...(event.threadId?{threadId:event.threadId}:{})}),{cwd:target.cwd || this.config.cwd,timeoutMs:target.timeoutMs || 30000,maxBytes:target.maxBytes || 1048576});
       if(target.receipt){
         const receipt=JSON.parse(output.stdout);
         if(receipt.accepted!==true){
@@ -149,15 +197,23 @@ export function makeServer(nerve:Nerve,token:string|undefined){
       if(req.method==='GET'){
         if(path==='/health')return reply(200,{ok:true,targets:Object.keys(nerve.config.targets),completion:'delivery-receipt'});
         if(path==='/events')return reply(200,nerve.store.status());
+        if(path==='/task-bindings')return reply(200,{defaults:Object.fromEntries(Object.entries(nerve.config.targets).filter(([,target])=>target.taskRouting).map(([id,target])=>[id,target.taskRouting!.defaultThreadId])),bindings:nerve.store.taskBindings()});
+        if(path.startsWith('/task-creations/')){const receipt=nerve.store.taskCreation(decodeURIComponent(path.slice('/task-creations/'.length)));return reply(receipt?200:404,receipt || {error:'Unknown creation ID'});}
         if(path.startsWith('/events/')){const event=nerve.store.event(decodeURIComponent(path.slice(8)));return reply(event?200:404,event || {error:'Unknown event'});}
       }
       if(req.method==='POST' && path.startsWith('/events/') && path.endsWith('/retry'))return reply(200,{changed:nerve.store.retry(decodeURIComponent(path.slice(8,-6)))});
-      if(req.method!=='POST' || path!=='/events')return reply(404,{error:'Not found'});
+      if(req.method!=='POST' || !['/events','/task-bindings','/task-bindings/create'].includes(path))return reply(404,{error:'Not found'});
       let size=0;const chunks=[];
       for await(const chunk of req){size+=chunk.length;if(size>1048576)return reply(413,{error:'Payload too large'});chunks.push(chunk);}
       const body=JSON.parse(Buffer.concat(chunks).toString());
+      if(!body || typeof body!=='object' || Array.isArray(body))throw new Error('Request body must be an object');
+      const fields=path==='/events'?['id','target','payload','source']:path==='/task-bindings'?['target','source','threadId']:['id','target','source','cwd','name'];
+      for(const field of Object.keys(body))if(!fields.includes(field))throw new Error(`Unknown request field: ${field}`);
+      if(path==='/task-bindings')return reply(200,nerve.bindTask(body.target,body.source,body.threadId ?? null));
+      if(path==='/task-bindings/create')return reply(200,await nerve.createTask(body));
       if(!nerve.config.targets[body.target])return reply(400,{error:'Unknown target'});
-      const inserted=nerve.store.enqueue(body.id,body.target,body.payload ?? {},Date.now(),typeof body.source==='string'?body.source:null);
+      if(body.source!==undefined)validateSource(body.source);
+      const inserted=nerve.enqueue(body.id,body.target,body.payload ?? {},body.source ?? null);
       return reply(inserted?202:200,{id:body.id,inserted});
     }catch(error){reply(400,{error:(error as Error).message});}
   });

@@ -76,7 +76,7 @@ async function fixture(t) {
       const initialized=await request('initialize',{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'runtime-test',version:'1'}});
       assert.equal(initialized.serverInfo.name,'nerve');
       const listed=await request('tools/list');
-      assert.equal(listed.tools.length,5);assert.ok(listed.tools.some(tool=>tool.name==='nerve_status'));
+      assert.equal(listed.tools.length,9);assert.ok(listed.tools.some(tool=>tool.name==='nerve_status'));assert.ok(listed.tools.some(tool=>tool.name==='nerve_create_task'));
       const status=await request('tools/call',{name:'nerve_status',arguments:{}});
       assert.equal(status.isError,false);
       const health=JSON.parse(status.content[0].text);
