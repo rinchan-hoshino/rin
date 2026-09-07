@@ -66,7 +66,7 @@ payload 提供 `prompt`。这个独立输入适配命令与聊天桥共用 app-s
 }
 ```
 
-`taskRouting` 只适用于 command target。可选 `codexHome` 和 `endpoint` 指定显式创建与绑定检查使用的 Codex 实例；它们必须与输入命令使用的实例一致。未配置该字段的旧目标继续使用原 argv 默认任务。自定义输入命令需要读取 stdin 顶层 `threadId`，不能从 payload 选择任务。
+`taskRouting` 只适用于 command target。可选 `codexHome` 和 `endpoint` 指定显式创建与绑定检查使用的 Codex 实例；它们必须与输入命令使用的实例一致。已有任务检查读取本机 `codexHome/state_5.sqlite`，因此 endpoint 必须对应同一份本机状态，不支持校验另一台机器上独立存储的任务。未配置该字段的旧目标继续使用原 argv 默认任务。自定义输入命令需要读取 stdin 顶层 `threadId`，不能从 payload 选择任务。
 
 生产者在 `source` 提供固定的触发器 ID 或其他稳定来源标识；例如 `{id:"daily-review:2026-09-08",target:"inbox",source:"daily-review",payload:{prompt:"Review pending work."}}`。来源由可信生产者决定，不能把聊天正文、网页内容或事件 payload 中的字段当成来源或路由指令。Nerve 不维护来源的定时规则和业务内容。
 
