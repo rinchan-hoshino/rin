@@ -255,6 +255,17 @@ export function createAdapter(config: DiscordConfig, context: AdapterContext) {
     },
     async typing(target: ChatTarget) { const destination = await channel(target.chatId); if (!('sendTyping' in destination)) throw new Error('discord_channel_not_typable'); await destination.sendTyping(); },
     async delete(target: ChatTarget, messageId: string) {
+      const interactionId=target.commandInteraction?.id;
+      if(interactionId) {
+        const entry=interactions.get(String(interactionId));
+        if(!entry)throw new Error('discord_command_interaction_unavailable');
+        try { await entry.interaction.deleteReply(); }
+        catch(errorValue) {
+          const error=platformError(errorValue);
+          if(![10008,10015,10062].includes(Number(error?.code)))throw new Error('discord_command_interaction_dismiss_failed');
+        }
+        clearTimeout(entry.timer);interactions.delete(String(interactionId));return;
+      }
       try {
         const destination = await channel(target.chatId);
         if (!('messages' in destination)) throw new Error('discord_channel_has_no_messages');

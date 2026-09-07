@@ -72,7 +72,7 @@ export default {
 };
 ```
 
-`name` starts with a lowercase letter and contains 1–13 lowercase letters, digits, or underscores. `description` is 1–100 characters. `argument` is an optional 1–100 character description; `privateOnly` is an optional boolean. `run` receives `args`, `dataDir`, and the admitted message's adapter, ID, chat ID, user ID, kind, and text. It returns `{text, files?}`; files use `{path, name?, mimeType?}`. Results go through the existing text/file delivery path; extensions cannot redirect a result by returning a different target.
+`name` starts with a lowercase letter and contains 1–13 lowercase letters, digits, or underscores. `description` is 1–100 characters. `argument` is an optional 1–100 character description; `privateOnly` is an optional boolean. `run` receives `args`, `dataDir`, and the admitted message's adapter, ID, chat ID, user ID, kind, and text. A resolved handler completes the command, whether built in or loaded locally; it never falls through to another handler or the model. It may return nothing (`undefined` or `null`), an empty output object, or `{text, files?}`. No `silent` flag is required. Discord clears the deferred private response when there is no output; files use `{path, name?, mimeType?}`. Results go through the existing text/file delivery path; extensions cannot redirect a result by returning a different target.
 
 Only regular `.mjs` files are loaded, in filename order. Invalid definitions and import failures are skipped with a fixed warning. Extensions cannot replace a built-in name; if extensions share a name, all conflicting definitions are rejected. Unrelated valid extensions still load. No model turn or extra approval role is introduced by the command layer.
 

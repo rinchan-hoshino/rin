@@ -13,7 +13,7 @@ export interface WorkingConfig { frames?: string[]; text?: string; intervalMs?: 
 export interface Logger { info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void; }
 export interface CommandContext { args: string; message: ChatMessage; dataDir: string; }
 export interface CommandDescriptor { name: string; description: string; argument?: string; privateOnly?: boolean; }
-export interface ChatCommand extends CommandDescriptor { run(context: CommandContext): ChatOutput | Promise<ChatOutput>; }
+export interface ChatCommand extends CommandDescriptor { run(context: CommandContext): ChatOutput | void | null | Promise<ChatOutput | void | null>; }
 export interface AttentionRecord { id: string; [key: string]: unknown; }
 export interface AdapterContext { dataDir: string; log: Logger; commands: ChatCommand[]; getCursor<T = unknown>(key: string): T | undefined; setCursor(key: string, value: unknown): void; isCommand(message: Pick<ChatMessage, 'text'>): boolean; isBound(message: ChatMessage): boolean; }
 export interface ChatAdapter { capabilities: {edit: boolean; reaction?: boolean; typing?: boolean; maxText?: number}; start(onMessage: (message: ChatMessage) => Promise<void>): Promise<void>; stop(): Promise<void>; send(target: ChatTarget, output: ChatOutput): Promise<{id: string | null}>; typing(target: ChatTarget): Promise<void>; startReaction?(target: ChatTarget): Promise<{id: string | null}>; endReaction?(target: ChatTarget, id: string): Promise<void>; delete?(target: ChatTarget, messageId: string): Promise<void>; }

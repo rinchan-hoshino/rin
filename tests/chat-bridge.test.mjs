@@ -89,13 +89,13 @@ test('idle failed admission types once, reports once through the outbox, and nev
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-test('submission failure preserves an existing active turn, queue stays idle, and both App IPC receipts become active',async()=>{
+test('submission failure preserves an existing active turn, queue stays idle, and app-server turn receipts become active',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-active-submit-'));const typing=[];let receive,release,mode='pending';
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>{
     if(mode==='failed')throw new Error('submission failed');
     if(mode==='pending')return new Promise(resolve=>{release=()=>resolve({messageId:'queued'});});
-    return mode==='steered'?{transport:'app-ipc-steer',turnId:'steered-turn'}
-      : mode==='started'?{transport:'app-ipc-start',turnId:'started-turn'}:{messageId:'queued'};
+    return mode==='steered'?{transport:'app-server',turnId:'steered-turn'}
+      : mode==='started'?{transport:'app-server',turnId:'started-turn'}:{messageId:'queued'};
   }};
   const adapter={capabilities:{edit:false,typing:true,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},typing:async()=>{typing.push('typing');},send:async()=>({id:'reply'})};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
@@ -112,10 +112,10 @@ test('submission failure preserves an existing active turn, queue stays idle, an
     bridge.event({threadId:'thread',turnId:'real-turn',type:'completed'});
     mode='steered';await receive({id:'steered',chatId:'dm',userId:'owner',kind:'dm',text:'steer'});await new Promise(resolve=>setImmediate(resolve));
     const afterSteer=typing.length;bridge.lastTypingAt.clear();bridge.typing();assert.equal(typing.length,afterSteer+1,'a successful steer confirms sustained activity');
-    assert.equal(bridge.store.db.prepare("SELECT state FROM inbox WHERE id=?").get(JSON.stringify(['d','dm','steered'])).state,'steered');
+    assert.equal(bridge.store.db.prepare("SELECT state FROM inbox WHERE id=?").get(JSON.stringify(['d','dm','steered'])).state,'delivered');
     bridge.event({threadId:'thread',turnId:'steered-turn',type:'completed'});
     mode='started';await receive({id:'started',chatId:'dm',userId:'owner',kind:'dm',text:'start'});await new Promise(resolve=>setImmediate(resolve));
-    const afterStart=typing.length;bridge.lastTypingAt.clear();bridge.typing();assert.equal(typing.length,afterStart+1,'a successful App IPC start confirms sustained activity');
+    const afterStart=typing.length;bridge.lastTypingAt.clear();bridge.typing();assert.equal(typing.length,afterStart+1,'a successful app-server start confirms sustained activity');
     assert.equal(bridge.store.db.prepare("SELECT state FROM inbox WHERE id=?").get(JSON.stringify(['d','dm','started'])).state,'delivered');
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
@@ -541,8 +541,8 @@ test('completed App images use task-scoped artifacts and durable QQ reply delive
 for(const [type,edit] of [['discord',true],['feishu',false],['qqbot',false]]) test(`${type}: an accepted same-turn steer gets an independent presentation without stealing an old item`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-steer-presentation-${type}-`));const sent=[];let receive,call=0;
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1
-    ? {transport:'app-ipc-start',turnId:'physical',messageId:'start-client'}
-    : {transport:'app-ipc-steer',turnId:'physical',messageId:'steer-client'}};
+    ? {transport:'app-server',turnId:'physical',messageId:'start-client'}
+    : {transport:'app-server',turnId:'physical',messageId:'steer-client'}};
   const adapter={capabilities:{edit,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},
     send:async(target,output)=>{sent.push({target,output});return{id:output.editId || `remote-${sent.length}`};},delete:async()=>{}};
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner-a','owner-b'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
@@ -550,6 +550,7 @@ for(const [type,edit] of [['discord',true],['feishu',false],['qqbot',false]]) te
   try{
     await bridge.start();
     await receive({id:'A',chatId:'dm',userId:'owner-a',kind:'dm',text:'first'});await bridge.submit();
+    bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-a',clientMessageId:'start-client',ordinal:1});
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'old',phase:'commentary',text:'A progress',ordinal:10});await bridge.flush();
     await receive({id:'B',chatId:'dm',userId:'owner-b',kind:'dm',text:'steer'});await new Promise(resolve=>setImmediate(resolve));await bridge.submit();await bridge.flush();
     assert.ok(sent.some(({output})=>output.replyTo==='B' && (output.progress || output.text==='Working...')),`accepted steer creates B working: calls=${call} sent=${JSON.stringify(sent)}`);
@@ -572,13 +573,14 @@ for(const [type,edit] of [['discord',true],['feishu',false],['qqbot',false]]) te
 test('steer persists an input boundary seen before its receipt and defers later same-poll output until it can be attributed',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-steer-input-race-'));const sent=[];let receive,call=0;
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1
-    ? {transport:'app-ipc-start',turnId:'physical',messageId:'start-client'}
-    : {transport:'app-ipc-steer',turnId:'physical',messageId:'steer-client'}};
+    ? {transport:'app-server',turnId:'physical',messageId:'start-client'}
+    : {transport:'app-server',turnId:'physical',messageId:'steer-client'}};
   const config={dataDir,adapters:[{id:'chat',type:'discord',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'});await bridge.submit();
+    bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-a',clientMessageId:'start-client',ordinal:1});
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'old',phase:'final',text:'old',ordinal:10});await bridge.flush();
     bridge.expectInput(config.bindings[0],'steer-client');
     bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-b',clientMessageId:'steer-client',ordinal:20});
@@ -595,12 +597,13 @@ test('steer persists an input boundary seen before its receipt and defers later 
 test('completed output buffered before a late steer receipt retains question, text, and generated image',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-steer-terminal-race-')),home=join(dataDir,'home'),imageRoot=join(home,'generated_images','thread');mkdirSync(imageRoot,{recursive:true});
   const image=join(imageRoot,'result.png');writeFileSync(image,'pixels');const sent=[];let receive,call=0;
-  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1?{transport:'app-ipc-start',turnId:'physical',messageId:'start'}:{transport:'app-ipc-steer',turnId:'physical',messageId:'steer'}};
+  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1?{transport:'app-server',turnId:'physical',messageId:'start'}:{transport:'app-server',turnId:'physical',messageId:'steer'}};
   const config={dataDir,codex:{codexHome:home},adapters:[{id:'chat',type:'qqbot',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'});await bridge.submit();
+    bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-a',clientMessageId:'start',ordinal:1});
     bridge.expectInput(config.bindings[0],'steer');bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-b',clientMessageId:'steer',ordinal:20});
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'question',phase:'question',text:'question',ordinal:21});
     bridge.event({threadId:'thread',turnId:'physical',type:'image',itemId:'image',path:image,ordinal:22});
@@ -649,7 +652,7 @@ test('late terminal for an older physical turn does not clear the current manual
 
 test('start observed before its receipt keeps the submitting chat reply context when newer ingress arrives',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-start-before-receipt-'));const sent=[];let receive,release,calls=0;
-  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1 ? new Promise(resolve=>{release=()=>resolve({transport:'app-ipc-start',turnId:'turn-a',messageId:'start-a'});}) : {messageId:'queued'}};
+  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1 ? new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'turn-a',messageId:'start-a'});}) : {messageId:'queued'}};
   const config={dataDir,adapters:[{id:'chat',type:'qqbot',allowUsers:['a','b']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
@@ -667,7 +670,7 @@ test('a failed turn before the steer receipt delivers one failure to the accepte
   const dataDir=mkdtempSync(join(tmpdir(),'rin-late-failure-')); const sent=[]; let receive, release, calls=0;
   const config={dataDir,adapters:[{id:'chat',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
-  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1?{transport:'app-ipc-start',turnId:'physical'}:new Promise(resolve=>{release=()=>resolve({transport:'app-ipc-steer',turnId:'physical',messageId:'client-b'});})};
+  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1?{transport:'app-server',turnId:'physical'}:new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'physical',messageId:'client-b'});})};
   const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try {
     await bridge.start(); await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'}); await new Promise(setImmediate);

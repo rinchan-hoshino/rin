@@ -135,6 +135,22 @@ test('Discord command registration failure does not block startup', async () => 
   await adapter.stop();
 });
 
+test('Discord no-output command dismisses its private deferred response without public fallback',async()=>{
+  const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
+  client.application={commands:{set:async()=>{}}};client.channels={fetch:async()=>assert.fail('must not access public channel')};
+  const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client},{dataDir:'/tmp',log:{}});
+  let deleted=0;await adapter.start(async()=>{});
+  try{
+    for(const code of [undefined,10008]){
+      const id=`ix-${code}`;
+      client.emit('interactionCreate',{id,channelId:'dm',user:{id:'allowed'},commandName:'help',isChatInputCommand:()=>true,options:{getString:()=>null},deferReply:async()=>{},deleteReply:async()=>{deleted++;if(code)throw {code};}});
+      await new Promise(setImmediate);await adapter.delete({chatId:'dm',commandInteraction:{id}},id);
+    }
+    assert.equal(deleted,2);
+    await assert.rejects(adapter.delete({chatId:'dm',commandInteraction:{id:'missing'}},'missing'),/unavailable/);
+  }finally{await adapter.stop();}
+});
+
 test('Discord applies the core binding gate before downloading attachments', async () => {
   const client = new EventEmitter(); client.user = {id: 'bot'}; client.login = async () => {}; client.isReady = () => true; client.destroy = async () => {};
   let fetched = 0;

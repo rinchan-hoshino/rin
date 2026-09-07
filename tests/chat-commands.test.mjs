@@ -83,3 +83,29 @@ test('slow menu registration does not block readiness and its later failure is h
   assert.equal(warnings.length,0);reject(new Error('secret request metadata'));
   await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(warnings,['menu registration failed']);
 });
+
+test('resolved commands own execution without requiring a reply, including native interactions and replay',async()=>{
+  const dataDir=mkdtempSync(join(tmpdir(),'rin-command-completion-'));const sent=[],deleted=[];let receive,calls=0;
+  mkdirSync(join(dataDir,'commands'));writeFileSync(join(dataDir,'commands','quiet.mjs'),`export default {name:'quiet',description:'Do work',run:async()=>{}};`);
+  const bridge=new ChatBridge({dataDir,bindings:[],adapters:[{id:'d',type:'discord',allowUsers:['owner']}]},{
+    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>assert.fail('commands must not reach model')},
+    usage:async()=>{calls++;},log:{info(){},warn(){},error(){}},
+    adapterFactory:async()=>({capabilities:{edit:false},start:async fn=>{receive=fn;},stop:async()=>{},send:async(t,o)=>{sent.push(o);return{id:'reply'};},delete:async(t,id)=>deleted.push([t.commandInteraction.id,id])}),
+  });
+  const msg=(id,text,extra={})=>({id,text,chatId:'dm',kind:'dm',userId:'owner',...extra});
+  try{
+    await bridge.start();
+    await receive(msg('builtin','/usage'));await receive(msg('extension','/quiet'));
+    await receive(msg('native','/quiet',{commandInteraction:{id:'ix'}}));await bridge.flush();
+    assert.equal(calls,1);assert.deepEqual(sent,[]);assert.deepEqual(deleted,[['ix','ix']]);
+    await receive(msg('builtin','/usage'));await receive(msg('native','/quiet',{commandInteraction:{id:'ix'}}));await bridge.flush();
+    assert.equal(calls,1);assert.equal(deleted.length,1);
+    for(const [index,value] of [null,{}, {text:'',files:[]}, false,{text:5},{fallbackText:'only fallback'}].entries()){
+      bridge.commands.find(c=>c.name==='quiet').run=()=>value;
+      await receive(msg(`result-${index}`,'/quiet'));await bridge.flush();
+    }
+    assert.equal(sent.length,3,'malformed results still report errors');
+    bridge.commands.find(c=>c.name==='quiet').run=()=>{throw new Error('failed');};
+    await receive(msg('failed','/quiet'));await bridge.flush();assert.equal(sent.length,4);
+  }finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
+});

@@ -90,8 +90,8 @@ export class ChatBridge {
     const state=this.presentations(binding), previous=state.currentId && state.entries[state.currentId];
     if(previous && previous.id!==id)this.retirePresentationProgress(binding,previous.id);
     state.entries[id]={id,turnId,context,...(inputId?{inputId}:{})};
-    // A start has a distinct physical turn. A steer stays on that turn and must
-    // wait for its own persisted userMessage/clientId boundary.
+    // Every accepted input, whether starting or steering, uses its persisted
+    // userMessage/clientId boundary to attribute output.
     if(!inputId)state.entries[id].boundary=Number.MIN_SAFE_INTEGER;
     else {
       const boundary=this.inputBoundaries(binding,binding.threadId,turnId)[inputId];
@@ -304,11 +304,11 @@ export class ChatBridge {
       if(command.privateOnly && !effectivePrivate(message))output={text:'请在私聊中使用此命令。'};
       else {
         const result=await command.run({args:parsed.args,message:{adapter:config.id,id:message.id,chatId:message.chatId,...(message.topicId?{topicId:message.topicId}:{}),userId:message.userId,kind:message.kind,text:message.text,...(message.privateLike?{privateLike:true}:{})},dataDir:this.config.dataDir});
-        if(!result || typeof result!=='object' || (result.text!==undefined && typeof result.text!=='string') ||
+        if(result != null && (typeof result!=='object' || Array.isArray(result) || (result.text!==undefined && typeof result.text!=='string') ||
           (result.fallbackText!==undefined && typeof result.fallbackText!=='string') ||
           (result.files!==undefined && (!Array.isArray(result.files) || result.files.some(file=>!file || typeof file.path!=='string' || (file.name!==undefined && typeof file.name!=='string') || (file.mimeType!==undefined && typeof file.mimeType!=='string')))) ||
-          (!result.text && !result.files?.length))throw new Error('Invalid command result');
-        output={text:result.text || '',...(result.fallbackText?{fallbackText:result.fallbackText}:{}),...(result.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
+          (result.fallbackText && !result.text && !result.files?.length)))throw new Error('Invalid command result');
+        output={text:result?.text || '',...(result?.fallbackText?{fallbackText:result.fallbackText}:{}),...(result?.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
       }
     } catch {
       this.log.warn('command failed',{name:command.name});
@@ -320,7 +320,8 @@ export class ChatBridge {
       ? prepareText(config.type,output.text || '',this.adapters.get(config.id)?.capabilities.maxText || 1900)
       : splitText(stripMarkdownFormatting(output.text || ''),1900).map(text=>({text}));
     // Native interaction replies are one private response; adapters retain the handle in memory.
-    const parts=message.commandInteraction?[{text:output.text,...(output.fallbackText?{fallbackText:output.fallbackText}:{}),...(output.files?.length?{files:output.files}:{})}]
+    const hasOutput=Boolean(output.text || output.files?.length);
+    const parts=!hasOutput ? (message.commandInteraction ? [{delete:true}] : []) : message.commandInteraction?[{text:output.text,...(output.fallbackText?{fallbackText:output.fallbackText}:{}),...(output.files?.length?{files:output.files}:{})}]
       : [...chunks,...(output.files?.length?[{files:output.files,...(output.fallbackText?{fallbackText:output.fallbackText}:{})}]:[])];
     for(const [index,part] of parts.entries())this.store.stage(stableId(key,index),this.routeKey({adapter:config.id,chatId:message.chatId,topicId:message.topicId}),{
       ...part,...(!message.commandInteraction && index===0?{replyTo:message.id}:{}),target});
@@ -357,7 +358,7 @@ export class ChatBridge {
         const message = JSON.parse(job.payload) as ChatMessage;
         const [ingressAdapterId] = JSON.parse(job.id) as [string];
         try {
-          // A start event can be observed before its IPC receipt. Freeze the
+          // A start event can be observed before its server receipt. Freeze the
           // submitting chat's reply context now; later ingress must not make
           // that new physical turn look as though it belonged to a newer chat.
           const routedBindings=this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter));
@@ -365,14 +366,14 @@ export class ChatBridge {
           const receipt = await this.codex.queue(job.thread,{text:composeInboundText(message.text,{reply:this.store.replyContext(ingressAdapterId,message),forward:message.forward}),files:message.files || [],onClientMessageId:id=>{
             for(const binding of this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter)))this.expectInput(binding,id);
           }});
-          const appIpc=receipt?.transport?.startsWith('app-ipc-');
-          const state=receipt?.transport==='app-ipc-steer' ? 'steered' : appIpc ? 'delivered' : 'queued';
+          const accepted=Boolean(receipt?.turnId);
+          const state=accepted ? 'delivered' : 'queued';
           this.store.inboxState(job.id,state,typeof receipt === 'string' ? receipt : JSON.stringify(receipt));
-          if(appIpc) {
+          if(accepted) {
             if(receipt.turnId) for(const binding of this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter))) {
               const [adapterId]=JSON.parse(job.id);
               const context=this.inboundContext(binding,adapterId,message);
-              const presentation=this.activatePresentation(binding,job.id,receipt.turnId,context,receipt.transport==='app-ipc-steer' ? receipt.messageId : undefined);
+              const presentation=this.activatePresentation(binding,job.id,receipt.turnId,context,receipt.messageId);
               this.store.setCursor(this.inflightInputKey(binding,job.thread),false);
               const terminal=this.physicalTerminal(job.thread,receipt.turnId);
               if(terminal) {
@@ -517,7 +518,7 @@ export class ChatBridge {
       for(const [key,item] of this.items) if(item.threadId===event.threadId && (!event.turnId || item.turnId===event.turnId) &&
         bindings.every(binding=>this.store.cursor(this.presentationItemKey(binding,item))!==undefined))this.items.delete(key);
       if (event.type === 'failed') for (const binding of bindings) {
-        // The physical turn may have failed after accepting an input whose IPC
+        // The physical turn may have failed after accepting an input whose server
         // receipt has not arrived. Let that receipt choose the failure's owner.
         if(this.store.cursor(this.inflightInputKey(binding,event.threadId)))continue;
         const presentation=this.currentPresentation(binding)?.turnId===event.turnId ? this.currentPresentation(binding) : this.presentationFor(binding,{threadId:event.threadId,turnId:event.turnId,itemId:'failure',phase:'final',text:'',ordinal:undefined});
@@ -689,7 +690,7 @@ export class ChatBridge {
         this.store.sending(item.id);
         const target = {...route,...this.store.cursor<Partial<ChatTarget>>(`reply:${item.route}`),...(payload.replyTo ? {messageId:payload.replyTo} : {}),...payload.target};
         try {
-          if(payload.delete) {if(item.message_id)await adapter.delete?.(target,item.message_id);this.store.sent(item.id,item.payload,null);continue;}
+          if(payload.delete) {const deleteId=item.message_id || target.commandInteraction?.id;if(deleteId)await adapter.delete?.(target,deleteId);this.store.sent(item.id,item.payload,null);continue;}
           const sent = await adapter.send(target,{...payload,...(item.message_id && adapter.capabilities.edit ? {editId:item.message_id} : {})});
           this.store.sent(item.id,item.payload,sent.id);
           this.retryAt.delete(item.id);
