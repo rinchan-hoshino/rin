@@ -80,9 +80,10 @@ Platform command APIs are reconciled to the complete catalog. Discord updates th
 
 ### Usage
 
-`/usage` and `/usage card` return a current quota card with the full text result. `/usage current` and `/usage text` return text. `/usage history --days 14` reads newly recorded local snapshots; `/usage history --json` exports them. `/usage --help` lists supported arguments. The provider reads the local Codex app-server's account rate-limit API, including every returned limit bucket and both windows, with used/remaining percentages and reset times. Unknown fields stay unknown. API spending is not presented as subscription quota. No purchase or usage-reset operation is implemented.
+`/usage` and `/usage card` return a PNG combining native account quota and daily token activity. `/usage weekly` and `/usage cumulative` select the other native activity views. `/usage text` (or `--text` with a view) returns text; image results carry text only as a delivery-failure fallback. `/usage --help` lists arguments. The provider calls the local Codex app-server's read-only `account/read`, `account/rateLimits/read`, and `account/usage/read` methods. Every returned limit bucket is included. Missing metrics stay unavailable; lifetime, peak, streak and longest-task summary values come directly from Codex. Daily cloud buckets use Sunday-based weeks for the weekly and cumulative views. No purchase or usage-reset operation is implemented.
 
-Snapshots and cards live under the configured private `dataDir/usage`. Quota history begins with the first successful read. The daily USD-equivalent curve uses only local Codex `token_usage_record` events from active and archived rollouts, deduplicated by provider and response ID. Each request uses its preceding turn model and the checked Standard API price snapshot (2026-09-07); this estimates token value, not subscription charges. Unknown days are gaps, today is partial-day, and unpriced requests remain explicitly excluded from partial estimates. Incremental SQLite indexing reads at most 32 MiB / approximately one second per command; initial indexing is partial until caught up. The index stores counters, model/identity metadata and byte cursors, never message bodies. Old Rin cost history is neither loaded nor merged.
+Only rendered PNG artifacts are written under private `dataDir/usage/cards`, retaining the latest 24 native cards. There is no local quota history, rollout indexing, or token-price estimation. Old statistics are neither read nor merged.
+
 
 ### Working text
 

@@ -1,365 +1,135 @@
-import type { CodexConfig, ChatOutput } from './types.js';
-import type { CodexUsageStatus } from './usage-card.js';
-type NativeTrend = Awaited<ReturnType<typeof readCodexTokenTrend>>;
-type CostTrend = ReturnType<typeof buildCodexCostTrend>;
-interface WindowInput {usedPercent?: unknown; used_percent?: unknown; windowDurationMins?: unknown; window_minutes?: unknown; resetsAt?: unknown; resets_at?: unknown;}
-interface LimitInput {primary?: WindowInput; secondary?: WindowInput; credits?: {hasCredits?: boolean; has_credits?: boolean; unlimited?: boolean; balance?: unknown}; limitId?: string; limit_id?: string; limitName?: string; limit_name?: string; planType?: string; plan_type?: string; spendControlReached?: boolean; spend_control_reached?: boolean; rateLimitReachedType?: string; rate_limit_reached_type?: string;}
-interface AccountInfo {email?: string; name?: string; displayName?: string;}
-interface UsageResponse {rateLimitsByLimitId?: Record<string, LimitInput>; rate_limits_by_limit_id?: Record<string, LimitInput>; rateLimits?: LimitInput; rate_limits?: LimitInput; account?: AccountInfo; accountInfo?: AccountInfo; account_info?: AccountInfo; email?: string; accountEmail?: string;}
-type UsageWindow = ReturnType<typeof normalizeWindow> & {name: string};
-type UsageLimit = NonNullable<ReturnType<typeof normalizeLimit>>;
-interface UsageSnapshot {observedAt: string; limits: UsageLimit[]; source?: UsageResponse;}
-interface UsageProvider {readRateLimits(): Promise<UsageResponse>;}
-import { readCodexTokenTrend, resolveCodexHome } from './codex-usage-history.js';
-import { spawn } from 'node:child_process';
-import { renderCodexUsageCardPng } from './usage-card.js';
-import { appendFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import {mkdir, readdir, rm, writeFile} from 'node:fs/promises';
+import {basename, join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {CodexAppServer} from '../codex-app-server.js';
+import type {CodexConfig, ChatOutput} from './types.js';
+import {renderNativeUsagePng} from './usage-card.js';
 
-const HISTORY_NAME = 'history.jsonl';
-const DEFAULT_DAYS = 14;
-const MAX_DAYS = 365;
-
-const finite = (value: unknown) => value === null || value === undefined || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : null;
-const clamp = (value: number | null) => value === null ? null : Math.max(0, Math.min(100, value));
-
-function usageHelp() {
-  return [
-    '用法：/usage [current|card|text|history] [--days N] [--json]',
-    '',
-    '  /usage             当前额度卡片（图片不受支持时仍返回完整文字）',
-    '  /usage current     当前额度文字',
-    '  /usage card        当前额度卡片',
-    '  /usage text        当前额度文字',
-    '  /usage history     Rin 启用此命令后记录的额度历史',
-    '  /usage --quota     兼容旧命令，等同 history',
-    '',
-    '额度历史由 Rin 快照组成；用量曲线仅统计本地 Codex 请求，按官方 API 价估值；缺失数据为 unknown。',
-    '旧版 token telemetry 参数（--tokens、--events、--group-by、--filter 等）依赖 Pi 事件流，新桥不提供。',
-  ].join('\n');
+export type UsageView = 'daily' | 'weekly' | 'cumulative';
+export interface NativeUsage {
+  summary: {lifetimeTokens: number | null; peakDailyTokens: number | null; longestRunningTurnSec: number | null; currentStreakDays: number | null; longestStreakDays: number | null};
+  dailyUsageBuckets: {startDate: string; tokens: number}[] | null;
 }
-
-export function parseUsageArgs(input = '') {
-  const words = String(input).trim().split(/\s+/).filter(Boolean);
-  if (words.some(word => word === '-h' || word === '--help')) return { mode: 'help', days: DEFAULT_DAYS, json: false };
-  if (words[0] === '--quota') {
-    words.shift();
-    words.unshift('history');
-  }
-  const legacy = new Set(['--tokens','--events','--group-by','--filter','--all-time','--limit','--order-by','--asc','--desc','--list-dimensions']);
-  if ((!words[0] || words[0].startsWith('-')) && words.some(word => legacy.has(word) || word === '--days')) return { mode: 'legacy-tokens', days: DEFAULT_DAYS, json: false };
-  let mode = words[0] && !words[0].startsWith('-') ? words.shift()!.toLowerCase() : 'card';
-  if (mode === 'current') mode = 'text';
-  if (!['card', 'text', 'history'].includes(mode)) throw new Error(`未知 usage 模式：${mode}`);
-  let days = DEFAULT_DAYS;
-  let json = false;
-  for (let index = 0; index < words.length; index++) {
-    const word = words[index];
-    if (word === '--json') json = true;
-    else if (word === '--days') {
-      const raw = words[++index];
-      if (!/^\d+$/.test(raw || '') || Number(raw) < 1 || Number(raw) > MAX_DAYS) throw new Error(`--days 必须是 1-${MAX_DAYS} 的整数`);
-      days = Number(raw);
-    } else throw new Error(`未知 usage 参数：${word}`);
-  }
-  if (mode !== 'history' && (days !== DEFAULT_DAYS || json)) throw new Error('--days 和 --json 仅用于 usage history');
-  return { mode, days, json };
+export interface NativeLimitWindow {usedPercent: number; windowDurationMins: number | null; resetsAt: number | null;}
+export interface NativeLimit {
+  limitId?: string | null; limitName?: string | null; planType?: string | null;
+  primary?: NativeLimitWindow | null; secondary?: NativeLimitWindow | null;
+  credits?: {hasCredits: boolean; unlimited: boolean; balance: string | null} | null;
 }
-
-function normalizeWindow(value: WindowInput) {
-  const used = clamp(finite(value?.usedPercent ?? value?.used_percent));
-  const duration = finite(value?.windowDurationMins ?? value?.window_minutes);
-  const reset = finite(value?.resetsAt ?? value?.resets_at);
-  return {
-    usedPercent: used,
-    remainingPercent: used === null ? null : Math.round((100 - used) * 10) / 10,
-    windowDurationMins: duration,
-    resetsAt: reset,
-  };
+export interface NativeUsageSnapshot {
+  account: {account?: {type?: string; email?: string | null; planType?: string | null} | null} | null;
+  rateLimits: {rateLimits?: NativeLimit | null; rateLimitsByLimitId?: Record<string, NativeLimit> | null; rateLimitResetCredits?: {availableCount: number} | null} | null;
+  usage: NativeUsage | null;
 }
+export interface UsageProvider {read(): Promise<NativeUsageSnapshot>;}
 
-function normalizeLimit(value: LimitInput, fallbackId: string) {
-  if (!value || typeof value !== 'object') return null;
-  const windows = [];
-  if (value.primary) windows.push({ name: 'primary', ...normalizeWindow(value.primary) });
-  if (value.secondary) windows.push({ name: 'secondary', ...normalizeWindow(value.secondary) });
-  const credits = value.credits && typeof value.credits === 'object' ? {
-    hasCredits: Boolean(value.credits.hasCredits ?? value.credits.has_credits),
-    unlimited: Boolean(value.credits.unlimited),
-    balance: value.credits.balance === undefined || value.credits.balance === null ? null : String(value.credits.balance),
-  } : null;
-  return {
-    id: String(value.limitId ?? value.limit_id ?? fallbackId ?? 'default'),
-    name: value.limitName ?? value.limit_name ?? null,
-    planType: value.planType ?? value.plan_type ?? null,
-    windows,
-    credits,
-    spendControlReached: value.spendControlReached ?? value.spend_control_reached ?? null,
-    rateLimitReachedType: value.rateLimitReachedType ?? value.rate_limit_reached_type ?? null,
-  };
-}
-
-export function normalizeUsageResponse(response: UsageResponse, now = new Date()) {
-  const source = response?.rateLimitsByLimitId ?? response?.rate_limits_by_limit_id;
-  let entries = source && typeof source === 'object' ? Object.entries(source) : [];
-  if (!entries.length && (response?.rateLimits || response?.rate_limits)) entries = [['default', (response.rateLimits ?? response.rate_limits)!]];
-  const limits = entries.map(([id, value]) => normalizeLimit(value, id)).filter((value): value is UsageLimit => value !== null);
-  return { observedAt: new Date(now).toISOString(), limits, source: response };
-}
-
-function durationLabel(minutes: number | null) {
-  if (minutes === null) return '窗口未知';
-  if (minutes % 10080 === 0) return `${minutes / 10080} 周`;
-  if (minutes % 1440 === 0) return `${minutes / 1440} 天`;
-  if (minutes % 60 === 0) return `${minutes / 60} 小时`;
-  return `${minutes} 分钟`;
-}
-
-function resetLabel(seconds: number | null, locale = 'zh-CN') {
-  if (seconds === null) return '重置时间 unknown';
-  const date = new Date(seconds > 1e11 ? seconds : seconds * 1000);
-  return Number.isNaN(date.getTime()) ? '重置时间 unknown' : `重置 ${date.toLocaleString(locale, { timeZone: 'Asia/Shanghai' })}（北京时间）`;
-}
-
-export function renderCurrentUsage(snapshot: UsageSnapshot) {
-  const lines = ['Codex 额度'];
-  const limits = ordinaryCodexLimits(snapshot);
-  if (!limits.length) return `${lines[0]}\n当前额度 unknown`;
-  for (const limit of limits) {
-    lines.push('', `${limit.name || limit.id}${limit.planType ? ` · ${limit.planType}` : ''}`);
-    if (!limit.windows.length) lines.push('额度窗口 unknown');
-    for (const window of limit.windows) {
-      const used = window.usedPercent === null ? 'unknown' : `${window.usedPercent}%`;
-      const remaining = window.remainingPercent === null ? 'unknown' : `${window.remainingPercent}%`;
-      lines.push(`${durationLabel(window.windowDurationMins)}：已用 ${used}，剩余 ${remaining}`, resetLabel(window.resetsAt));
-    }
-    if (limit.credits) {
-      const value = limit.credits.unlimited ? '无限' : limit.credits.balance !== null ? limit.credits.balance : '无可用余额';
-      lines.push(`Credits：${value}`);
-    }
-    if (limit.spendControlReached === true) lines.push('已达到支出控制上限');
-    if (limit.rateLimitReachedType) lines.push(`状态：${limit.rateLimitReachedType}`);
-  }
-  return lines.join('\n');
-}
-
-function historyPath(dataDir: string) { return join(dataDir, 'usage', HISTORY_NAME); }
-
-async function appendSnapshot(dataDir: string, snapshot: UsageSnapshot) {
-  const directory = join(dataDir, 'usage');
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await appendFile(historyPath(dataDir), `${JSON.stringify(snapshot)}\n`, { encoding: 'utf8', mode: 0o600 });
-}
-
-async function readHistory(dataDir: string, days: number, now: Date): Promise<UsageSnapshot[]> {
-  let body;
-  try { body = await readFile(historyPath(dataDir), 'utf8'); }
-  catch (error) { if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return []; throw error; }
-  const cutoff = new Date(now).getTime() - days * 86_400_000;
-  return body.split('\n').filter(Boolean).flatMap(line => {
+export function createCodexUsageProvider({config = {}, server}: {config?: CodexConfig; server?: Pick<CodexAppServer, 'start' | 'connect' | 'request' | 'stop'>} = {}): UsageProvider {
+  return {async read() {
+    const client=server || new CodexAppServer({command:config.command, codexHome:config.codexHome});
+    client.start();
     try {
-      const row = JSON.parse(line) as UsageSnapshot;
-      return Date.parse(row?.observedAt) >= cutoff && Array.isArray(row?.limits) ? [row] : [];
-    } catch { return []; }
-  });
+      await client.connect();
+      const results=await Promise.allSettled([
+        client.request<NativeUsageSnapshot['account']>('account/read',{refreshToken:false}),
+        client.request<NativeUsageSnapshot['rateLimits']>('account/rateLimits/read',{}),
+        client.request<NativeUsage>('account/usage/read',{}),
+      ]);
+      // Missing cloud metrics stay missing. Never substitute a local estimate.
+      if(results.every(result=>result.status==='rejected'))throw new Error('Codex 原生用量暂不可用。');
+      return {account:results[0].status==='fulfilled'?results[0].value:null,
+        rateLimits:results[1].status==='fulfilled'?results[1].value:null,
+        usage:results[2].status==='fulfilled'?results[2].value:null};
+    } finally {await client.stop();}
+  }};
 }
 
-function renderHistory(rows: UsageSnapshot[], days: number) {
-  if (!rows.length) return `Codex 额度历史（最近 ${days} 天）\n历史数据 unknown：Rin 尚未记录新的额度快照。`;
-  const lines = [`Codex 额度历史（最近 ${days} 天，共 ${rows.length} 次快照）`];
-  const series = new Map<string, (UsageWindow & {at: string})[]>();
-  for (const row of rows) for (const limit of ordinaryCodexLimits(row)) for (const window of limit.windows || []) {
-    const key = `${limit.id}/${window.name}`;
-    const list = series.get(key) || [];
-    list.push({ at: row.observedAt, ...window });
-    series.set(key, list);
+export function parseUsageArgs(input = ''): {view: UsageView; text: boolean; help: boolean} {
+  const words=input.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if(words.includes('--help') || words.includes('-h'))return {view:'daily',text:false,help:true};
+  let view: UsageView='daily', text=false, hasView=false;
+  for(const word of words) {
+    if(['daily','weekly','cumulative'].includes(word) && !hasView){view=word as UsageView;hasView=true;}
+    else if(['text','current','--text'].includes(word) && !text)text=true;
+    else if(word==='card' && words.length===1)continue;
+    else throw new Error(`不支持的参数：${word}`);
   }
-  if (!series.size) lines.push('历史数据 unknown：快照中没有额度窗口。');
-  for (const [key, points] of series) {
-    const first = points[0], last = points.at(-1)!;
-    const delta = first.usedPercent === null || last.usedPercent === null ? 'unknown' : `${Math.round((last.usedPercent - first.usedPercent) * 10) / 10} 个百分点`;
-    const crossedReset=points.some((point,index)=>index>0 && point.resetsAt!==null && points[index-1].resetsAt!==null && point.resetsAt!==points[index-1].resetsAt);
-    lines.push('', key, `最早 ${first.usedPercent ?? 'unknown'}% → 最新 ${last.usedPercent ?? 'unknown'}%（变化 ${delta}）`, `最新剩余 ${last.remainingPercent ?? 'unknown'}%，${resetLabel(last.resetsAt)}`, ...(crossedReset?['期间跨过额度重置；快照变化不代表实际消费量。']:[]));
-  }
+  return {view,text,help:false};
+}
+const HELP='用法：/usage [daily|weekly|cumulative] [--text]\n\n/usage：Codex 原生额度 + 每日活动热力图\n/usage weekly：每周 Token 活动\n/usage cumulative：累计 Token 活动\n/usage text：完整文字结果\n\n数据与 Codex /status、/usage 相同；只美化图片，不另行统计或估算费用。';
+export function compactTokens(value: number | null | undefined): string {
+  if(value==null || !Number.isFinite(value))return '—';
+  for(const [scale,suffix] of [[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'K']] as const)
+    if(value>=scale)return `${Number((value/scale).toPrecision(3))}${suffix}`;
+  return String(Math.round(value));
+}
+export function nativeLimitRows(snapshot: NativeUsageSnapshot) {
+  const response=snapshot.rateLimits;
+  const buckets=response?.rateLimitsByLimitId;
+  const limits=buckets && Object.keys(buckets).length ? Object.entries(buckets).sort(([a],[b])=>a.localeCompare(b))
+    : response?.rateLimits ? [[response.rateLimits.limitId || 'codex',response.rateLimits] as const] : [];
+  return limits.flatMap(([id,limit])=>[limit.primary,limit.secondary].filter((w): w is NativeLimitWindow=>Boolean(w)).map(window=>{
+    const minutes=window.windowDurationMins;
+    const duration=minutes===10080?'Weekly':minutes===300?'5h':minutes!=null?`${minutes}m`:'Usage';
+    const label=`${id==='codex'?'':`${limit.limitName || id} `}${duration} limit`;
+    return {label,percentLeft:Number.isFinite(window.usedPercent)?Math.max(0,Math.min(100,100-window.usedPercent)):null,resetAt:window.resetsAt};
+  }));
+}
+export function nativeResetLabel(seconds: number | null | undefined) {
+  if(seconds==null || !Number.isFinite(seconds))return '—';
+  return new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(seconds*1000));
+}
+export function nativeSummaryLine(usage: NativeUsage | null) {
+  const s=usage?.summary;
+  const minutes=s?.longestRunningTurnSec==null?'—':`${Math.floor(s.longestRunningTurnSec/60)}m`;
+  return `Lifetime ${compactTokens(s?.lifetimeTokens)} · Peak ${compactTokens(s?.peakDailyTokens)} · Streak ${s?.currentStreakDays??'—'}d (best ${s?.longestStreakDays??'—'}d) · Longest task ${minutes}`;
+}
+export function renderNativeUsageText(snapshot: NativeUsageSnapshot, view: UsageView, now = new Date()): string {
+  const account=snapshot.account?.account;
+  const lines=['Codex /status',`Account: ${account?.email || account?.type || '—'}${account?.planType?` (${account.planType})`:''}`];
+  for(const row of nativeLimitRows(snapshot))lines.push(`${row.label}: ${row.percentLeft==null?'—':`${Math.round(row.percentLeft)}% left`} · resets ${nativeResetLabel(row.resetAt)} (UTC+08:00)`);
+  if(!snapshot.rateLimits)lines.push('Rate limits unavailable');
+  const resets=snapshot.rateLimits?.rateLimitResetCredits?.availableCount;
+  if(resets!=null)lines.push(`Usage limit resets available: ${resets}`);
+  lines.push('',`Codex /usage ${view} · last 12 months`,nativeSummaryLine(snapshot.usage));
+  const series=buildNativeUsageSeries(snapshot.usage,now);
+  if(!series)lines.push('Token activity unavailable');
+  else if(view==='daily')for(const day of series.days.filter(day=>day.tokens>0))lines.push(`${day.date}: ${day.tokens.toLocaleString('en-US')} tokens`);
+  else for(const week of series.weeks.filter(week=>view==='cumulative'?week.cumulative>0:week.tokens>0))lines.push(`${week.date}: ${(view==='cumulative'?week.cumulative:week.tokens).toLocaleString('en-US')} tokens`);
+  lines.push('',`Updated ${new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'short'}).format(now)} (UTC+08:00)`);
   return lines.join('\n');
 }
-
-function accountName(response?: UsageResponse) {
-  const account = response?.account ?? response?.accountInfo ?? response?.account_info ?? {};
-  for (const value of [account.email, account.name, account.displayName, response?.email, response?.accountEmail]) {
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
+export function buildNativeUsageSeries(usage: NativeUsage | null, now = new Date()) {
+  if(!Array.isArray(usage?.dailyUsageBuckets))return null;
+  // Codex's activity grid and weekly view use Sunday-based weeks. Keep the
+  // server's calendar dates; do not regroup request timestamps in a new zone.
+  const today=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+  const endSunday=today-new Date(today).getUTCDay()*86400000;
+  const start=endSunday-52*7*86400000;
+  const buckets=new Map(usage.dailyUsageBuckets.map(row=>[row.startDate,row.tokens]));
+  const days=[];
+  for(let time=start;time<=today;time+=86400000){const date=new Date(time).toISOString().slice(0,10);days.push({date,tokens:buckets.get(date)||0});}
+  let cumulative=0;
+  const weeks=[];
+  for(let i=0;i<days.length;i+=7){const tokens=days.slice(i,i+7).reduce((sum,day)=>sum+day.tokens,0);cumulative+=tokens;weeks.push({date:days[i].date,tokens,cumulative});}
+  return {days,weeks};
 }
-
-function isSparkLimit(limit: UsageLimit) { return limit.name === 'GPT-5.3-Codex-Spark' || limit.id === 'spark'; }
-function ordinaryCodexLimits(snapshot: UsageSnapshot) { return (snapshot.limits || []).filter(limit => !isSparkLimit(limit)); }
-
-function cardWindowName(limit: UsageLimit, window: UsageWindow) {
-  const minutes = window.windowDurationMins;
-  const duration = minutes === null ? 'unknown' : minutes >= 10080 && minutes % 10080 === 0 ? 'weekly' : minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60}_hour` : `${minutes ?? 'unknown'}_minute`;
-  return duration === 'weekly' ? 'weekly' : duration === '5_hour' ? 'five_hour' : duration;
-}
-
-function isoReset(seconds: number | null) {
-  if (seconds === null) return undefined;
-  const date = new Date(seconds > 1e11 ? seconds : seconds * 1000);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
-function usageStatusForCard(snapshot: UsageSnapshot, limits?: UsageLimit[]): CodexUsageStatus {
-  const selected = limits || ordinaryCodexLimits(snapshot);
-  const windows = selected.flatMap(limit => (limit.windows || []).map(window => ({
-    name: cardWindowName(limit, window),
-    percentLeft: window.remainingPercent === null ? undefined : window.remainingPercent,
-    resetAt: isoReset(window.resetsAt),
-  })));
-  const creditLines = selected.flatMap(limit => {
-    if (!limit.credits) return [];
-    if (limit.credits.unlimited) return [`${limit.id.toUpperCase()} UNLIMITED`];
-    // A reported balance of 0 is a real value and must be shown.
-    if (limit.credits.balance !== null) return [`${limit.id.toUpperCase()} ${limit.credits.balance}`];
-    return [];
-  });
-  return {
-    accountId: 'ACCOUNT UNKNOWN',
-    accountName: accountName(snapshot.source),
-    plan: selected.find(limit => limit.id === 'codex')?.planType ?? selected.find(limit => limit.planType)?.planType ?? undefined,
-    windows,
-    credits: creditLines.length ? creditLines.join('  ') : undefined,
-  };
-}
-
-function costHistoryPath(dataDir: string) { return join(dataDir, 'usage', 'cost-history.json'); }
-const compact = (value: number) => value >= 1_000_000_000 ? `${(value / 1_000_000_000).toFixed(1)}B` : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : String(Math.round(value));
-
-function buildCodexCostTrend(native: NativeTrend | null) {
-  if (!native) return null;
-  const firstObserved = native.points.findIndex(point => point.total_tokens !== null);
-  const points = firstObserved >= 0 ? native.points.slice(firstObserved) : native.points;
-  const first = points[0].timestamp, latest = points.at(-1)!.timestamp;
-  return { days: points.length, points, total_cost: points.reduce((sum, point) => sum + (point.cost_total || 0), 0), peak_cost: Math.max(0, ...points.map(point => point.cost_total || 0)), title: `USAGE VALUE ${first.slice(5).replace('-', '/')}-${latest.slice(5).replace('-', '/')} - DAILY`, secondary: `CODEX STANDARD EST${native.partial ? ' PARTIAL' : ''}  TODAY SO FAR`, footer: `LOCAL CODEX - ${native.unpricedRequests} UNPRICED - PRICES ${native.pricing.checkedAt.slice(5).replace('-', '/')}`, partial: native.partial };
-}
-
-function pngCard(snapshot: UsageSnapshot, trend: CostTrend, limits?: UsageLimit[]) {
-  return renderCodexUsageCardPng(usageStatusForCard(snapshot, limits), { trend: trend || undefined, trendTitle: trend?.title, trendSecondary: trend?.secondary, trendFooter: trend?.footer });
-}
-
-async function writeCard(dataDir: string, snapshot: UsageSnapshot, trend: CostTrend, limits: UsageLimit[], suffix = '') {
-  const directory = join(dataDir, 'usage', 'cards');
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const path = join(directory, `codex-usage-${snapshot.observedAt.replace(/[^0-9A-Za-z]/g, '')}${suffix}.png`);
-  await writeFile(path, pngCard(snapshot, trend, limits), { mode: 0o600 });
-  const stale = (await readdir(directory)).filter(name => name.endsWith('.png') && name !== basename(path)).sort().slice(0, -7);
-  await Promise.all(stale.map(name => rm(join(directory, name), { force: true })));
-  return { path, name: basename(path), mimeType: 'image/png' };
-}
-
-export function createCodexUsageProvider({ config = {}, spawnImpl = spawn, timeoutMs = 10_000 }: {config?: CodexConfig; spawnImpl?: typeof spawn; timeoutMs?: number} = {}): UsageProvider {
-  return { async readRateLimits() {
-    const command = Array.isArray(config.command) && config.command.length ? config.command : ['codex'];
-    return new Promise<UsageResponse>((resolve, reject) => {
-      const child = spawnImpl(command[0], [...command.slice(1), 'app-server'], { env: { ...process.env, CODEX_HOME: resolveCodexHome(config.codexHome) }, stdio: ['pipe', 'pipe', 'pipe'] });
-      let buffer = '', settled = false, nextId = 1;
-      const pending = new Map<string, {accept: (value: UsageResponse) => void; decline: (error: Error) => void}>();
-      const finish = (error: unknown, value?: UsageResponse) => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); error ? reject(error) : resolve(value!); };
-      const request = (method: string, params: unknown) => new Promise<UsageResponse>((accept, decline) => {
-        const id = nextId++;
-        pending.set(String(id), { accept, decline });
-        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
-      });
-      const timer = setTimeout(() => finish(new Error('Codex usage read timed out')), timeoutMs);
-      child.stderr.on('data', () => {});
-      child.stdin.on('error', () => finish(new Error('Codex usage provider unavailable')));
-      child.stdout.on('error', () => finish(new Error('Codex usage provider unavailable')));
-      child.stdout.on('data', chunk => {
-        buffer += chunk.toString();
-        if (buffer.length > 1024 * 1024) return finish(new Error('Codex usage provider returned an oversized response'));
-        const lines = buffer.split('\n'); buffer = lines.pop() || '';
-        for (const line of lines) {
-          let message: {id?: string | number; error?: {message?: string}; result: UsageResponse}; try { message = JSON.parse(line); } catch { continue; }
-          const entry = pending.get(String(message.id)); if (!entry) continue;
-          pending.delete(String(message.id));
-          if (message.error) entry.decline(new Error(message.error.message || 'Codex usage read failed'));
-          else entry.accept(message.result);
-        }
-      });
-      child.once('error', error => finish(error));
-      child.once('exit', () => { if (!settled) finish(new Error('Codex usage provider unavailable')); });
-      (async () => {
-        try {
-          await request('initialize', { clientInfo: { name: 'rin-chat', title: 'Rin chat', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } });
-          const [limits, account] = await Promise.all([
-            request('account/rateLimits/read', undefined),
-            // Identity is optional presentation metadata. Quota reading remains
-            // usable on app-server versions that do not expose account/read.
-            request('account/read', undefined).catch(() => null),
-          ]);
-          finish(null, account && typeof account === 'object' ? { ...limits, account: account.account && typeof account.account === 'object' ? account.account : account as AccountInfo } : limits);
-        } catch (error) { finish(error); }
-      })();
-    });
-  } };
-}
-
-export async function migrateLegacyCostHistory({ dataDir, legacyDbPath, spawnImpl = spawn }: {dataDir?: string; legacyDbPath?: string; spawnImpl?: typeof spawn} = {}) {
-  if (!dataDir || !legacyDbPath) throw new Error('dataDir and legacyDbPath are required');
-  const query = "SELECT strftime('%Y-%m-%d', timestamp, 'localtime') AS date, SUM(cost_total) AS cost_total, SUM(total_tokens) AS total_tokens, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens, COUNT(*) AS rows FROM telemetry_events WHERE timestamp IS NOT NULL AND cost_total IS NOT NULL GROUP BY date ORDER BY date";
-  const output = await new Promise<string>((resolve, reject) => {
-    const child = spawnImpl('sqlite3', ['-readonly', '-json', legacyDbPath, query], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '';
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.once('error', reject);
-    child.once('exit', code => code === 0 ? resolve(stdout) : reject(new Error(`legacy usage migration failed${stderr ? `: ${stderr.trim()}` : ''}`)));
-  });
-  let rows;
-  try { rows = JSON.parse(output); } catch { throw new Error('legacy usage migration returned invalid JSON'); }
-  const points = Array.isArray(rows) ? rows.filter(row => typeof row?.date === 'string' && Number.isFinite(Number(row.cost_total)) && Number(row.cost_total) >= 0).map(row => ({ date: row.date, cost_total: Number(row.cost_total), total_tokens: Number(row.total_tokens) || 0, input_tokens: Number(row.input_tokens) || 0, output_tokens: Number(row.output_tokens) || 0, cache_read_tokens: Number(row.cache_read_tokens) || 0, cache_write_tokens: Number(row.cache_write_tokens) || 0, rows: Number(row.rows) || 0 })) : [];
-  const directory = join(dataDir, 'usage');
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const destination = costHistoryPath(dataDir);
-  // The copied JSON is independent of old Rin. This function never writes to its source DB.
-  await writeFile(destination, JSON.stringify({ version: 1, source: 'legacy-rin-usage-db', migratedAt: new Date().toISOString(), points }, null, 2), { mode: 0o600 });
-  return { path: destination, points: points.length };
-}
-
-export async function executeUsage(args = '', { config = {}, dataDir, provider, now = () => new Date() }: {config?: CodexConfig; dataDir?: string; provider?: UsageProvider; now?: () => Date} = {}): Promise<ChatOutput> {
-  if (!dataDir) throw new Error('usage dataDir required');
+export async function executeUsage(args = '', {config = {},dataDir,provider,now = ()=>new Date()}: {config?: CodexConfig;dataDir?: string;provider?: UsageProvider;now?: ()=>Date} = {}): Promise<ChatOutput> {
+  if(!dataDir)throw new Error('usage dataDir required');
   let options;
-  try { options=parseUsageArgs(args); }
-  catch(error) { return { text: `${error instanceof Error?error.message:String(error)}\n\n${usageHelp()}` }; }
-  if (options.mode === 'help') return { text: usageHelp() };
-  if (options.mode === 'legacy-tokens') return { text: `旧 token telemetry 不可用：它依赖已移除的 Pi 事件流和旧数据库。请使用 /usage history 查看 Rin 新记录的额度快照。\n\n${usageHelp()}` };
-  if (options.mode === 'history') {
-    const rows = await readHistory(dataDir, options.days, now());
-    if (!options.json) return { text: renderHistory(rows, options.days) };
-    const directory = join(dataDir, 'usage', 'reports');
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    const path = join(directory, `history-${new Date(now()).toISOString().replace(/[^0-9A-Za-z]/g,'')}.json`);
-    const reportRows = rows.map(row => ({ ...row, limits: ordinaryCodexLimits(row) }));
-    await writeFile(path, JSON.stringify({ days: options.days, snapshots: reportRows }, null, 2), { mode: 0o600 });
-    return { text: rows.length ? `已导出最近 ${options.days} 天的 ${rows.length} 次额度快照。` : `最近 ${options.days} 天的历史数据 unknown；已导出空报告。`, files: [{ path, name: basename(path), mimeType: 'application/json' }] };
-  }
-  const source = provider || createCodexUsageProvider({ config });
-  const snapshot = normalizeUsageResponse(await source.readRateLimits(), now());
-  let tokenTrend: NativeTrend | null = null, tokenError = false;
-  try { tokenTrend = await readCodexTokenTrend({ codexHome: config.codexHome, dataDir, now: now() }); }
-  catch { tokenError = true; }
-  const trend = buildCodexCostTrend(tokenTrend);
-  await appendSnapshot(dataDir, { observedAt: snapshot.observedAt, limits: snapshot.limits });
-  let text = renderCurrentUsage(snapshot);
-  if (trend && tokenTrend) {
-    const unpriced = Object.entries(tokenTrend.unpricedModels).map(([model, count]) => `${model}: ${count}`).join('，');
-    text += `\n\nUSD-equivalent 历史：${trend.points[0].timestamp} 至 ${trend.points.at(-1)!.timestamp} 的 ${trend.days} 天记录（${trend.secondary}）。按真实逐请求 tokens、记录中的模型及 ${tokenTrend.pricing.checkedAt} 官方 Standard API 价估值，不是订阅扣费。未定价 ${tokenTrend.unpricedRequests} 次${unpriced ? `（${unpriced}）；图中金额仅含已定价请求` : ''}。`;
-    text += `\n\n本地 Codex tokens：已记录 ${tokenTrend.points.some(point => point.total_tokens !== null) ? compact(tokenTrend.total_tokens) : 'unknown'} tokens${tokenTrend.pendingFiles || tokenTrend.warnings.length ? '（索引尚不完整，当前为部分统计）' : ''}。按北京时间归日，今天为截至当前的记录；包含缓存输入，缺失日期为 unknown；账户归属 unknown。`;
-  } else {
-    text += `\n\nUSD-equivalent 历史及本地 Codex tokens unknown${tokenError ? '：索引暂不可用' : ''}。`;
-  }
-  if (options.mode === 'text') return { text };
+  try {options=parseUsageArgs(args);}catch(error){return {text:`${(error as Error).message}\n\n${HELP}`};}
+  if(options.help)return {text:HELP};
+  let snapshot;
+  try {snapshot=await (provider || createCodexUsageProvider({config})).read();}
+  catch{return {text:'Codex 原生用量暂不可用，请稍后重试。'};}
+  const observed=now(),text=renderNativeUsageText(snapshot,options.view,observed);
+  if(options.text)return {text};
   try {
-    const files = [await writeCard(dataDir, snapshot, trend, ordinaryCodexLimits(snapshot))];
-    return { files, fallbackText: text };
-  }
-  catch { return { text: `${text}\n\n额度卡片生成失败，以上为完整文字结果。` }; }
+    const directory=join(dataDir,'usage','cards');await mkdir(directory,{recursive:true,mode:0o700});
+    const path=join(directory,`native-${observed.getTime()}-${randomUUID()}.png`);
+    await writeFile(path,renderNativeUsagePng(snapshot,{view:options.view,now:observed}),{mode:0o600});
+    // Card files are presentation artifacts, never a parallel usage database.
+    const previous=(await readdir(directory)).filter(name=>name.startsWith('native-') && name.endsWith('.png')).sort().slice(0,-24);
+    await Promise.all(previous.map(name=>rm(join(directory,name),{force:true})));
+    return {files:[{path,name:basename(path),mimeType:'image/png'}],fallbackText:text};
+  } catch {return {text};}
 }

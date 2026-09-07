@@ -53,7 +53,7 @@ Discord、Telegram 有编辑能力时使用共享进度消息；异步提问切�
 
 ### 统一命令与可选安装配置
 
-聊天命令的当前目录默认含 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。旧桥的目录曾由运行时动态提供，不能把这两个当前内建命令当作旧目录的完整历史。五种适配器共用显式 `allowUsers` 准入，不恢复旧身份库、主人角色或频道白名单；`dmOnly` 只控制普通消息路由，已注册文字命令可在群内裸发，不再要求提及。未知的斜杠文字在准入后的私聊回复帮助提示，在群聊静默；`/name@其他机器人` 不会执行本机命令。`privateOnly` 只限制结果呈现场景。额度走 Codex 只读接口，提供 PNG、完整文字及新采样历史；每日用量曲线仅按本地 Codex 逐请求 token、模型与已核验 Standard API 价估值，增量索引 active/archived rollout，未知日期留空、未定价请求标明 partial，不读取或合并旧 token/cost 数据。普通消息 `bindings` 路由保持独立。
+聊天命令的当前目录默认含 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。旧桥的目录曾由运行时动态提供，不能把这两个当前内建命令当作旧目录的完整历史。五种适配器共用显式 `allowUsers` 准入，不恢复旧身份库、主人角色或频道白名单；`dmOnly` 只控制普通消息路由，已注册文字命令可在群内裸发，不再要求提及。未知的斜杠文字在准入后的私聊回复帮助提示，在群聊静默；`/name@其他机器人` 不会执行本机命令。`privateOnly` 只限制结果呈现场景。额度及活动直接读取 Codex 原生 account/read、account/rateLimits/read、account/usage/read，只美化 PNG；提供 daily、weekly、cumulative 和文字视图。原生摘要不重算，不另建统计库、不按 API 价格估值，不读取旧历史。普通消息 `bindings` 路由保持独立。
 
 平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 

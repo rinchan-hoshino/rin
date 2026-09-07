@@ -2,7 +2,7 @@ import type { CommandDescriptor, CommandContext, ChatCommand, ChatOutput, Logger
 // One command contract for text ingress and platform menus.
 export const COMMANDS = Object.freeze([
   {name:'help',description:'Show available commands'},
-  {name:'usage',description:'Show account usage',argument:'Options: current, history, card, text, --help'},
+  {name:'usage',description:'Show account usage',argument:'Options: daily, weekly, cumulative, text, --help'},
 ]);
 export interface ParsedCommandText { commandLike: true; name: string; args: string; target?: string; registered: boolean; }
 
