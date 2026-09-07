@@ -1,107 +1,26 @@
-import type { ChildProcess } from 'node:child_process';
-interface CreateResponse {thread?: {id?: string};}
-interface CreateError extends Error {code?: string; threadId?: string;}
-import { spawn } from 'node:child_process';
+import type { CodexAppServer } from '../codex-app-server.js';
 
-// A short-lived creation transport. Existing threads remain owned by the App;
-// this client never submits a turn or retries a thread/start mutation.
-export function createCodexThread({ command, codexHome, timeoutMs, children, cwd, model, name }: {command: string[]; codexHome?: string; timeoutMs: number; children: Set<ChildProcess>; cwd: string; model?: string; name?: string}) {
-  return new Promise<string>((resolve, reject) => {
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$)/i.test(key)));
-    if (codexHome) env.CODEX_HOME = codexHome;
-    const child = spawn(command[0], [...command.slice(1), 'app-server', '--stdio'], {
-      env, stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    children.add(child);
-    let buffer = '', nextId = 1, settled = false, closed = false, creationSent = false;
-    let threadId: string | undefined;
-    let pending: {id: number; accept: (value: CreateResponse) => void; decline: (error: Error) => void} | undefined;
-    const closeWaiters: (() => void)[] = [];
-    const close = () => new Promise<void>(done => {
-      if (closed) return done();
-      const terminate = setTimeout(() => child.kill('SIGTERM'), 250);
-      const force = setTimeout(() => child.kill('SIGKILL'), 1_000);
-      closeWaiters.push(() => { clearTimeout(terminate); clearTimeout(force); done(); });
-      child.stdin.end();
-    });
-    const finish = (cause: unknown, value?: string) => {
-      const error = cause as CreateError | null;
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        error.code = creationSent ? 'CODEX_THREAD_CREATE_UNCERTAIN' : 'CODEX_THREAD_CREATE_FAILED';
-        if (threadId) error.threadId = threadId;
-        else if (creationSent) error.message += '; thread creation outcome uncertain';
-      }
-      void close().then(() => error ? reject(error) : resolve(value!));
-    };
-    const timer = setTimeout(() => finish(new Error('Codex thread creation timed out')), timeoutMs);
-    const request = (method: string, params: unknown) => new Promise<CreateResponse>((accept, decline) => {
-      if (settled) return decline(new Error('Codex thread creation connection closed'));
-      const id = nextId++;
-      pending = { id, accept, decline };
-      if (method === 'thread/start') creationSent = true;
-      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
-    });
-    child.stderr.on('data', () => {});
-    child.stdin.on('error', () => finish(new Error('Codex thread creation input failed')));
-    child.stdout.on('error', () => finish(new Error('Codex thread creation output failed')));
-    child.once('error', error => finish(error));
-    child.once('close', (code, signal) => {
-      closed = true;
-      children.delete(child);
-      for (const done of closeWaiters) done();
-      finish(new Error(`Codex thread creation connection closed (${signal || code})`));
-    });
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', chunk => {
-      if (settled) return;
-      buffer += chunk;
-      if (buffer.length > 4 * 1024 * 1024) return finish(new Error('Codex thread creation response too large'));
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (settled) break;
-        if (!line.trim()) continue;
-        let message: {id?: number; method?: string; error?: {message?: string}; result: CreateResponse};
-        try { message = JSON.parse(line); }
-        catch { finish(new Error('Invalid Codex thread creation response')); break; }
-        if (!message || typeof message !== 'object') {
-          finish(new Error('Invalid Codex thread creation response')); break;
-        }
-        if (!pending || message.id !== pending.id || message.method) continue;
-        const entry = pending;
-        pending = undefined;
-        if (message.error) entry.decline(new Error(message.error.message || 'Codex thread creation rejected'));
-        else entry.accept(message.result);
-      }
-    });
-    void (async () => {
-      try {
-        await request('initialize', {
-          clientInfo: { name: 'rin-chat', title: 'Rin chat', version: '1' },
-          capabilities: { experimentalApi: true, requestAttestation: false },
-        });
-        if (settled) return;
-        child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
-        const result = await request('thread/start', { cwd, ...(model ? { model } : {}), ephemeral: false });
-        if (typeof result?.thread?.id !== 'string' || !result.thread.id.trim()) {
-          throw new Error('Codex thread creation returned no thread ID');
-        }
-        // An empty thread/start is not durably resumable after this client exits.
-        // Persist the bridge's routing contract without a user message or turn.
-        // Only expose a usable ID after this write has been acknowledged.
-        const createdId = result.thread.id;
-        await request('thread/inject_items', { threadId: createdId, items: [{
-          type: 'message', role: 'developer', content: [{ type: 'input_text', text:
-            'This task receives messages through the Rin chat bridge. Ordinary assistant replies are automatically delivered to the bound chat; do not send a second copy with external messaging tools.',
-          }],
-        }] });
-        threadId = createdId;
-        if (name) await request('thread/name/set', { threadId, name });
-        finish(null, threadId);
-      } catch (error) { finish(error); }
-    })();
-  });
+/** Creation and submission use the same shared server. No private stdio host. */
+export async function createCodexThread({server, cwd, model, name}: {server: CodexAppServer; cwd: string; model?: string; name?: string}) {
+  let sent = false;
+  let threadId: string | undefined;
+  try {
+    await server.connect();
+    sent = true;
+    const result = await server.request<{thread?: {id?: string}}>('thread/start', {cwd, ...(model ? {model} : {})});
+    const id = result?.thread?.id;
+    if (!id) throw new Error('Codex thread creation returned no thread ID');
+    // Persist an empty routing task without running a model turn.
+    await server.request('thread/inject_items', {threadId: id, items: [{type: 'message', role: 'developer', content: [{type: 'input_text', text:
+      'This task receives messages through the Rin chat bridge. Ordinary assistant replies are automatically delivered to the bound chat; do not send a second copy with external messaging tools.',
+    }]}]});
+    threadId = id;
+    if (name) await server.request('thread/name/set', {threadId, name});
+    return threadId;
+  } catch (cause) {
+    const error = cause as Error & {code?: string; threadId?: string};
+    error.code = sent ? 'CODEX_THREAD_CREATE_UNCERTAIN' : 'CODEX_THREAD_CREATE_FAILED';
+    if (threadId) error.threadId = threadId;
+    throw error;
+  }
 }

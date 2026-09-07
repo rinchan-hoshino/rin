@@ -2,9 +2,8 @@ import type { CodexEvent } from './types.js';
 interface HistoryRow {thread_id: string; turn_id: string; item_id: string; status: string; rollout_ordinal: number; updated_at_ordinal: number; error_json: string; item_type: string; client_message_id?: string; agent_text?: string; agent_delivery?: string; has_questions?: number; agent_phase?: string; summary_json?: string; image_status?: string; image_path?: string;}
 interface ObserverCursor {activeTurns?: {turnId: string; status?: string}[]; turnHighWater: number; itemHighWater: number;}
 interface Watcher {stop(): void; unsubscribe(): void;}
-interface BridgeOptions {command?: string[]; codexHome?: string; onEvent?: (event: CodexEvent) => void; getCursor?: (key: string) => unknown; setCursor?: (key: string, value: unknown) => void; pollMs?: number; queueTimeoutMs?: number; appSteering?: boolean; appWake?: boolean; wakeApp?: (threadId: string) => Promise<unknown>;}
-import { CodexInput } from '../codex-input.js';
-import { wakeCodexApp } from '../codex-app-wake.js';
+interface BridgeOptions extends CodexInputOptions {onEvent?: (event: CodexEvent) => void; getCursor?: (key: string) => unknown; setCursor?: (key: string, value: unknown) => void; pollMs?: number;}
+import { CodexInput, type CodexInputOptions } from '../codex-input.js';
 import { createCodexThread } from './codex-thread-create.js';
 import { DatabaseSync } from 'node:sqlite';
 import { join, resolve } from 'node:path';
@@ -37,18 +36,11 @@ function visibleItem(row: HistoryRow) {
   return null;
 }
 
-/**
- * Thin bridge to Codex App threads, with a short-lived creation client.
- *
- * Optional App IPC submits input and can load an unowned task through its App URL. Until the desktop
- * shared daemon exposes a working subscriber handshake, watch() uses a pinned,
- * read-only observer for the 0.153.x paginated history schema. It never starts
- * a second app-server or takes ownership of an existing thread.
- */
+/** Shared app-server input with a durable, read-only chat delivery observer. */
 export class CodexBridge extends CodexInput {
   onEvent: (event: CodexEvent) => void; getCursor?: (key: string) => unknown; setCursor?: (key: string, value: unknown) => void; pollMs: number; watchers: Map<string, Watcher>;
-  constructor({ command = ['codex'], codexHome = join(homedir(), '.codex'), onEvent = () => {}, getCursor, setCursor, pollMs = 500, queueTimeoutMs = 30_000, appSteering = false, appWake = false, wakeApp = wakeCodexApp }: BridgeOptions = {}) {
-    super({ command, codexHome, queueTimeoutMs, appSteering, appWake, wakeApp });
+  constructor({ command = ['codex'], codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'), onEvent = () => {}, getCursor, setCursor, pollMs = 500, queueTimeoutMs = 30_000, endpoint }: BridgeOptions = {}) {
+    super({ command, codexHome, queueTimeoutMs, endpoint });
     if (typeof onEvent !== 'function') throw new Error('onEvent function required');
     if (!Number.isFinite(pollMs) || pollMs < 10) throw new Error('pollMs must be at least 10');
     this.onEvent = onEvent;
@@ -64,8 +56,7 @@ export class CodexBridge extends CodexInput {
     const directory = resolve(requiredText(cwd, 'cwd'));
     const selectedModel = model === undefined ? undefined : requiredText(model, 'model');
     const title = name === undefined ? undefined : requiredText(name, 'name');
-    return createCodexThread({ command: this.command, codexHome: this.codexHome,
-      timeoutMs: this.queueTimeoutMs, children: this.children, cwd: directory, model: selectedModel, name: title });
+    return createCodexThread({ server: this.server, cwd: directory, model: selectedModel, name: title });
   }
 
   async stop() {

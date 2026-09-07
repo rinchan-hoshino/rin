@@ -7,7 +7,7 @@ export interface ChatOutput { text?: string; files?: FileAttachment[]; editId?: 
 export interface Binding extends ChatTarget { adapter: string; threadId: string; kind: ChatKind; mirror: boolean; }
 export interface AutoBind { cwd: string; model?: string; excludedChatIds?: string[]; }
 export interface AdapterConfig { id: string; type: string; enabled?: boolean; allowUsers: string[]; /** Explicit historic owner identities used only for private-like membership proofs. */ ownerUsers?: string[]; dmOnly?: boolean; requireMention?: boolean; autoBind?: AutoBind | false; token?: string; tokenEnv?: string; appId?: string; appSecret?: string; appSecretEnv?: string; url?: string; accessToken?: string; accessTokenEnv?: string; [key: string]: unknown; }
-export interface CodexConfig { command?: string[]; codexHome?: string; timeoutMs?: number; pollMs?: number; }
+export interface CodexConfig { queueTimeoutMs?: number; endpoint?: string; command?: string[]; codexHome?: string; timeoutMs?: number; pollMs?: number; }
 export interface ChatConfig { dataDir: string; adapters: AdapterConfig[]; bindings: Binding[]; codex?: CodexConfig; attachmentRoots?: string[]; display?: {working?: WorkingConfig; summaries?: boolean}; commands?: {directory?: string}; }
 export interface WorkingConfig { frames?: string[]; text?: string; intervalMs?: number; }
 export interface Logger { info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void; }

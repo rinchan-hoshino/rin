@@ -55,7 +55,7 @@ node src/daemon.mjs /absolute/path/to/private/daemon.json
 
 产品源码使用严格 TypeScript（`src/**/*.ts`），`npm run typecheck` 检查类型，`npm run build` 生成 `dist/`。测试会先重新编译；安装和更新也会安装构建依赖并完成编译、回归后再切换版本。少量 `src/*.mjs` 入口只负责兼容已有启动器，不包含产品实现。
 
-Codex App 路径依赖已核对的内部 IPC 与只读历史投影，目前锁定 0.153.x / paginated 模式。`appSteering` 和 `appWake` 为显式开关；自动唤醒目前仅支持 macOS。默认 CLI queue 的成功回执只代表排队，不保证未加载任务立即执行。版本升级或协议变化需要重新验证。
+聊天桥与触发器共用 Codex app-server：连接已有服务，默认本机入口不存在时直接启动原生服务。输入不覆盖模型、工作目录或权限；App 可通过 SSH 连接同一主机，TUI 可通过 `--remote` 接入。聊天输出仍使用已核验的 0.153.x / paginated 只读历史投影，保留续传与去重；版本升级需重新验证。
 
 ## 能力边界
 
@@ -66,6 +66,6 @@ Discord 的直接桥接和注意力模式、QQ 官方群文字与图片入站已
 - [旧版能力差距与验证边界](docs/chat-parity-audit.md)
 - [保留的呈现行为与来源](docs/legacy-render-audit.md)
 - [Nerve 配置与 MCP](docs/nerve.md)
-- [实验性 Codex App 接入](docs/codex-app-steering.md)
+- [Codex 共享服务接入](docs/codex-app-steering.md)
 
 源码与运行部署分开；提交代码不会自动替换正在运行的服务。GPL-3.0，见 [LICENSE](LICENSE)。

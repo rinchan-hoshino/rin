@@ -1,6 +1,6 @@
 {
   "dataDir": "chat-data",
-  "codex": {"command": ["codex"], "appSteering": false},
+  "codex": {"command": ["codex"]},
   "display": {"summaries": true},
   "adapters": [
     {"id":"discord","type":"discord","enabled":false,"token":"","allowUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}},

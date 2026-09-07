@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 /** A command target for generic event producers; exits at host admission. */
-export async function submitEvent(threadId:string,event:{id:string;payload:{prompt:string}},bridge=new CodexInput({appSteering:true,appWake:true})) {
+export async function submitEvent(threadId:string,event:{id:string;payload:{prompt:string}},bridge=new CodexInput()) {
   if(!threadId || !/^[\da-f-]{36}$/i.test(threadId))throw new Error('An existing task UUID is required');
   if(typeof event.id!=='string' || typeof event.payload?.prompt!=='string' || !event.payload.prompt.trim())throw new Error('Event id and payload.prompt required');
   let submitted=false;
@@ -18,6 +18,6 @@ export async function submitEvent(threadId:string,event:{id:string;payload:{prom
 export async function main() {
   let input='';
   for await(const chunk of process.stdin){input+=chunk;if(Buffer.byteLength(input)>1048576)throw new Error('Input too large');}
-  process.stdout.write(JSON.stringify(await submitEvent(process.argv[2],JSON.parse(input)))+'\n');
+  process.stdout.write(JSON.stringify(await submitEvent(process.argv[2],JSON.parse(input),new CodexInput({endpoint:process.argv[3]})))+'\n');
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(error=>{console.error(error.message);process.exitCode=1;});

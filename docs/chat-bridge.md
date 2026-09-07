@@ -24,7 +24,7 @@ QQ 官方平台使用 OpenID，不能把普通 QQ 数字号或 OneBot 用户 ID 
 
 ## 输入、公开输出与附件
 
-输入通过持久收件箱投递。默认原生 `codex queue` 只保证排队；显式开启 `codex.appSteering` 后可通过 App IPC start/steer，`appWake` 可加载未打开任务。目前自动加载仅支持 macOS，且可能显示目标任务窗口。
+输入通过持久收件箱投递到共享 app-server。已有任务通过 `thread/resume` 加载或重连，再调用 `turn/start`；Codex 原生决定开始新轮次或向运行中的轮次追加输入。Rin 不覆盖模型、工作目录、沙箱和审批设置。默认入口不存在时启动原生 app-server，Rin 关闭时只断开客户端。`codex.endpoint` 可指定已有的同机共享入口；旧 `appSteering`/`appWake` 字段已无作用，可删除。详见 [共享服务](codex-app-steering.md)。
 
 观察器只读 `state_5.sqlite` 与 `thread_history_1.sqlite`，只接受已核对的 0.153.x / paginated 结构。提取公开文字、公开摘要和完成的 `imageGeneration.savedPath`，不提取图片结果中的提示词/base64、工具输出或私有推理；不修改 Codex 数据库。不兼容时停止该任务观察与新提交。
 
