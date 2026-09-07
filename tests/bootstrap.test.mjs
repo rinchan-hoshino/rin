@@ -12,7 +12,11 @@ const missing=path=>access(path).then(()=>false,()=>true);
 
 async function executable(path,body) { await writeFile(path,`#!/bin/sh\nset -eu\n${body}\n`);await chmod(path,0o755); }
 
-const runtimeTest=t=>process.platform==='win32'&&t.skip('POSIX bootstrap test');
+const runtimeTest=t=>{
+  if(process.platform!=='win32')return false;
+  t.skip('POSIX bootstrap test');
+  return true;
+};
 
 function command(command,args) { return new Promise((resolveCommand,reject)=>{const child=spawn(command,args,{stdio:'ignore'});child.once('error',reject);child.once('close',code=>code===0?resolveCommand():reject(Error(`${command} failed: ${code}`)));}); }
 
@@ -107,6 +111,8 @@ test('Windows bootstrap retains its local-entry, legacy-runtime exclusion, and v
   const source=await readFile(windowsInstaller,'utf8');
   assert.match(source,/\$rinNodeVersion = '24\.18\.0'/);
   assert.match(source,/\$nodePath\.StartsWith\(\(Join-Path \$env:USERPROFILE '\.rin'\) \+ '\\', \[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(source,/\$nodeVersion = & \$nodeCommand\.Source --version/);
+  assert.doesNotMatch(source,/process\.versions\.node\.split/);
   assert.match(source,/Get-FileHash -LiteralPath \$archivePath -Algorithm SHA256/);assert.match(source,/if \(\$actual -ne \$expected\) \{ throw 'Node\.js archive checksum verification failed\.' \}/);
   assert.match(source,/if \(\$PSScriptRoot -and \(Test-Path \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)\)\) \{\s*& node \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)/s);
 });

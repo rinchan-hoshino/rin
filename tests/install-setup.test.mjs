@@ -99,13 +99,13 @@ test('file instructions retry after an unreadable path and preserve existing AGE
   assert.equal(await readFile(agents, 'utf8'), 'Existing instructions.\n\nPrefer concrete examples.\n\n');
 });
 
-test('legacy detection identifies its own launcher and leaves unrelated commands alone', async t => {
+test('POSIX legacy detection identifies its own launcher and leaves unrelated commands alone', { skip: process.platform === 'win32' }, async t => {
   const userHome = await temporary(t), bin = join(userHome, '.local/bin'), other = join(userHome, 'other');
   await mkdir(join(userHome, '.rin'), { recursive: true }); await mkdir(bin, { recursive: true }); await mkdir(other);
   await writeFile(join(userHome, '.rin/installer.json'), JSON.stringify({ service: { kind: 'launchd', label: 'com.rin.daemon.example' } }));
   await writeFile(join(bin, 'rin'), `#!/bin/sh\nexec '${join(userHome, '.rin/app/current/dist/app/rin/main.js')}' "$@"\n`);
   await writeFile(join(other, 'rin'), '#!/bin/sh\nprintf unrelated\n');
-  const result = await inspectLegacy({ userHome, env: { PATH: [bin, other].join(process.platform === 'win32' ? ';' : ':') } });
+  const result = await inspectLegacy({ userHome, env: { PATH: [bin, other].join(':') } });
   assert.deepEqual(result.cli, [join(bin, 'rin')]);
   const calls = [];
   await disableLegacy(result, { platform: 'darwin', exec: async (command, args) => { calls.push([command, args]); return { code: args[0] === 'print' ? 113 : 0 }; } });

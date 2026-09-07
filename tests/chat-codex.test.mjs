@@ -36,9 +36,8 @@ const waitFor = async predicate => {
 
 test('read-only observer baselines history and emits only new public output and completion', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const db = historyFixture(dir);
-  t.after(() => db.close());
+  t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
   db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'old', 1, 'completed', null, 1, 2);
   db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
     'thread-one', 'old', 'old-message', 2, 1, JSON.stringify({ type: 'agentMessage', id: 'old-message', text: 'old answer', phase: 'final_answer' }), 'agentMessage', 2,
@@ -93,8 +92,7 @@ test('read-only observer baselines history and emits only new public output and 
 
 test('observer projects the persisted steer input client id and immutable rollout ordinal before later output', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'rin-codex-steer-boundary-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const db = historyFixture(dir);t.after(() => db.close());
+  const db = historyFixture(dir);t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
   db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'physical', 1, 'inProgress', null, 1, null);
   const events=[];const bridge=new CodexBridge({command:['codex'],codexHome:dir,pollMs:10,onEvent:event=>events.push(event)});
   await bridge.start();bridge.watch('thread-one');await new Promise(resolve=>setTimeout(resolve,30));
@@ -144,9 +142,8 @@ test('observer reports live schema drift as a typed event without crashing', asy
 
 test('persistent cursor catches a missed final after observer restart', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const db = historyFixture(dir);
-  t.after(() => db.close());
+  t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
   db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'active', 1, 'inProgress', null, 1, null);
   let cursor;
   const cursorApi = {
@@ -177,11 +174,11 @@ test('persistent cursor catches a missed final after observer restart', async t 
 
 test('async final_answer questions do not terminate the visible output stream', async t => {
   const dir=await mkdtemp(join(tmpdir(),'rin-question-history-'));
-  t.after(()=>rm(dir,{recursive:true,force:true}));
-  const db=historyFixture(dir);t.after(()=>db.close());
+  const db=historyFixture(dir);
   const events=[];
   const bridge=new CodexBridge({codexHome:dir,pollMs:10,onEvent:event=>events.push(event)});
-  await bridge.start();t.after(()=>bridge.stop());bridge.watch('thread-one');
+  t.after(async()=>{await bridge.stop();db.close();await rm(dir,{recursive:true,force:true});});
+  await bridge.start();bridge.watch('thread-one');
   db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one','turn',1,'inProgress',null,1,null);
   const items=[
     {text:'before',phase:'commentary'},
@@ -204,8 +201,8 @@ test('async final_answer questions do not terminate the visible output stream', 
 });
 
 test('observer emits completed image artifacts without exposing image payload or tool output, and resumes once', async t => {
-  const dir=await mkdtemp(join(tmpdir(),'rin-image-history-'));t.after(()=>rm(dir,{recursive:true,force:true}));
-  const db=historyFixture(dir);t.after(()=>db.close());
+  const dir=await mkdtemp(join(tmpdir(),'rin-image-history-'));
+  const db=historyFixture(dir);t.after(async()=>{db.close();await rm(dir,{recursive:true,force:true});});
   const events=[];let cursor;
   const options={codexHome:dir,pollMs:10,onEvent:e=>events.push(e),getCursor:()=>cursor,setCursor:(_k,v)=>{cursor=v;}};
   let bridge=new CodexBridge(options);await bridge.start();bridge.watch('thread-one');

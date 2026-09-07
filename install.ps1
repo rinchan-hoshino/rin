@@ -10,8 +10,14 @@ function Test-Node24 {
   if (-not $nodeCommand) { return $false }
   $nodePath = & $nodeCommand.Source -p 'process.execPath'
   if ($LASTEXITCODE -ne 0 -or $nodePath.StartsWith((Join-Path $env:USERPROFILE '.rin') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
-  & $nodeCommand.Source -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
-  return $LASTEXITCODE -eq 0
+  $nodeVersion = & $nodeCommand.Source --version
+  if ($LASTEXITCODE -ne 0) { return $false }
+  try {
+    $currentNodeVersion = [version]($nodeVersion -replace '^v', '')
+    return $currentNodeVersion -ge [version]'24.0.0'
+  } catch {
+    return $false
+  }
 }
 
 $rinNeedGit = -not [bool](Get-Command git -ErrorAction SilentlyContinue)

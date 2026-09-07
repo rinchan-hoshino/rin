@@ -62,7 +62,7 @@ test('rin-install companion is retired along with rin and Windows startup collis
   const f = await fixture(t);
   await f.put(join(f.userHome, '.rin/installer.json'), JSON.stringify({ installDir: f.root, service: { kind: 'systemd', label: 'rin-daemon-example.service' } }));
   const companion = join(f.binDir, 'rin-install');
-  await f.put(companion, `#!/usr/bin/env sh\nexec '${f.root}/runtime/node/current/bin/node' '${f.root}/app/current/dist/app/rin-install/main.js' "$@"\n`);
+  await f.put(companion, `#!/usr/bin/env sh\nexec '${join(f.root, 'runtime/node/current/bin/node')}' '${join(f.root, 'app/current/dist/app/rin-install/main.js')}' "$@"\n`);
   const result = await inspectLegacy(f); assert.deepEqual(result.cli, [f.cli, companion]);
   await disableLegacy(result, { exec: async () => {} });
   assert.match(await readFile(companion + '.pi-disabled', 'utf8'), /rin-install/);
@@ -71,7 +71,7 @@ test('rin-install companion is retired along with rin and Windows startup collis
   await assert.rejects(disableLegacy({ root: f.root, cli: [], service: { kind: 'windows-startup', servicePath: startup } }, { platform: 'win32', exec: async () => calls++ }), /already exists/);
   assert.equal(calls, 0);
 });
-test('inaccessible cross-user root retires only this users confirmed legacy launchers and metadata', async t => {
+test('inaccessible cross-user root retires only this users confirmed legacy launchers and metadata', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t);
   const metadata = join(f.userHome, '.config/rin/install.json');
   await f.put(metadata, JSON.stringify({

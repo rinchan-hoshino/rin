@@ -20,7 +20,7 @@ test('missing directory is created privately and loads as empty', async t => {
   const root = await fixture(t), directory = join(root, 'new');
   assert.deepEqual(await loadCommandExtensions({ directory }), []);
   const { mode } = await import('node:fs/promises').then(fs => fs.stat(directory));
-  assert.equal(mode & 0o077, 0);
+  if (process.platform !== 'win32') assert.equal(mode & 0o077, 0);
 });
 
 test('valid modules load in filename order and expose only protocol fields', async t => {

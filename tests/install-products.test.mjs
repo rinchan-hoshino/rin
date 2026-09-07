@@ -8,12 +8,13 @@ import {historySupport,installHistoryTool,installProducts,productSources} from '
 const temp=async t=>{const dir=await mkdtemp(join(tmpdir(),'rin-install-test-'));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;};
 
 test('Codex installs into the user prefix without consulting or changing an unwritable POSIX global prefix',async()=>{
-  const calls=[];const result=await installProducts({products:['codex'],home:'/safe home',userHome:'/users/test',node:'/node 24/bin/node',npmCli:'/node 24/npm-cli.js',run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/fresh/npm'};}});
+  const userHome=join(tmpdir(),'rin-posix-user'),node=join(tmpdir(),'node 24','bin','node'),npmCli=join(tmpdir(),'node 24','npm-cli.js');
+  const calls=[];const result=await installProducts({products:['codex'],home:join(tmpdir(),'safe home'),userHome,platform:'linux',node,npmCli,run:async(command,args)=>{calls.push({command,args});return {code:0,stdout:'/fresh/npm'};}});
   assert.deepEqual(calls.map(({command,args})=>({command,args})),[
-    {command:'/node 24/bin/node',args:['/node 24/npm-cli.js','install','--global','--prefix','/users/test/.local','@openai/codex']},
+    {command:node,args:[npmCli,'install','--global','--prefix',join(userHome,'.local'),'@openai/codex']},
   ]);
   assert.equal(result[0].status,'installed');
-  assert.equal(result[0].command,'/users/test/.local/bin/codex');
+  assert.equal(result[0].command,join(userHome,'.local/bin/codex'));
 });
 
 test('Windows keeps its configured npm user prefix and refuses a legacy Rin prefix',async()=>{
@@ -29,7 +30,7 @@ test('Windows retains npm configured prefix installation behavior',async()=>{
     {command:'/node',args:['/npm-cli.js','prefix','--global']},
     {command:'/node',args:['/npm-cli.js','install','--global','@openai/codex']},
   ]);
-  assert.equal(result[0].command,'/users/test/npm/codex.cmd');
+  assert.equal(result[0].command,join('/users/test/npm','codex.cmd'));
 });
 
 test('Windows ChatGPT uses the official Microsoft Store winget identifier',async()=>{

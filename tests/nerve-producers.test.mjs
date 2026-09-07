@@ -19,7 +19,8 @@ test('script directory passes admission credentials and drains child shutdown',a
  writeFileSync(join(dir,'source.mjs'),`import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(output)},JSON.stringify({endpoint:process.env.NERVE_ENDPOINT,token:process.env.NERVE_TOKEN}));setInterval(()=>{},1000);process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(output+'.closed')},'closed');process.exit(0);});`);
  const scripts=new ScriptDirectory(dir,{NERVE_ENDPOINT:'http://127.0.0.1:1',NERVE_TOKEN:'fixture'},()=>{});t.after(async()=>{await scripts.stop();rmSync(dir,{recursive:true,force:true});});await scripts.start();
  for(let n=0;n<100&&!existsSync(output);n++)await new Promise(ok=>setTimeout(ok,10));
- assert.deepEqual(JSON.parse(readFileSync(output)),{endpoint:'http://127.0.0.1:1',token:'fixture'});await scripts.stop();assert.equal(readFileSync(output+'.closed','utf8'),'closed');
+ assert.deepEqual(JSON.parse(readFileSync(output)),{endpoint:'http://127.0.0.1:1',token:'fixture'});await scripts.stop();
+ if(process.platform!=='win32')assert.equal(readFileSync(output+'.closed','utf8'),'closed');
 });
 test('input adapter returns at admission; pre-submit errors differ from uncertain submissions',async()=>{
  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',event={id:'source:1',payload:{prompt:'hello'}};

@@ -71,7 +71,7 @@ test('a fast-forward candidate is verified in isolation without touching the run
 
   assert.deepEqual({ sha: candidate.sha, changed: candidate.changed }, { sha: next, changed: true });
   assert.equal(await readFile(join(running, 'live-marker'), 'utf8'), 'still running');
-  assert.equal(await readFile(join(candidate.release, 'src/cli.mjs'), 'utf8'), 'export const version = 2;\n');
+  assert.equal((await readFile(join(candidate.release, 'src/cli.mjs'), 'utf8')).replaceAll('\r\n', '\n'), 'export const version = 2;\n');
   assert.equal(JSON.parse(await readFile(join(candidate.release, '.rin-verified.json'), 'utf8')).sha, next);
   assert.deepEqual(runner.npm.map(call => call.args.slice(1)), [['ci', '--ignore-scripts', '--include=dev'], ['test']]);
 });

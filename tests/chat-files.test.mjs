@@ -50,7 +50,7 @@ test('file roots reject symlink escapes, sibling paths, directories and oversize
     assert.deepEqual(outputParts(input, [root]), [{text:input}]);
   }
   const dotName = file('..allowed.png');
-  assert.equal(outputFiles(`[图](${dotName})`, [root]).length, 1);
+  assert.equal(outputFiles(`[图](${encodeURIComponent(dotName)})`, [root]).length, 1);
 });
 
 test('native Markdown supports encoded paths, balanced parentheses and media MIME', t => {
