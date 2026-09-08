@@ -166,6 +166,8 @@ test('CLI routing reserves exact lifecycle commands and preserves ordinary Codex
   assert.deepEqual(routeArgs(['start']), { type: 'rin', command: 'start' });
   assert.deepEqual(routeArgs(['stop']), { type: 'rin', command: 'stop' });
   assert.deepEqual(routeArgs(['restart']), { type: 'rin', command: 'restart' });
+  assert.deepEqual(routeArgs(['restart','--app-server']), { type: 'rin', command: 'restart',appServer:true });
+  assert.throws(()=>routeArgs(['start','--app-server']),/takes no arguments/);
   assert.deepEqual(routeArgs(['update']), { type: 'rin', command: 'update' });
   assert.deepEqual(routeArgs(['--', 'start', '--quiet']), { type: 'codex', args: ['start', '--quiet'] });
   assert.deepEqual(routeArgs(['exec', 'start']), { type: 'codex', args: ['exec', 'start'] });

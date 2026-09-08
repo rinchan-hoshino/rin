@@ -22,7 +22,7 @@ Nerve MCP 使用安装根目录的稳定 `nerve-mcp-run.mjs` 入口，新连接�
 
 ### Codex 接入
 
-聊天桥与独立事件输入命令只使用共享 app-server。默认本机入口不存在时直接启动 `codex app-server --listen`，由 Codex 自身的 socket 独占处理并发启动；Rin 不维护额外 PID、监督器或执行状态。恢复任务时不覆盖执行配置，原生 `turn/start` 负责新轮次与忙时追加输入。客户端退出不终止模型执行，提交回执与业务完成分开。App 通过 SSH、TUI 通过 `--remote` 接入同一服务。
+聊天桥与独立事件输入命令只使用共享 app-server。Rin 启动前确认服务可连接，默认本机入口不存在时直接启动 `codex app-server --listen`，由 Codex 自身的 socket 独占处理并发启动；Rin 不维护额外 PID、监督器或执行状态。普通停止与重启不终止 app-server；显式 `rin restart --app-server` 核对本机监听进程后一起重启。恢复任务时不覆盖执行配置，原生 `turn/start` 负责新轮次与忙时追加输入。客户端退出不终止模型执行，提交回执与业务完成分开。App 通过 SSH、TUI 通过 `--remote` 接入同一服务。
 
 历史观察只读取公开消息、公开摘要和已完成的生成图片路径，不外发工具输出或私有推理。观察器锁定 0.153.x / paginated 表结构，不兼容时停止观察和新提交。详见 [App 接入](codex-app-steering.md)。
 

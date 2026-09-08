@@ -86,7 +86,7 @@ test('update repairs bundled MCP and activates added work even without a newer r
   const current='a'.repeat(40);
   await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current,node:process.execPath,codexHome}));
   const events=[],service={};
-  await main(['update'],{home,serviceFactory:()=>service,prepare:async()=>({sha:current,changed:false}),
+  await main(['update'],{home,codexHome,serviceFactory:()=>service,prepare:async()=>({sha:current,changed:false}),
     ensureMcp:async options=>{assert.equal(options.codexHome,codexHome);events.push('repair');return{needsActivation:true,configPath:'/config'};},
     activateMcp:async options=>{assert.equal(options.service,service);assert.equal(options.nerve.needsActivation,true);events.push('activate');},
   });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { startDaemon } from '../dist/daemon.js';
@@ -61,6 +61,7 @@ test('starts Nerve before chat and stops chat before Nerve', async t => {
     async stop() { events.push('chat.stop'); }
   }
   const daemon = await startDaemon(daemonFile, { nerveToken: 'x'.repeat(24), log: quietLog, intervalMs: 60_000, dependencies: {
+    ensureAppServer:async()=>{},
     readChatConfig: () => ({ dataDir, codex: {}, adapters: [], bindings: [] }),
     createLogger: () => quietLog,
     adapterFactory: async () => {},
@@ -88,6 +89,7 @@ test('chat PID lock blocks before bridge construction', async t => {
   const daemonFile = f.write('daemon.json', { chat: chatFile, nerve: null });
   let constructed = 0;
   const dependencies = {
+    ensureAppServer:async()=>{},
     readChatConfig: () => ({ dataDir, codex: {}, adapters: [], bindings: [] }),
     createLogger: () => quietLog,
     ChatBridge: class { constructor() { constructed++; } async start() {} async stop() {} },
@@ -116,6 +118,7 @@ test('chat startup failure rolls back an already started Nerve', async t => {
     close(fn) { this.listening = false; stopped.push('server'); fn(); },
   };
   await assert.rejects(startDaemon(daemonFile, { nerveToken: 'x'.repeat(24), log: quietLog, dependencies: {
+    ensureAppServer:async()=>{},
     readChatConfig: () => ({ dataDir, codex: {}, adapters: [], bindings: [] }),
     createLogger: () => quietLog,
     ChatBridge: class { async start() { throw new Error('chat failed'); } async stop() { stopped.push('chat'); } },
@@ -131,7 +134,9 @@ test('empty real Nerve serves health and closes its listener', async t => {
   const nerveFile = f.write('nerve.json', { database: 'events.sqlite', cwd: '.', port: 0, targets: {} });
   const daemonFile = f.write('daemon.json', { chat: null, nerve: nerveFile });
   const token = 'test-daemon-token-at-least-24-characters';
-  const daemon = await startDaemon(daemonFile, { nerveToken: token, log: quietLog, intervalMs: 60_000 });
+  let ensured=false;
+  const daemon = await startDaemon(daemonFile, { nerveToken: token, log: quietLog, intervalMs: 60_000, ensureAppServer:async()=>{ensured=true;} });
+  assert.equal(ensured,true);
   t.after(()=>daemon.stop());
   const url = `http://127.0.0.1:${daemon.address.port}/health`;
   assert.equal((await fetch(url)).status, 401);
@@ -140,4 +145,24 @@ test('empty real Nerve serves health and closes its listener', async t => {
   await daemon.stop();
   await assert.rejects(fetch(url));
   assert.equal(existsSync(join(f.dir, 'events.sqlite')), true);
+});
+
+for (const [name, env, chatOptions, expected] of [
+  ['stored install home', {}, {}, '/stored/codex'],
+  ['environment overrides stored home', {CODEX_HOME:'/env/codex'}, {}, '/env/codex'],
+  ['chat overrides default home', {CODEX_HOME:'/env/codex'}, {codexHome:'/chat/codex'}, '/chat/codex'],
+]) test(`daemon uses ${name} for readiness and bridge`, async t => {
+  const f = fixture(t);
+  mkdirSync(join(f.dir, 'private'));
+  f.write('install.json', {codexHome:'/stored/codex'});
+  const daemonFile = f.write('private/daemon.json', {chat:'chat.json'});
+  const received = [];
+  const daemon = await startDaemon(daemonFile, {env, log:quietLog, dependencies:{
+    readChatConfig:()=>({dataDir:join(f.dir,'data'),codex:chatOptions}),
+    ensureAppServer:async options=>{received.push(options);},
+    CodexBridge:class {constructor(options){received.push(options);}},
+    ChatBridge:class {async start(){} async stop(){}},
+  }});
+  await daemon.stop();
+  assert.deepEqual(received, [{codexHome:expected},{codexHome:expected}]);
 });

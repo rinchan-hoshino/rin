@@ -50,7 +50,7 @@ async function fixture(t) {
   const options={home,codexHome,command,run,writeConfig};
   const service={
     isRunning:async()=>Boolean(daemon),
-    start:async()=>{assert.equal(daemon,undefined);starts++;daemon=await startDaemon(join(home,'private/daemon.json'),{env:{},log:{info(){},error(){}}});},
+    start:async()=>{assert.equal(daemon,undefined);starts++;daemon=await startDaemon(join(home,'private/daemon.json'),{env:{},log:{info(){},error(){}},ensureAppServer:async()=>{}});},
     stop:async()=>{await daemon?.stop();daemon=undefined;},
   };
   async function verifyMcp() {

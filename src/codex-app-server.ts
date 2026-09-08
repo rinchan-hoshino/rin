@@ -17,7 +17,7 @@ export class CodexAppServer {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   private stopped = false;
-  constructor({command = ['codex'], codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'), endpoint = process.platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://', queueTimeoutMs = 30_000}: AppServerOptions = {}) {
+  constructor({command = [process.env.RIN_CODEX_BIN || 'codex'], codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'), endpoint = process.platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://', queueTimeoutMs = 30_000}: AppServerOptions = {}) {
     if (!Array.isArray(command) || !command.length || command.some(x => typeof x !== 'string' || !x)) throw new Error('command argv required');
     if (typeof codexHome !== 'string' || !codexHome.trim()) throw new Error('codexHome required');
     if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('positive queueTimeoutMs required');
@@ -25,22 +25,22 @@ export class CodexAppServer {
     this.command = [...command]; this.codexHome = codexHome; this.endpoint = endpoint; this.timeoutMs = queueTimeoutMs;
   }
   start() { this.stopped = false; }
-  async connect() {
+  async connect({bootstrap = true}: {bootstrap?: boolean} = {}) {
     if (this.stopped) throw new Error('app-server client stopped');
     if (this.connecting) return this.connecting;
     if (this.socket?.readyState === WebSocket.OPEN) return;
-    this.connecting = this.open().finally(() => { this.connecting = undefined; });
+    this.connecting = this.open(bootstrap).finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
-  private async open() {
+  private async open(bootstrap: boolean) {
     try { await this.openSocket(); }
     catch (error) {
       // Only absence of the default local listener allows bootstrap. A custom
       // endpoint, auth rejection or broken handshake must not start another host.
       const defaultEndpoint = process.platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://';
-      if (this.endpoint !== defaultEndpoint || !['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
+      if (!bootstrap || this.endpoint !== defaultEndpoint || !['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
       if (this.stopped) throw new Error('app-server client stopped');
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$)/i.test(key)));
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$|RIN_MANAGED_DAEMON$)/i.test(key)));
       env.CODEX_HOME = this.codexHome;
       const directory = join(this.codexHome, 'app-server-control');
       await mkdir(directory, {recursive: true, mode: 0o700});

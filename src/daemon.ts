@@ -1,8 +1,9 @@
 import {ScriptDirectory} from './nerve-scripts.js';
+import {ensureAppServer} from './codex-server-lifecycle.js';
 import type {Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import type {Logger} from './chat/types.js';
-interface DaemonDependencies {readChatConfig:typeof readChatConfig; createLogger:typeof createLogger; adapterFactory:typeof adapterFactory; ChatBridge:typeof ChatBridge; CodexBridge:typeof CodexBridge; Nerve:typeof Nerve; Store:typeof Store; makeServer:typeof makeServer; validateNerveConfig:typeof validateNerveConfig}
+interface DaemonDependencies {readChatConfig:typeof readChatConfig; createLogger:typeof createLogger; adapterFactory:typeof adapterFactory; ChatBridge:typeof ChatBridge; CodexBridge:typeof CodexBridge; Nerve:typeof Nerve; Store:typeof Store; makeServer:typeof makeServer; validateNerveConfig:typeof validateNerveConfig; ensureAppServer:typeof ensureAppServer}
 interface DaemonOptions extends Partial<DaemonDependencies> {readConfig?:typeof readChatConfig; dependencies?:Partial<DaemonDependencies>; pid?:number; processKill?:typeof process.kill; env?:NodeJS.ProcessEnv; intervalMs?:number; log?:Logger; nerveToken?:string}
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -83,11 +84,16 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
     Store: options.Store ?? Store,
     makeServer: options.makeServer ?? makeServer,
     validateNerveConfig: options.validateNerveConfig ?? validateNerveConfig,
+    ensureAppServer: options.ensureAppServer ?? ensureAppServer,
     ...options.dependencies,
   };
   const pid = options.pid ?? process.pid;
   const processKill = options.processKill ?? process.kill.bind(process);
   const env = options.env ?? process.env;
+  const installFile = resolve(daemonDir, '../install.json');
+  const installState = existsSync(installFile) ? readJson(installFile) as {codexHome?:string} : undefined;
+  const codexHome = env.CODEX_HOME || installState?.codexHome;
+  const defaultCodexOptions = codexHome ? {codexHome} : {};
   const intervalMs = options.intervalMs ?? 1000;
   let chat: ChatBridge | undefined;
   let chatPidPath: string | undefined;
@@ -138,6 +144,7 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
       for (const target of Object.values(nerveConfig.targets)) {
         if (target.cwd !== undefined) target.cwd = resolveConfiguredPath(target.cwd, nerveDir, 'target cwd');
       }
+      if (!chatFile) await dependencies.ensureAppServer(defaultCodexOptions);
       nerveStore = new dependencies.Store(nerveConfig.database);
       let secrets: Record<string,string> | undefined;
       const secret = (name: string) => env[name] ?? (secrets ??= readJson(resolve(nerveDir, 'secrets.json')) as Record<string,string>)[name];
@@ -168,7 +175,9 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
       // The legacy and combined entrypoints intentionally share this lock.
       // Acquire it before ChatBridge constructs its SQLite store.
       chatPidPath = acquireChatPid(chatConfig.dataDir, pid, processKill);
-      const codex = new dependencies.CodexBridge(chatConfig.codex || {});
+      const codexOptions = {...defaultCodexOptions, ...chatConfig.codex};
+      await dependencies.ensureAppServer(codexOptions);
+      const codex = new dependencies.CodexBridge(codexOptions);
       chat = new dependencies.ChatBridge(chatConfig, { codex, adapterFactory: dependencies.adapterFactory, log });
       await chat.start();
       log.info('Rin chat bridge ready');

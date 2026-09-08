@@ -6,7 +6,9 @@
 
 macOS/Linux 默认使用 `unix://`，对应 `$CODEX_HOME/app-server-control/app-server-control.sock`；未设置 `CODEX_HOME` 时使用 `~/.codex`。Windows 默认使用 `ws://127.0.0.1:4500`。
 
-先连接已有服务。只有默认入口明确不存在或拒绝连接时，才在后台直接运行 `codex app-server --listen <endpoint>`，继承用户的 Codex 配置与登录，不指定模型、审批或沙箱参数。启动诊断追加到 `$CODEX_HOME/app-server-control/rin-start.log`。Codex 本身负责监听地址独占；同时启动的其他实例会退出，客户端接入成功占用地址的实例。Rin 停止时只断开连接，已接收的工作继续执行。
+启动 Rin 时先连接并完成 app-server 握手，成功后才报告就绪；只有 Nerve 的安装也执行这个检查。只有默认入口明确不存在或拒绝连接时，才在后台直接运行 `codex app-server --listen <endpoint>`，继承用户的 Codex 配置与登录，不指定模型、审批或沙箱参数。启动诊断追加到 `$CODEX_HOME/app-server-control/rin-start.log`。Codex 本身负责监听地址独占；同时启动的其他实例会退出，客户端接入成功占用地址的实例。Rin 停止时只断开自己的客户端连接，已接收的工作继续执行。
+
+`rin restart` 只重启 Rin。需要同时重启共享 app-server 时，在独立终端执行 `rin restart --app-server`；这会中断该服务器上的活动任务。命令先通过握手核对 Codex 主目录，再从系统监听表确认当前用户的确切进程，停止 Rin，正常终止该进程，重新连接成功后启动 Rin。macOS 使用 `netstat`，Linux 使用 `ss`，Windows 使用 PowerShell 的 TCP 监听信息；不保存 PID 记录、不按名称批量结束进程，也不强制杀死停止超时的服务器。无法确认目标、目标发生变化或命令正在目标 app-server 内执行时，拒绝停止。该选项只处理默认本机入口，自定义服务由其宿主管理。
 
 可通过 `codex.command` 选择可执行命令，通过 `codex.endpoint` 选择一个已存在的同机入口。自定义入口失败不会自动另起服务；连接或输入回执不确定时不会换路径重投。聊天输出观察要求服务与 Rin 共享同一台主机及同一 `CODEX_HOME`。旧 `appSteering` / `appWake` 配置不再参与选择路径，可以移除。
 
@@ -45,6 +47,6 @@ App 的 SSH 模式与同机桌面模式可能有宿主工具差异；复用远�
 
 ## 验证边界
 
-本机 0.153.4 已验证：默认 Unix 共享连接、第二个原生服务拒绝抢占、无服务时启动与客户端断开后再次接入、聊天和 Nerve 命令真实轮次完成、触发器进程退出后原生 shell 工具继续执行、运行中输入追加到同一 turn、TUI 列出任务。平台 SDK 收发、编辑、附件及持久输出语义由回归测试覆盖；本次未把无真实入站消息窗口的 QQ 平台测试写成端到端验收。
+本机 0.153.4 已验证：默认 Unix 共享连接、第二个原生服务拒绝抢占、无服务时启动与客户端断开后再次接入、聊天和 Nerve 命令真实轮次完成、触发器进程退出后原生 shell 工具继续执行、运行中输入追加到同一 turn、TUI 列出任务。另已用隔离的真实服务验证 macOS 监听进程识别、正常停止、重新启动与再次握手；Linux 和 Windows 重启分支仍需实机验收。平台 SDK 收发、编辑、附件及持久输出语义由回归测试覆盖；本次未把无真实入站消息窗口的 QQ 平台测试写成端到端验收。
 
 官方参考：[app-server](https://learn.chatgpt.com/docs/app-server)、[SSH 连接](https://learn.chatgpt.com/docs/remote-connections#connect-to-an-ssh-host)。
