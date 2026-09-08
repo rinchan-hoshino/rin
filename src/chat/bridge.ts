@@ -397,10 +397,7 @@ export class ChatBridge {
           const [adapterId] = JSON.parse(job.id);
           const binding=this.config.bindings.find(b=>b.adapter===adapterId && String(b.chatId)===String(message.chatId) && String(b.topicId || '')===String(message.topicId || '') && b.kind===message.kind);
           if(binding) {
-            const unsupported=failure(error)?.code==='CODEX_INPUT_UNSUPPORTED' || failure(error)?.cause?.code==='CODEX_INPUT_UNSUPPORTED';
-            const text=unsupported
-              ? '暂不支持发送附件，请先发送文字消息。'
-              : '消息投递未确认。为避免重复，我不会自动重发。';
+            const text=error instanceof Error ? error.message : String(error);
             this.store.stage(stableId('submission-error',job.id),this.routeKey(binding),{
               text,replyTo:message.id,
               target:{chatId:message.chatId,...(message.topicId?{topicId:message.topicId}:{}),kind:message.kind,userId:message.userId,messageId:message.id},

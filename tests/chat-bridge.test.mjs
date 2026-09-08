@@ -83,7 +83,7 @@ test('idle failed admission types once, reports once through the outbox, and nev
     await receive(message);await new Promise(resolve=>setImmediate(resolve));await bridge.flush();
     assert.equal(typing.length,1,'admission may show one immediate typing hint');
     bridge.typing();bridge.typing();assert.equal(typing.length,1,'failed idle submission must not sustain typing');
-    assert.deepEqual(sent,[{text:'消息投递未确认。为避免重复，我不会自动重发。',replyTo:'source',target:{chatId:'dm',kind:'dm',userId:'owner',messageId:'source'}}]);
+    assert.deepEqual(sent,[{text:'lost response',replyTo:'source',target:{chatId:'dm',kind:'dm',userId:'owner',messageId:'source'}}]);
     await receive(message);await bridge.submit();await bridge.flush();assert.equal(sent.length,1,'replayed ingress must not duplicate the error reply');
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
@@ -119,7 +119,7 @@ test('submission failure preserves an existing active turn, queue stays idle, an
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-test('explicit unsupported Codex input gets a short attachment reply',async()=>{
+test('explicit unsupported Codex input preserves the original error message',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-unsupported-'));const sent=[];let receive;
   const error=Object.assign(new Error('unsupported'),{code:'CODEX_INPUT_UNSUPPORTED'});
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>{throw error;}};
@@ -128,7 +128,7 @@ test('explicit unsupported Codex input gets a short attachment reply',async()=>{
   const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'file',chatId:'dm',userId:'owner',kind:'dm',text:'',files:[{name:'x'}]});
-    await new Promise(resolve=>setImmediate(resolve));await bridge.flush();assert.equal(sent[0].text,'暂不支持发送附件，请先发送文字消息。');assert.equal(sent[0].replyTo,'file');
+    await new Promise(resolve=>setImmediate(resolve));await bridge.flush();assert.equal(sent[0].text,'unsupported');assert.equal(sent[0].replyTo,'file');
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
