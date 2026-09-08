@@ -69,6 +69,11 @@ export async function ensureNerveMcp({home,codexHome,node=process.execPath,binar
   if(initialized)config={database:'nerve.sqlite',port:await availablePort(),targets:{}};
   config=object(config,'Nerve configuration');
   object(config.targets,'Nerve targets');
+  // Older fresh installs wrote an empty producer list. It has no behavior to
+  // migrate; nonempty lists still need an explicit producer migration.
+  const emptyLegacyTriggers=Array.isArray(config.triggers) && config.triggers.length===0;
+  if(emptyLegacyTriggers) { config={...config};delete config.triggers; }
+  else if('triggers' in config)throw new Error(`Nerve configuration ${configPath} contains legacy triggers. Migrate these tasks to producer scripts before upgrading; the configuration was preserved.`);
   validateConfig(config);
   if(typeof config.database!=='string' || !config.database)throw new Error('Nerve database path is required');
   if(config.port!==undefined && (typeof config.port!=='number' || !Number.isInteger(config.port) || config.port<1 || config.port>65535))throw new Error('Invalid Nerve port');
@@ -88,7 +93,7 @@ export async function ensureNerveMcp({home,codexHome,node=process.execPath,binar
   await mkdir(dirname(configPath),{recursive:true,mode:0o700});
   await mkdir(privateDir,{recursive:true,mode:0o700});
   if(secretsChanged)await atomicJSON(secretsPath,secrets);
-  if(initialized)await atomicJSON(configPath,config);
+  if(initialized || emptyLegacyTriggers)await atomicJSON(configPath,config);
   // Failure never attaches a newly initialized service to the daemon. Keep its
   // valid private files for retry because a failed RPC can have committed edits.
   if(edits.length)await writer({edits,reloadUserConfig:true});

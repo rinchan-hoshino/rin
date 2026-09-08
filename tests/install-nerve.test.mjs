@@ -112,3 +112,29 @@ test('failed registration leaves daemon untouched and valid setup can be retried
   assert.equal(result.initialized,false);assert.equal(result.daemonChanged,true);assert.equal(result.needsActivation,true);
   assert.deepEqual(await json(join(f.privateDir,'secrets.json')),secrets);
 });
+
+
+test('update migrates the empty triggers default from earlier installers idempotently',async t=>{
+  const f=await fixture(t),configPath=await existing(f,{triggers:[],scriptsDirectory:'producers'});
+  await writeFile(join(f.privateDir,'daemon.json'),JSON.stringify({nerve:'nerve.json'}));
+  const result=await ensureNerveMcp(f.options);
+  assert.equal(result.initialized,false);
+  assert.deepEqual(await json(configPath),{database:'custom.sqlite',port:19873,targets:{},scriptsDirectory:'producers'});
+  assert.equal((await json(join(f.privateDir,'secrets.json'))).OTHER,'keep');
+  await ensureNerveMcp(f.options);
+  assert.equal('triggers' in await json(configPath),false);
+});
+
+test('active legacy triggers are preserved with a file-specific migration error',async t=>{
+  const f=await fixture(t),configPath=await existing(f,{triggers:[{id:'daily',daily:'03:00',target:'main'}]});
+  const before=await readFile(configPath,'utf8');
+  await assert.rejects(ensureNerveMcp(f.options),error=>error.message.includes(configPath) && /Migrate these tasks/.test(error.message));
+  assert.equal(await readFile(configPath,'utf8'),before);assert.equal(f.writes,0);
+});
+
+test('empty trigger migration does not rewrite a configuration that fails other validation',async t=>{
+  const f=await fixture(t),configPath=await existing(f,{triggers:[],attention:{}});
+  const before=await readFile(configPath,'utf8');
+  await assert.rejects(ensureNerveMcp(f.options),/Unsupported configuration field attention/);
+  assert.equal(await readFile(configPath,'utf8'),before);assert.equal(f.writes,0);
+});
