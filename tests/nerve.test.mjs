@@ -49,8 +49,19 @@ test('same target admissions serialize while unrelated targets can progress',asy
  n.deliver=async event=>{seen.push(event.id);if(event.id==='a1')await new Promise(r=>release=r);return {accepted:true};};
  store.enqueue('a1','a',{});store.enqueue('a2','a',{});store.enqueue('b1','b',{});await n.tick();await n.tick();await Promise.resolve();assert.deepEqual(seen,['a1','b1']);release();await Promise.all(n.running);await n.tick();await Promise.all(n.running);assert.deepEqual(seen,['a1','b1','a2']);await n.close();store.close();
 });
-test('unsupported producer and execution config is rejected before startup',()=>{
- for(const extra of [{triggers:[]},{attention:{}},{minecraft:{}}])assert.throws(()=>validateConfig({targets:{},...extra}),/migrate producer/);
+test('producer fields are ignored while execution targets remain validated',()=>{
+ for(const extra of [{triggers:[{id:'old'}]},{attention:{}},{minecraft:{}}])assert.doesNotThrow(()=>validateConfig({targets:{},...extra}));
  for(const type of ['codex','codex-app'])assert.throws(()=>validateConfig({targets:{out:{type,threadId:'existing'}}}),/Unknown target/);
  assert.throws(()=>validateConfig({targets:{out:{type:'command',argv:['node',null]}}}),/argv/);
+});
+
+test('runtime accepts retained trigger configuration without starting a legacy scheduler',async()=>{
+ const store=new Store(':memory:');
+ const n=new Nerve({targets:{out:{type:'command',argv:[process.execPath,'-e','console.log("ok")']}},triggers:[{id:'old',target:'out',everySeconds:1,payload:{old:true}}]},store);
+ try {
+  await n.tick();assert.equal(store.db.prepare('SELECT count(*) AS n FROM events').get().n,0);
+  n.enqueue('explicit','out',{new:true});await n.tick();await Promise.all(n.running);
+  assert.equal(store.event('explicit').state,'done');
+  assert.equal(store.db.prepare('SELECT count(*) AS n FROM events').get().n,1);
+ } finally {await n.close();store.close();}
 });

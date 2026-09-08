@@ -7,8 +7,8 @@ export function validateTaskId(value:unknown):asserts value is string {
 export function validateConfig(value:unknown):asserts value is NerveConfig{
   if(!value || typeof value!=='object' || Array.isArray(value))throw new Error('Configuration must be an object');
   const config=value as NerveConfig;
-  const fields=new Set(['targets','database','cwd','port','scriptsDirectory']);
-  for(const field of Object.keys(config))if(!fields.has(field))throw new Error(`Unsupported configuration field ${field}; migrate producer configuration before upgrading`);
+  // Validate only the fields this runtime consumes. Producer configuration
+  // belongs to its owner and does not impose an installation migration gate.
   if(!config.targets || typeof config.targets!=='object' || Array.isArray(config.targets))throw new Error('targets required');
   for(const [name,target] of Object.entries(config.targets)){
     if(!target || !['command','http'].includes(target.type))throw new Error(`Unknown target type: ${name}`);

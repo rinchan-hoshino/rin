@@ -90,3 +90,5 @@ payload 提供 `prompt`。这个独立输入适配命令与聊天桥共用 app-s
 旧版 `triggers`、`attention`、`minecraft` 以及 `codex`／`codex-app` target 不再属于 Nerve 配置。启动前会明确拒绝旧字段，避免静默丢弃业务。先备份并迁移生产者状态，将规则和平台账号移入私有脚本，再改为 command/http 目标。切换时停止旧接收者，保留消息 ID、已读区间、定时游标和不确定发送状态；不能把旧 running 业务当成未执行而盲目重放。
 
 安装器保留已有配置，不自动猜测个人业务如何迁移。平台专用的读写 MCP 如仍需使用，由对应私有服务单独提供。
+
+升级仅验证当前 Nerve 会使用的投递配置。旧 `triggers`、`attention`、`minecraft` 等 producer 字段原样保留，不自动迁移，也不作为升级门槛；新版核心不执行这些旧字段。需要继续运行的事件源由使用者维护独立 producer。
