@@ -1,46 +1,15 @@
-# Validation status
+# Validation
 
-Automated verification covers the shared AgentBridge contract, native command construction for Claude Code, pi, and OpenCode, per-session serialization, Codex app-server client behavior, chat admission and delivery policy, durable Nerve delivery, isolated updates, stable launchers, and Rin service lifecycle.
+Automated checks cover the shared agent contract, native command construction for Claude Code, pi, and OpenCode, per-session serialization, Codex app-server behavior, chat admission and delivery, durable Nerve delivery, isolated updates, launchers, and service lifecycle.
 
-These checks use local fixtures and subprocesses. They establish code behavior; they are not agent or chat-platform end-to-end acceptance.
+Fixtures and subprocess probes establish code behavior. They do not replace acceptance with real agent credentials or live chat accounts.
 
-## Current environment
+## Acceptance sequence
 
-- Codex CLI 0.153.4 is installed. This refactor did not start or restart its app-server and did not submit a real task.
-- Claude Code, pi, and OpenCode are not installed, so their real session-resume flows are unverified.
-- Discord, Telegram, and OneBot were not connected to live accounts during this refactor.
+1. Start a disposable Codex app-server, bind a task, and verify input, intermediate output, final output, attachments, restart recovery, and the no-server error path.
+2. Install and authenticate each selected CLI agent. Verify its documented non-interactive resume command with a disposable native session.
+3. For every enabled transport, verify an authorized message, rejected identity, configured allow and deny rules, registered command, quiet delivery, attachments, and restart recovery.
+4. For Telegram and OneBot, verify private-like routing only with a fresh complete member list containing the bot and exactly one configured owner.
+5. Run the installation flow in a clean per-user directory and verify launcher ownership, service registration, update rollback, and removal on each documented platform.
 
-## CLI protocol probes
-
-On 2026-09-09, isolated installs were used to exercise the real command
-surfaces without importing the owner's configuration or sending private
-context:
-
-- Claude Code `2.1.266` accepted `-p --resume <session> --output-format text`.
-  A disposable unknown session returned a non-zero "conversation not found"
-  error. A fresh `--session-id` probe returned JSONL `system`, `assistant`, and
-  `result` records with an authentication error and no model request.
-- pi `0.85.1` accepted `-p --session <id> <prompt>`. Its RPC help exposes a
-  JSON stdin/stdout protocol; a no-key probe returned a non-zero no-API-key
-  error. No private session was opened.
-- OpenCode `1.18.30` accepted `run --session <id> <prompt>` and exposes
-  `--format json`; an unknown disposable session returned "Session not found".
-  An isolated `--pure --format json --model openai/gpt-4o` no-key run returned
-  a JSON `UnknownError` and non-zero exit; a separate fresh probe attempted a
-  network tool step and was stopped, so no OpenCode model completion is
-  claimed.
-
-These probes validate argv and failure boundaries only. They do not establish
-authenticated model output, cancellation, restart recovery, or chat-platform
-delivery. The adapters must continue to report those items as unverified until
-an operator supplies credentials and a disposable native session.
-
-## Remaining acceptance
-
-1. With an operator-started Codex app-server, bind a disposable task and verify one input, intermediate output, final output, attachment, restart recovery, and the no-server failure path.
-2. Install and authenticate each selected CLI agent independently. Verify its documented non-interactive session-resume command with a disposable native session before enabling that adapter.
-3. For each enabled chat transport, verify an authorized message, a rejected identity, allow and deny chat rules, a registered command outside the chat lists, quiet delivery, attachments, and restart recovery.
-4. On Telegram and OneBot, verify private-like routing only with a complete live member list containing the bot and exactly one configured owner.
-5. Run the public installation prompt in a clean per-user directory. Verify launcher ownership checks, service registration, update rollback, and removal on every supported operating system that will be documented as accepted.
-
-Record the real CLI version, platform, session type, checks, and observed receipts for each completed item. Keep credentials, account IDs, task IDs, and private paths outside the public repository.
+Record the real agent version, platform, session type, checks, and observed receipts. Keep credentials, account IDs, task IDs, and private paths outside the public repository.

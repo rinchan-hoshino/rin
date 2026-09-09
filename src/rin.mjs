@@ -1,4 +1,4 @@
-// Compatibility entrypoint for existing Rin installations; implementation is TypeScript.
+// JavaScript entrypoint for the compiled Rin implementation.
 export * from '../dist/rin.js';
 import * as implementation from '../dist/rin.js';
 import {resolve} from 'node:path';

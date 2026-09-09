@@ -65,7 +65,7 @@ test('producer fields are ignored while execution targets remain validated',()=>
  assert.throws(()=>validateConfig({targets:{out:{type:'command',argv:['node',null]}}}),/argv/);
 });
 
-test('runtime accepts retained trigger configuration without starting a legacy scheduler',async()=>{
+test('runtime ignores producer metadata and processes explicit events',async()=>{
  const store=new Store(':memory:');
  const n=new Nerve({targets:{out:{type:'command',argv:[process.execPath,'-e','console.log("ok")']}},triggers:[{id:'old',target:'out',everySeconds:1,payload:{old:true}}]},store);
  try {

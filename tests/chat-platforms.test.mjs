@@ -219,7 +219,7 @@ test('Telegram admits recognized group commands for allowed users under dmOnly',
   assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot'}},config,{id:'9',username:'rinbot'},extensions),null);
 });
 
-test('Telegram clears legacy narrow scopes and authoritatively updates the default command menu', async () => {
+test('Telegram clears narrow scopes and authoritatively updates the default command menu', async () => {
   const calls=[]; const deleted=[]; let updates=0;
   const api={raw:{
     deleteWebhook:async()=>true,getMe:async()=>({id:9,username:'rin'}),

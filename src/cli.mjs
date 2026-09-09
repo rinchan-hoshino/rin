@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compatibility entrypoint for existing Rin installations; implementation is TypeScript.
+// JavaScript entrypoint for the compiled CLI implementation.
 export * from '../dist/cli.js';
 import * as implementation from '../dist/cli.js';
 import {resolve} from 'node:path';

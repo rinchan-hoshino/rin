@@ -42,7 +42,7 @@ test('a Codex thread binds one chat only and every binding explicitly mirrors', 
   assert.throws(()=>validateConfig({adapters,bindings:[{...first,mirror:undefined}]}),/mirror:true/);
   assert.equal(validateConfig({adapters,bindings:[first]}).bindings.length,1);
 });
-test('Telegram topics are separate bindings while legacy non-topic duplicate rules remain stable', () => {
+test('Telegram topics are separate bindings while non-topic duplicate rules remain stable', () => {
   const adapters=[{id:'t',type:'telegram',allowUsers:['owner']}];
   const one={adapter:'t',chatId:'group',topicId:'1',threadId:'one',kind:'group',mirror:true};
   const two={adapter:'t',chatId:'group',topicId:'2',threadId:'two',kind:'group',mirror:true};

@@ -4,9 +4,6 @@ export const adapterTypes = ['discord', 'telegram', 'onebot'];
 
 export function validateConfig(config: ChatConfig) {
   if (!Array.isArray(config.adapters) || !Array.isArray(config.bindings)) throw new Error('adapters and bindings must be arrays');
-  // Existing Codex-only configs remain readable during the guided migration.
-  // Preserve their adapter options instead of silently falling back to the
-  // Codex defaults when the new `agent` field is absent.
   if(!config.agent)config.agent={type:'codex',...(config.codex || {})};
   if(typeof config.agent!=='object' || !['codex','claude-code','pi','opencode'].includes(config.agent.type))throw new Error('agent.type must be codex, claude-code, pi, or opencode');
   if(config.agent.type==='codex') {

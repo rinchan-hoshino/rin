@@ -165,8 +165,7 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
     if (chatFile) {
       const chatConfig = dependencies.readChatConfig(chatFile);
       log = options.log ?? dependencies.createLogger(chatConfig);
-      // The legacy and combined entrypoints intentionally share this lock.
-      // Acquire it before ChatBridge constructs its SQLite store.
+      // Combined entrypoints share this lock. Acquire it before ChatBridge constructs its SQLite store.
       chatPidPath = acquireChatPid(chatConfig.dataDir, pid, processKill);
       const agent = dependencies.createAgentBridge(chatConfig.agent!);
       chat = new dependencies.ChatBridge(chatConfig, { agent, adapterFactory: dependencies.adapterFactory, log });

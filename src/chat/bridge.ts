@@ -27,7 +27,7 @@ export class ChatBridge {
   retryAt: Map<string, {at: number; delay: number}>; lastTypingAt: Map<string, number>; working: ReturnType<typeof resolveWorking>;
   workingTimers: Map<string, {timer: ReturnType<typeof setInterval>; threadId: string; turnId: string; presentationId: string}>;
   running: boolean; flushing: boolean; submittingThreads: Set<string>; timer?: ReturnType<typeof setInterval>; typingTimer?: ReturnType<typeof setInterval>;
-  constructor(config: ChatConfig, { agent, codex, adapterFactory, log = console, store }: {agent?: AgentBridge; /** @deprecated */ codex?: AgentBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore}) {
+  constructor(config: ChatConfig, { agent, codex, adapterFactory, log = console, store }: {agent?: AgentBridge; codex?: AgentBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore}) {
     this.config = validateConfig(config);
     this.log = log;
     this.commands = [];
@@ -46,9 +46,8 @@ export class ChatBridge {
     this.adapterFactory = adapterFactory;
     this.adapters = new Map();
     this.items = new Map(this.store.cursor<[string, PublicItem][]>('public-items') || []);
-    // Kept for on-disk compatibility. A physical App turn can contain several
-    // accepted chat presentations after steer, so delivery finality is stored per
-    // presentation below rather than keyed only by turnId.
+    // A physical turn can contain several accepted chat presentations after steer,
+    // so delivery finality is stored per presentation rather than by turnId.
     this.finalizedTurns = new Set(this.store.cursor<string[]>('finalized-turns') || []);
     this.active = new Set();
     this.faultedThreads = new Set();
@@ -290,8 +289,7 @@ export class ChatBridge {
   async command(config: AdapterConfig,message: ChatMessage) {
     const parsed=parseCommandText(message.text,this.commands);
     if(!parsed)return false;
-    // This was deliberately removed from the old catalog. It remains silent,
-    // including in a private chat, rather than being submitted as a prompt.
+    // Reserved session controls remain silent rather than becoming agent prompts.
     if(parsed.name==='session')return true;
     if(!parsed.registered || (parsed.target && message.commandTarget!=='self'))return this.unknownCommand(config,message);
     const command=this.commands.find(c=>c.name===parsed.name)!;

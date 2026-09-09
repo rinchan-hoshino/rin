@@ -1,10 +1,8 @@
 # Installation
 
-Install and authenticate one supported agent first. Then paste [the installation prompt](../prompts/install.md) into that agent.
+Install and authenticate one supported agent first. Then paste [the installation prompt](../prompts/install.md) into that agent. The guided flow collects the agent session, chat transports, identity rules, bindings, delivery preferences, service choice, and optional Nerve endpoint before writing configuration.
 
-The guided flow verifies a clean release before it writes an installation record or private configuration. It asks separately about the agent, chat transports, identity and chat admission, quiet behavior, the Rin user service, and the optional Nerve MCP endpoint.
-
-Rin never changes the selected agent's global settings, installs optional products, reads an old `~/.rin` tree by default, or replaces an unrelated launcher.
+Rin stores its release record, private configuration, credentials, chat database, and Nerve database in the paths you approve. The selected agent remains the source of agent sessions and authentication.
 
 After installation, the stable CLI provides:
 
@@ -17,8 +15,6 @@ rin app-server start
 rin app-server restart
 ```
 
-The last two commands are explicit Codex operator actions. The daemon never invokes them.
+`rin start|stop|restart` manage Rin resources. The app-server commands are explicit Codex operator actions. `rin update` verifies an isolated candidate, switches the atomic release record, and recovers the previous service when a transition fails.
 
-`rin update` prepares a detached candidate, installs locked dependencies without package scripts, runs the full test suite, and switches the atomic installation record. A failed service transition restores the prior record and attempts to restore the previous service.
-
-Real integration status must be reported separately for each installed agent and chat platform. A fixture, mocked CLI, or successful configuration check is not an end-to-end acceptance.
+Validate configuration before registering a user service. Test an authorized message, an identity rejection, configured chat rules, and a final response for every enabled transport. Record real agent and platform checks separately from fixture or mocked tests.

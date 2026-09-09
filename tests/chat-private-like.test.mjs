@@ -34,7 +34,7 @@ test('private-like keeps group transport semantics while applying dmOnly and men
   assert.equal(allowed(adapter, {...group, privateLike: true, userId: 'stranger'}), false);
 });
 
-test('an explicit owner migration may bind a DM-only group without pre-approving it', async () => {
+test('an explicit owner proof may bind a DM-only group without pre-approving it', async () => {
   const {validateConfig} = await import('../dist/chat/policy.js');
   assert.doesNotThrow(() => validateConfig({adapters: [adapter], bindings: [{adapter: adapter.id, chatId: 'g', kind: 'group', threadId: 't', mirror: true}]}));
   assert.throws(() => validateConfig({adapters: [{...adapter, ownerUsers: []}], bindings: [{adapter: adapter.id, chatId: 'g', kind: 'group', threadId: 't', mirror: true}]}), /DM-only/);

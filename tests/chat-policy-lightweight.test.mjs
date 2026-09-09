@@ -27,12 +27,12 @@ test('chat rule and agent configuration fail closed',()=>{
   assert.throws(()=>validateConfig({agent:{type:'opencode',env:{TOKEN:1}},adapters:[],bindings:[]}),/string values/);
 });
 
-test('legacy codex configuration is migrated without dropping adapter options',()=>{
-  const config=validateConfig({codex:{command:['codex-fixture'],codexHome:'/tmp/codex',endpoint:'ws://127.0.0.1:4500'},adapters:[],bindings:[]});
+test('agent configuration requires an explicit Codex adapter',()=>{
+  const config=validateConfig({agent:{type:'codex',command:['codex-fixture'],codexHome:'/tmp/codex',endpoint:'ws://127.0.0.1:4500'},adapters:[],bindings:[]});
   assert.deepEqual(config.agent,{type:'codex',command:['codex-fixture'],codexHome:'/tmp/codex',endpoint:'ws://127.0.0.1:4500'});
 });
 
-test('legacy quiet forms normalize without changing execution',()=>{
+test('quiet forms normalize consistently',()=>{
   for(const value of [true,'quiet',{enabled:true},{quiet:true},{mode:'quiet'}])assert.equal(quietEnabled(value),true);
   for(const value of [false,undefined,'loud',{enabled:false},{mode:'normal'}])assert.equal(quietEnabled(value),false);
 });

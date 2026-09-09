@@ -57,8 +57,8 @@ export class ChatStore {
     if (!message.replyTo) return undefined;
     const row=this.db.prepare('SELECT payload FROM inbound_messages WHERE adapter=? AND chat_id=? AND topic_id=? AND message_id=?')
       .get(adapterId,String(message.chatId),String(message.topicId || ''),String(message.replyTo)) as {payload?: string} | undefined;
-    const legacyId=message.topicId ? JSON.stringify([adapterId,message.chatId,String(message.topicId),message.replyTo]) : JSON.stringify([adapterId,message.chatId,message.replyTo]);
-    const inbox=row?.payload ? row : this.db.prepare('SELECT payload FROM inbox WHERE id=?').get(legacyId) as {payload?: string} | undefined;
+    const priorKey=message.topicId ? JSON.stringify([adapterId,message.chatId,String(message.topicId),message.replyTo]) : JSON.stringify([adapterId,message.chatId,message.replyTo]);
+    const inbox=row?.payload ? row : this.db.prepare('SELECT payload FROM inbox WHERE id=?').get(priorKey) as {payload?: string} | undefined;
     if (!inbox?.payload) {
       const route=message.topicId ? JSON.stringify([adapterId,String(message.chatId),String(message.topicId)]) : JSON.stringify([adapterId,String(message.chatId)]);
       const sent=this.db.prepare('SELECT sent_payload,payload FROM deliveries WHERE route=? AND message_id=? ORDER BY updated DESC LIMIT 1').get(route,String(message.replyTo)) as {sent_payload?: string; payload?: string} | undefined;
