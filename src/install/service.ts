@@ -1,6 +1,6 @@
 import {errorCode} from './types.js';
 import type {Exec,ExecOptions,ExecResult,Service} from './types.js';
-export interface ServiceOptions {home: string; node?: string; platform?: NodeJS.Platform; userHome?: string; env?: NodeJS.ProcessEnv; run?: Exec; isReady?: ()=>Promise<boolean>; timeoutMs?: number; pollMs?: number}
+export interface ServiceOptions {home: string; node?: string; platform?: NodeJS.Platform; userHome?: string; env?: NodeJS.ProcessEnv; run?: Exec; isReady?: ()=>Promise<boolean>; timeoutMs?: number; pollMs?: number; serviceId?: string}
 interface ServiceCommand {node: string; runner: string; pathValue: string}
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
@@ -15,11 +15,11 @@ const xml= (value: unknown)=>String(value).replaceAll('&','&amp;').replaceAll('<
 const systemd= (value: unknown)=>String(value).replaceAll('\\','\\\\').replaceAll('"','\\"').replaceAll('%','%%').replaceAll('$',()=> '$$').replaceAll('\n','\\n');
 const ps= (value: unknown)=>`'${String(value).replaceAll("'","''")}'`;
 
-function macPlist({node,runner,pathValue}: ServiceCommand) {
+function macPlist({node,runner,pathValue}: ServiceCommand, label=MAC_LABEL) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>${MAC_LABEL}</string>
+<key>Label</key><string>${xml(label)}</string>
 <key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(runner)}</string></array>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(pathValue)}</string></dict>
 <key>StandardOutPath</key><string>${xml(join(dirname(runner),'private/logs/daemon.log'))}</string>
@@ -64,8 +64,8 @@ function managerError(command: string,args: string[],result: Partial<ExecResult>
   return Object.assign(new Error(`${summary}: ${managerDetail(command,args,result)}`),result);
 }
 
-function macJobDetail(domain: string,result: Partial<ExecResult>) {
-  const args=['print',`${domain}/${MAC_LABEL}`];
+function macJobDetail(domain: string,result: Partial<ExecResult>,label=MAC_LABEL) {
+  const args=['print',`${domain}/${label}`];
   if(result.code!==0)return managerDetail('launchctl',args,result);
   const status=String(result.stdout||'').split('\n').filter(line=>/\b(?:state|pid|last exit code|terminating signal)\s*=/.test(line.trim())).join('\n');
   return managerDetail('launchctl',args,{...result,stdout:status,stderr:''});
@@ -80,13 +80,14 @@ export async function daemonReady(home: string) {
   }catch(error){if(errorCode(error)==='ENOENT')return false;throw error;}
 }
 
-export function createService({home,node=process.execPath,platform=process.platform,userHome=homedir(),env=process.env,run=coreRun,isReady=()=>daemonReady(home),timeoutMs=30000,pollMs=250}: ServiceOptions): Service {
+export function createService({home,node=process.execPath,platform=process.platform,userHome=homedir(),env=process.env,run=coreRun,isReady=()=>daemonReady(home),timeoutMs=30000,pollMs=250,serviceId}: ServiceOptions): Service {
   if(!home||typeof home!=='string')throw new TypeError('home is required');
   const runner=join(home,'daemon-run.mjs');
+  const macLabel=serviceId && /^com\.rin\.[a-z0-9-]+$/.test(serviceId) ? serviceId : MAC_LABEL;
   const pathValue=String(env.PATH||'');
   const uid=String(env.UID??(typeof process.getuid==='function'?process.getuid():''));
   let configPath='';
-  if(platform==='darwin')configPath=join(userHome,'Library','LaunchAgents',`${MAC_LABEL}.plist`);
+  if(platform==='darwin')configPath=join(userHome,'Library','LaunchAgents',`${macLabel}.plist`);
   else if(platform==='linux')configPath=join(userHome,'.config','systemd','user',LINUX_UNIT);
   else if(platform!=='win32')throw new Error(`unsupported service platform: ${platform}`);
 
@@ -97,15 +98,15 @@ export function createService({home,node=process.execPath,platform=process.platf
 
   const macJob=async()=>{
     let result;
-    try { result=await invoke('launchctl',['print',`${domain}/${MAC_LABEL}`],{capture:true,allowFailure:true}); }
+    try { result=await invoke('launchctl',['print',`${domain}/${macLabel}`],{capture:true,allowFailure:true}); }
     catch(error) { if(expectedNotRunning(error,'darwin'))return {present:false,running:false}; throw error; }
     if(result?.code!==0) {
-      const error=managerError('launchctl',['print',`${domain}/${MAC_LABEL}`],result||{},'launchctl status query failed');
-      if(expectedNotRunning(error,'darwin'))return {present:false,running:false,detail:macJobDetail(domain,result||{})};
+      const error=managerError('launchctl',['print',`${domain}/${macLabel}`],result||{},'launchctl status query failed');
+      if(expectedNotRunning(error,'darwin'))return {present:false,running:false,detail:macJobDetail(domain,result||{},macLabel)};
       throw error;
     }
     const output=String(result.stdout||'');
-    return {present:true,running:/(?:^|\n)\s*(?:state = running|pid = \d+)\s*(?:\n|$)/.test(output),detail:macJobDetail(domain,result)};
+    return {present:true,running:/(?:^|\n)\s*(?:state = running|pid = \d+)\s*(?:\n|$)/.test(output),detail:macJobDetail(domain,result,macLabel)};
   };
 
   const status=async()=>{
@@ -141,8 +142,8 @@ export function createService({home,node=process.execPath,platform=process.platf
       if(platform==='darwin') {
         if(!uid)throw new Error('macOS service requires a user uid');
         await mkdir(dirname(configPath),{recursive:true});
-        await writeFile(configPath,macPlist({node,runner,pathValue}),{mode:0o644});
-        await invoke('launchctl',['disable',`${domain}/${MAC_LABEL}`]);
+        await writeFile(configPath,macPlist({node,runner,pathValue},macLabel),{mode:0o644});
+        await invoke('launchctl',['disable',`${domain}/${macLabel}`]);
       } else if(platform==='linux') {
         await mkdir(dirname(configPath),{recursive:true});
         await writeFile(configPath,linuxUnit({node,runner,pathValue}),{mode:0o644});
@@ -153,11 +154,11 @@ export function createService({home,node=process.execPath,platform=process.platf
     async start() {
       if(platform==='darwin') {
         if(!uid)throw new Error('macOS service requires a user uid');
-        await invoke('launchctl',['enable',`${domain}/${MAC_LABEL}`]);
+        await invoke('launchctl',['enable',`${domain}/${macLabel}`]);
         if(!(await macJob()).present)await invoke('launchctl',['bootstrap',domain,configPath]);
         // bootstrap registers a disabled-at-load job but does not reliably start it.
         // Always request its first run explicitly, just as for an already-loaded job.
-        await invoke('launchctl',['kickstart',`${domain}/${MAC_LABEL}`]);
+        await invoke('launchctl',['kickstart',`${domain}/${macLabel}`]);
       } else if(platform==='linux') await invoke('systemctl',['--user','enable','--now',LINUX_UNIT]);
       else await powershell(`Enable-ScheduledTask -TaskName ${ps(WINDOWS_TASK)} | Out-Null;Start-ScheduledTask -TaskName ${ps(WINDOWS_TASK)}`);
       let consecutive=0;
@@ -172,12 +173,12 @@ export function createService({home,node=process.execPath,platform=process.platf
     async stop() {
       if(platform==='darwin') {
         if(!uid)throw new Error('macOS service requires a user uid');
-        await invoke('launchctl',['disable',`${domain}/${MAC_LABEL}`]);
+        await invoke('launchctl',['disable',`${domain}/${macLabel}`]);
         const job=await macJob();
         if(job.present) {
-          const result=await invoke('launchctl',['bootout',`${domain}/${MAC_LABEL}`],{capture:true,allowFailure:true});
+          const result=await invoke('launchctl',['bootout',`${domain}/${macLabel}`],{capture:true,allowFailure:true});
           if(result?.code!==0) {
-            const error=managerError('launchctl',['bootout',`${domain}/${MAC_LABEL}`],result,'launchctl bootout failed');
+            const error=managerError('launchctl',['bootout',`${domain}/${macLabel}`],result,'launchctl bootout failed');
             if(!expectedNotRunning(error,'darwin'))throw error;
           }
         }

@@ -43,7 +43,7 @@ export async function main(args=process.argv.slice(2),{
       console.log(`Codex app-server ${route.command==='start'?'ready':'restarted'}.`);
       return 0;
     }
-    const service=serviceFactory({home,node:state.node});
+    const service=serviceFactory({home,node:state.node,userHome:process.env.HOME || process.env.USERPROFILE || homedir(),serviceId:state.serviceId});
     if(route.command==='update'){
       const candidate=await prepare(home,{repository:state.repository,current:state.current});
       if(!candidate.changed){console.log('Rin is already up to date.');return 0;}
