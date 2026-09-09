@@ -24,8 +24,8 @@ const withInstallLock = async (home, fn) => { await mkdir(home, {recursive:true,
 const findNpmCli = async () => { const paths = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':'); for (const dir of paths) { const file=join(dir, process.platform === 'win32' ? 'npm.cmd' : 'npm'); if (await exists(file)) return file; } const bundled=join(dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js'); if (await exists(bundled)) return bundled; throw new Error('Rin requires npm from Node.js 24 or newer. Install the official Node.js 24+ package so node and npm are both on PATH, then retry.'); };
 const REPOSITORY = 'https://github.com/rinchan-hoshino/rin.git';
 const platformBin = (platform=process.platform, env=process.env) => platform === 'win32'
-  ? join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Rin', 'bin')
-  : join(homedir(), '.local', 'bin');
+  ? (env.RIN_BIN_DIR || join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Rin', 'bin'))
+  : (env.RIN_BIN_DIR || join(homedir(), '.local', 'bin'));
 
 async function requireNode() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error(`Rin requires Node.js 24 or newer; found ${process.versions.node}. Install Node.js 24+ and retry.`);
