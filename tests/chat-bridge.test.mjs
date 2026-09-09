@@ -12,7 +12,7 @@ test('durable ingress queues once; commentary edits same remote message; tool ev
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async(t,m)=>{queued.push([t,m]);return {messageId:'q1'};}};
   const adapter={capabilities:{edit:true,typing:true,maxText:2000},start:async(fn)=>{receive=fn;},stop:async()=>{},typing:async()=>{},delete:async(_target,id)=>{deleted.push(id);},send:async(t,o)=>{sent.push(o);return {id:o.editId || `remote-${sent.length}`};}};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'t',mirror:true}]};
-  const b=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const b=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await b.start();
     const m={id:'m',chatId:'dm',userId:'owner',kind:'dm',text:'hi'};
@@ -33,7 +33,7 @@ test('idle failed admission types once, reports once through the outbox, and nev
   const adapter={capabilities:{edit:true,typing:true,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},
     typing:async()=>{typing.push('typing');},send:async(_target,output)=>{sent.push(output);return {id:`remote-${sent.length}`};}};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();const message={id:'source',chatId:'dm',userId:'owner',kind:'dm',text:'hello'};
     await receive(message);await new Promise(resolve=>setImmediate(resolve));await bridge.flush();
@@ -54,7 +54,7 @@ test('submission failure preserves an existing active turn, queue stays idle, an
   }};
   const adapter={capabilities:{edit:false,typing:true,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},typing:async()=>{typing.push('typing');},send:async()=>({id:'reply'})};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();
     await receive({id:'queued',chatId:'dm',userId:'owner',kind:'dm',text:'queued'});await new Promise(resolve=>setImmediate(resolve));
@@ -81,7 +81,7 @@ test('explicit unsupported Codex input preserves the original error message',asy
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>{throw error;}};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return {id:'reply'};}};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'file',chatId:'dm',userId:'owner',kind:'dm',text:'',files:[{name:'x'}]});
     await new Promise(resolve=>setImmediate(resolve));await bridge.flush();assert.equal(sent[0].text,'unsupported');assert.equal(sent[0].replyTo,'file');
@@ -95,7 +95,7 @@ test('a shorter projection retains the first remote message and deletes surplus 
     send:async(_target,output)=>{const id=output.editId || `remote-${next++}`;calls.push(['send',output,id]);remote.set(id,output.text);return {id};},
     delete:async(_target,id)=>{calls.push(['delete',id]);assert.ok(remote.has(id));remote.delete(id);}};
   const config={dataDir,adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'t',mirror:true}]};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();
     bridge.store.setCursor(`reply:${bridge.routeKey(config.bindings[0])}`,{messageId:'source-message'});
@@ -119,7 +119,7 @@ test('restart preserves buffered public text until completion on a no-edit trans
   const makeCodex=()=>({start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})});
   const makeAdapter=()=>({capabilities:{edit:false,typing:false,maxText:4096},start:async()=>{},stop:async()=>{},
     send:async(_target,output)=>{sent.push(output);return {id:`remote-${sent.length}`};}});
-  let first=new ChatBridge(config,{codex:makeCodex(),adapterFactory:async()=>makeAdapter(),log:{info(){},warn(){},error(){}}});
+  let first=new ChatBridge(config,{agent:makeCodex(),adapterFactory:async()=>makeAdapter(),log:{info(){},warn(){},error(){}}});
   try{
     await first.start();
     first.event({threadId:'thread',turnId:'turn',type:'text',itemId:'answer',phase:'final_answer',delta:'durable buffered answer'});
@@ -127,7 +127,7 @@ test('restart preserves buffered public text until completion on a no-edit trans
     assert.equal(first.store.cursor('public-items').length,1);
     await first.stop();first=null;
 
-    const second=new ChatBridge(config,{codex:makeCodex(),adapterFactory:async()=>makeAdapter(),log:{info(){},warn(){},error(){}}});
+    const second=new ChatBridge(config,{agent:makeCodex(),adapterFactory:async()=>makeAdapter(),log:{info(){},warn(){},error(){}}});
     try{
       await second.start();
       second.event({threadId:'thread',turnId:'turn',type:'completed'});
@@ -147,7 +147,7 @@ for(const type of ['discord','telegram']) test(`${type}: different public items 
   const calls=[],remote=new Map();let nextId=1,bridge;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const makeBridge=()=>new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
     adapterFactory:async()=>({capabilities:{edit:true,typing:false,maxText:4096},start:async()=>{},stop:async()=>{},
       send:async(_target,output)=>{
         const id=output.editId || `remote-${nextId++}`;
@@ -211,7 +211,7 @@ for(const type of ['discord','telegram']) test(`${type}: native start immediatel
   const calls=[],remote=new Map();let nextId=1,receive;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const bridge=new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'queued'})},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'queued'})},
     adapterFactory:async()=>({capabilities:{edit:true,typing:true,maxText:4096},start:async fn=>{receive=fn;},stop:async()=>{},typing:async()=>{calls.push({method:'typing'});},
       send:async(_target,output)=>{const id=output.editId || `remote-${nextId++}`;remote.set(id,output.text);calls.push({method:output.editId?'edit':'send',id,...output});return {id};},
       delete:async(_target,id)=>{assert.ok(remote.has(id));remote.delete(id);calls.push({method:'delete',id});},
@@ -248,7 +248,7 @@ for(const type of ['discord','telegram']) test(`${type}: a new turn after an err
   const calls=[],remote=new Map();let nextId=1;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const bridge=new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
     adapterFactory:async()=>({capabilities:{edit:true,typing:false,maxText:4096},start:async()=>{},stop:async()=>{},
       send:async(_target,output)=>{const id=output.editId || `remote-${nextId++}`;remote.set(id,output.text);calls.push({method:output.editId?'edit':'send',id,...output});return {id};},
       delete:async(_target,id)=>{assert.ok(remote.has(id));remote.delete(id);calls.push({method:'delete',id});},
@@ -283,7 +283,7 @@ test('Discord keeps separate quote slots and a final deletes only its frozen sou
   const calls=[],remote=new Map();let nextId=1;
   const config={dataDir,adapters:[{id:'chat',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const bridge=new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})},
     adapterFactory:async()=>({capabilities:{edit:true,typing:false,maxText:4096},start:async()=>{},stop:async()=>{},
       send:async(_target,output)=>{const id=output.editId || `remote-${nextId++}`;remote.set(id,output.text);calls.push({method:output.editId?'edit':'send',id,...output});return {id};},
       delete:async(_target,id)=>{assert.ok(remote.has(id));remote.delete(id);calls.push({method:'delete',id});},
@@ -317,7 +317,7 @@ for(const type of ['onebot']) test(`${type}: complete public snapshots arrive im
   const file=join(dataDir,'image.png');writeFileSync(file,'image');
   const calls=[];let bridge;
   const config={dataDir,attachmentRoots:[dataDir],adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
-  const make=()=>new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},adapterFactory:async()=>({
+  const make=()=>new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},adapterFactory:async()=>({
     capabilities:{edit:false,typing:false,maxText:4000},start:async()=>{},stop:async()=>{},
     send:async(target,output)=>{assert.equal(output.editId,undefined);calls.push(output);return {id:`remote-${calls.length}`};},
     delete:async()=>{assert.fail('immutable messages must never be retired');},
@@ -348,7 +348,7 @@ test('OneBot freezes passive reply context for every queued text/media part acro
   const config={dataDir,attachmentRoots:[dataDir],adapters:[{id:'qq',type:'onebot',allowUsers:['owner'],dmOnly:false}],bindings:[{adapter:'qq',chatId:'group',kind:'group',threadId:'thread',mirror:true}]};
   const calls=[];let bridge;
   const make=()=>new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},
     adapterFactory:async()=>({capabilities:{edit:false,typing:false,maxText:12},start:async()=>{},stop:async()=>{},
       send:async(target,output)=>{calls.push({target,output});return {id:`sent-${calls.length}`};},
     }),log:{info(){},warn(){},error(){}},
@@ -379,7 +379,7 @@ test('Working fallback is plain, quoted, durable and absent with edit or reactio
  const dataDir=mkdtempSync(join(tmpdir(),'rin-working-fallback-'));const calls=[];let bridge;
  const config={dataDir,adapters:[{id:'qq',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'qq',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
  const adapter={capabilities:{edit:false,typing:false},start:async()=>{},stop:async()=>{},send:async(target,output)=>{calls.push({target,output});return{id:String(calls.length)};}};
- const make=()=>new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+ const make=()=>new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
  try{
   bridge=make();await bridge.start();const binding=config.bindings[0],context={messageId:'source',userId:'owner'};
   bridge.store.setCursor(`reply:${bridge.routeKey(binding)}`,context);
@@ -398,7 +398,7 @@ for(const type of ['discord','telegram','onebot'])test(`${type}: questions stay 
   let nextId=0,b;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'t',mirror:true}]};
   const make=()=>new ChatBridge(config,{
-    codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},
     adapterFactory:async()=>({capabilities:{edit:editable,typing:false,maxText:4000},start:async()=>{},stop:async()=>{},
       send:async(_target,output)=>{const id=output.editId||String(++nextId);remote.set(id,output.text);calls.push(output);return{id};},
       delete:async(_target,id)=>remote.delete(id),
@@ -449,7 +449,7 @@ test('completed App images use agent-scoped artifacts and durable OneBot reply d
   const outside=join(dataDir,'private.png');writeFileSync(outside,'private');symlinkSync(outside,join(root,'escape.png'));
   const config={dataDir,attachmentRoots:[root],adapters:[{id:'q',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'g',kind:'group',threadId:'t',mirror:true}]};
   const adapter={capabilities:{edit:false,maxText:2000},start:async()=>{},stop:async()=>{},send:async(_t,o)=>{sent.push(o);return{id:'sent-image'};}};
-  const deps={codex:{start:async()=>{},stop:async()=>{},watch(){}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}};
+  const deps={agent:{start:async()=>{},stop:async()=>{},watch(){}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}};
   let bridge=new ChatBridge(config,deps);await bridge.start();
   try{
     const route=bridge.routeKey(config.bindings[0]);bridge.store.setCursor(`turn-reply:${route}:turn`,{messageId:'original',userId:'owner'});
@@ -468,7 +468,7 @@ for(const [type,edit] of [['discord',true],['onebot',false]]) test(`${type}: an 
   const adapter={capabilities:{edit,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},
     send:async(target,output)=>{sent.push({target,output});return{id:output.editId || `remote-${sent.length}`};},delete:async()=>{}};
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner-a','owner-b'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
-  let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  let bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();
     await receive({id:'A',chatId:'dm',userId:'owner-a',kind:'dm',text:'first'});await bridge.submit();
@@ -485,7 +485,7 @@ for(const [type,edit] of [['discord',true],['onebot',false]]) test(`${type}: an 
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'new',phase:'final',text:'B final',ordinal:21});await bridge.flush();
     assert.ok(sent.some(({output})=>output.text==='B final' && output.replyTo==='B'));
     assert.ok(sent.some(({target,output})=>output.text==='B final' && target.messageId==='B'));
-    await bridge.stop();bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});await bridge.start();
+    await bridge.stop();bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});await bridge.start();
     const count=sent.length;
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'old-final',phase:'final',text:'A final',ordinal:11});await bridge.flush();
     assert.equal(sent.length,count,'restart keeps the old item ownership and delivery dedupe');
@@ -499,7 +499,7 @@ test('steer persists an input boundary seen before its receipt and defers later 
     : {transport:'app-server',turnId:'physical',messageId:'steer-client'}};
   const config={dataDir,adapters:[{id:'chat',type:'discord',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
-  let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  let bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'});await bridge.submit();
     bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-a',clientMessageId:'start-client',ordinal:1});
@@ -510,7 +510,7 @@ test('steer persists an input boundary seen before its receipt and defers later 
     assert.equal(sent.some(({output})=>output.text==='new'),false,'unmatched input boundary defers output rather than assigning it to A');
     await receive({id:'B',chatId:'dm',userId:'owner',kind:'dm',text:'B'});await bridge.submit();await bridge.flush();
     assert.ok(sent.some(({output})=>output.text==='new' && output.replyTo==='B'));
-    await bridge.stop();bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});await bridge.start();
+    await bridge.stop();bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});await bridge.start();
     bridge.event({threadId:'thread',turnId:'physical',type:'text',itemId:'after-restart',phase:'final',text:'after restart',ordinal:22});await bridge.flush();
     assert.ok(sent.some(({output})=>output.text==='after restart' && output.replyTo==='B'),'persisted boundary retains B ownership after restart');
   }finally{await bridge?.stop();rmSync(dataDir,{recursive:true,force:true});}
@@ -522,7 +522,7 @@ test('completed output buffered before a late steer receipt retains question, te
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1?{transport:'app-server',turnId:'physical',messageId:'start'}:{transport:'app-server',turnId:'physical',messageId:'steer'}};
   const config={dataDir,attachmentRoots:[imageRoot],adapters:[{id:'chat',type:'onebot',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
-  let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  let bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'});await bridge.submit();
     bridge.event({threadId:'thread',turnId:'physical',type:'input',itemId:'input-a',clientMessageId:'start',ordinal:1});
@@ -547,7 +547,7 @@ test('reaction working lifecycle is per presentation, removes on terminal, and f
     endReaction:async(target,id)=>{reactions.push(['end',target,id]);},
     send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};},
   };
-  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();const binding=config.bindings[0],route=bridge.routeKey(binding);
     bridge.store.setCursor(`reply:${route}`,{messageId:'source-a',userId:'owner'});
@@ -564,7 +564,7 @@ test('reaction working lifecycle is per presentation, removes on terminal, and f
 test('late terminal for an older physical turn does not clear the current manual turn',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-manual-terminal-'));const config={dataDir,adapters:[{id:'chat',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async()=>{},stop:async()=>{},send:async()=>({id:'sent'})};
-  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();bridge.event({threadId:'thread',turnId:'older',type:'started'});bridge.event({threadId:'thread',turnId:'manual',type:'started'});
     bridge.event({threadId:'thread',turnId:'older',type:'completed'});
@@ -577,7 +577,7 @@ test('start observed before its receipt keeps the submitting chat reply context 
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1 ? new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'turn-a',messageId:'start-a'});}) : {messageId:'queued'}};
   const config={dataDir,adapters:[{id:'chat',type:'onebot',allowUsers:['a','b']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();await receive({id:'A',chatId:'dm',userId:'a',kind:'dm',text:'A'});await new Promise(resolve=>setImmediate(resolve));
     await receive({id:'B',chatId:'dm',userId:'b',kind:'dm',text:'B'});
@@ -593,7 +593,7 @@ test('a failed turn before the steer receipt delivers one failure to the accepte
   const config={dataDir,adapters:[{id:'chat',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1?{transport:'app-server',turnId:'physical'}:new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'physical',messageId:'client-b'});})};
-  const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try {
     await bridge.start(); await receive({id:'A',chatId:'dm',userId:'owner',kind:'dm',text:'A'}); await new Promise(setImmediate);
     await receive({id:'B',chatId:'dm',userId:'owner',kind:'dm',text:'B'}); await new Promise(setImmediate);
@@ -610,7 +610,7 @@ test('retiring a presentation removes a reaction whose create request returns la
   const dataDir=mkdtempSync(join(tmpdir(),'rin-late-reaction-')); let release; const removed=[];
   const config={dataDir,adapters:[{id:'chat',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,reaction:true},start:async()=>{},stop:async()=>{},send:async()=>({id:'sent'}),startReaction:async()=>new Promise(resolve=>{release=()=>resolve({id:'late'});}),endReaction:async(target,id)=>{removed.push({target,id});}};
-  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try {
     await bridge.start(); const binding=config.bindings[0];
     const first=bridge.activatePresentation(binding,'A','turn',{messageId:'A'});

@@ -4,7 +4,7 @@ export const adapterTypes = ['discord', 'telegram', 'onebot'];
 
 export function validateConfig(config: ChatConfig) {
   if (!Array.isArray(config.adapters) || !Array.isArray(config.bindings)) throw new Error('adapters and bindings must be arrays');
-  if(!config.agent)config.agent={type:'codex',...(config.codex || {})};
+  if(!config.agent)config.agent={type:'codex'};
   if(typeof config.agent!=='object' || !['codex','claude-code','pi','opencode'].includes(config.agent.type))throw new Error('agent.type must be codex, claude-code, pi, or opencode');
   if(config.agent.type==='codex') {
     if(config.agent.command!==undefined && (!Array.isArray(config.agent.command) || !config.agent.command.length || config.agent.command.some(value=>typeof value!=='string' || !value)))throw new Error('agent.command must be a non-empty argv array for Codex');
@@ -45,8 +45,8 @@ export function validateConfig(config: ChatConfig) {
     threads.add(b.threadId);
     const a = config.adapters.find(a => a.id === b.adapter)!;
     // A group binding on a DM-only adapter remains unreachable unless a fresh
-    // private-like proof succeeds.  Do not reject an explicitly migrated owner
-    // configuration before that runtime proof can run.
+    // private-like proof succeeds. Do not reject an owner configuration before
+    // that runtime proof can run.
     if ((a.dmOnly ?? a.type === 'discord') && b.kind !== 'dm' && (!Array.isArray(a.ownerUsers) || a.ownerUsers.length === 0)) throw new Error('DM-only adapter cannot bind a group without explicit ownerUsers');
     if (b.mirror !== undefined && typeof b.mirror !== 'boolean') throw new Error('mirror must be boolean');
     if (b.mirror !== true) throw new Error('Explicit mirror:true is required: a bound chat receives future public output from this thread');
@@ -94,7 +94,7 @@ export function allowed(adapter: AdapterConfig, message: ChatMessage, {command =
   const admissionKind = (message.kind === 'dm' || privateLike) ? 'dm' : message.kind;
   if (!admitted(adapter, message.userId, admissionKind, {command})) return false;
   if(!command && !chatAllowed(adapter,message))return false;
-  // Legacy commands were authenticated by sender identity and command registry.
+  // Commands are authenticated by sender identity and the command registry.
   // Mentioning only gates ordinary group conversation.
   if (message.kind === 'group' && !privateLike && adapter.requireMention !== false && !message.mentioned && !command) return false;
   // A direct message or a bot-mentioned group reply can consist solely of a

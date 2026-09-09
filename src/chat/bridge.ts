@@ -27,7 +27,7 @@ export class ChatBridge {
   retryAt: Map<string, {at: number; delay: number}>; lastTypingAt: Map<string, number>; working: ReturnType<typeof resolveWorking>;
   workingTimers: Map<string, {timer: ReturnType<typeof setInterval>; threadId: string; turnId: string; presentationId: string}>;
   running: boolean; flushing: boolean; submittingThreads: Set<string>; timer?: ReturnType<typeof setInterval>; typingTimer?: ReturnType<typeof setInterval>;
-  constructor(config: ChatConfig, { agent, codex, adapterFactory, log = console, store }: {agent?: AgentBridge; codex?: AgentBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore}) {
+  constructor(config: ChatConfig, { agent, adapterFactory, log = console, store }: {agent: AgentBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore}) {
     this.config = validateConfig(config);
     this.log = log;
     this.commands = [];
@@ -39,7 +39,7 @@ export class ChatBridge {
     }
     validateConfig(this.config);
     this.bindingCreations=new Map();
-    this.agent = agent || codex!;
+    this.agent = agent;
     if(!this.agent)throw new Error('agent bridge is required');
     this.agent.getCursor = key => this.store.cursor(key);
     this.agent.setCursor = (key,value) => this.store.setCursor(key,value);

@@ -23,7 +23,7 @@ function fixture(t,createThread) {
  const dataDir=mkdtempSync(join(tmpdir(),'rin-auto-bind-'));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));
  const config={dataDir,adapters:[{id:'discord',type:'discord',allowUsers:['owner'],dmOnly:false,autoBind:{cwd:dataDir,excludedChatIds:['casual']}}],bindings:[]};
  const queue=[];const watches=[];const contexts=[];
- const make=()=>new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async id=>watches.push(id),createThread,queue:async(id,input)=>{queue.push({id,input});return{messageId:'queued'};}},adapterFactory:async(_config,context)=>{contexts.push(context);return{capabilities:{maxText:2000},start:async()=>{},stop:async()=>{},send:async()=>({id:'sent'})};},log:{info(){},warn(){},error(){}}});
+ const make=()=>new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async id=>watches.push(id),createThread,queue:async(id,input)=>{queue.push({id,input});return{messageId:'queued'};}},adapterFactory:async(_config,context)=>{contexts.push(context);return{capabilities:{maxText:2000},start:async()=>{},stop:async()=>{},send:async()=>({id:'sent'})};},log:{info(){},warn(){},error(){}}});
  return{config,make,queue,watches,contexts};
 }
 test('first admitted message creates one task; concurrent messages and restart reuse it',async t=>{
