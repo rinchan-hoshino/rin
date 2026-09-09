@@ -83,7 +83,7 @@ export async function withInstallLock<T>(home: string, fn: ()=>Promise<T>): Prom
 }
 
 // Prepare a separate Git checkout; never mutate the running release or reset user work.
-export async function prepareRelease(home: string, { repository = REPOSITORY, current, exec = run }: {repository?: string; current?: string; exec?: Exec} = {}): Promise<Candidate> {
+export async function prepareRelease(home: string, { repository = REPOSITORY, current, revision, exec = run }: {repository?: string; current?: string; revision?: string; exec?: Exec} = {}): Promise<Candidate> {
   const source = join(home, 'source.git');
   if (!await exists(source)) {
     await exec('git', ['init', '--bare', source]);
@@ -93,7 +93,8 @@ export async function prepareRelease(home: string, { repository = REPOSITORY, cu
   const remote = (await exec('git', ['--git-dir', source, 'remote', 'get-url', 'origin'], { capture: true })).stdout.trim();
   if (remote !== repository) throw new Error('The saved Git remote does not match this installation');
   await exec('git', ['--git-dir', source, 'fetch', '--no-tags', 'origin', 'refs/heads/main:refs/heads/main']);
-  const sha = (await exec('git', ['--git-dir', source, 'rev-parse', 'refs/heads/main'], { capture: true })).stdout.trim();
+  if (revision) await exec('git', ['--git-dir', source, 'fetch', '--no-tags', 'origin', revision]);
+  const sha = revision || (await exec('git', ['--git-dir', source, 'rev-parse', 'refs/heads/main'], { capture: true })).stdout.trim();
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Git returned an invalid revision');
   if (current) await exec('git', ['--git-dir', source, 'merge-base', '--is-ancestor', current, sha]);
   if (sha === current) return { sha, changed: false };

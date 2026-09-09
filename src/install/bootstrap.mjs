@@ -4,13 +4,25 @@
 import {access, mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, join, resolve} from 'node:path';
 import {homedir} from 'node:os';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {atomicJSON, findNpmCli, installHome, prepareRelease, REPOSITORY, run, withInstallLock} from '../../dist/install/core.js';
-import {writeLaunchers} from '../../dist/install/launchers.js';
-import {createService} from '../../dist/install/service.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exists = path => access(path).then(() => true, () => false);
+const run = (command, args, options={}) => new Promise((resolveRun, rejectRun) => {
+  import('node:child_process').then(({spawn}) => {
+    const {capture=false, ...spawnOptions} = options;
+    const child = spawn(command, args, {stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', ...spawnOptions});
+    let stdout='', stderr=''; child.stdout?.on('data', b => { stdout += b; }); child.stderr?.on('data', b => { stderr += b; });
+    child.once('error', rejectRun); child.once('close', code => code === 0 ? resolveRun({code, stdout, stderr}) : rejectRun(new Error(`${command} failed (${code}): ${stderr.trim() || stdout.trim()}`)));
+  }, rejectRun);
+});
+const installHome = (env=process.env, platform=process.platform) => resolve(env.RIN_HOME || (platform === 'win32' ? join(env.LOCALAPPDATA || homedir(), 'Rin') : join(env.XDG_DATA_HOME || join(homedir(), '.local/share'), 'rin')));
+export const serviceIdForHome = home => `com.rin.user-${createHash('sha256').update(resolve(home)).digest('hex').slice(0, 12)}`;
+const atomicJSON = async (path, data) => { const temp = `${path}.tmp-${process.pid}`; await writeFile(temp, JSON.stringify(data, null, 2) + '\n', {mode: 0o600}); await import('node:fs/promises').then(({rename,rm}) => rename(temp, path).finally(() => rm(temp, {force:true}))); };
+const withInstallLock = async (home, fn) => { await mkdir(home, {recursive:true, mode:0o700}); const lock=join(home,'install.lock'); try { await mkdir(lock); } catch { throw new Error('Another Rin install/update is already running.'); } try { return await fn(); } finally { await import('node:fs/promises').then(({rm}) => rm(lock, {recursive:true, force:true})); } };
+const findNpmCli = async () => { const paths = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':'); for (const dir of paths) { const file=join(dir, process.platform === 'win32' ? 'npm.cmd' : 'npm'); if (await exists(file)) return file; } const bundled=join(dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js'); if (await exists(bundled)) return bundled; throw new Error('Rin requires npm from Node.js 24 or newer. Install the official Node.js 24+ package so node and npm are both on PATH, then retry.'); };
+const REPOSITORY = 'https://github.com/rinchan-hoshino/rin.git';
 const platformBin = (platform=process.platform, env=process.env) => platform === 'win32'
   ? join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Rin', 'bin')
   : join(homedir(), '.local', 'bin');
@@ -45,14 +57,18 @@ async function addCommandPath(binDir, platform=process.platform, env=process.env
 }
 
 export async function install({home=installHome(), repository=REPOSITORY, binDir=platformBin(), platform=process.platform, env=process.env}={}) {
+  if (await exists(join(home, 'install.json'))) return {home, binDir, existing:true};
   const sha = await verifySource();
   return withInstallLock(home, async () => {
-    if (await exists(join(home, 'install.json'))) throw new Error(`Rin is already installed at ${home}; use rin update.`);
-    const candidate = await prepareRelease(home, {repository});
+    if (await exists(join(home, 'install.json'))) return {home, binDir, existing:true};
+    const {prepareRelease} = await import('../../dist/install/core.js');
+    const {writeLaunchers} = await import('../../dist/install/launchers.js');
+    const {createService} = await import('../../dist/install/service.js');
+    const candidate = await prepareRelease(home, {repository, revision: sha});
     if (candidate.sha !== sha && repository === REPOSITORY) throw new Error('The verified source changed while preparing the release; retry the installer.');
     await mkdir(join(home, 'private', 'logs'), {recursive: true, mode: 0o700});
     await atomicJSON(join(home, 'private', 'daemon.json'), {chat: null, nerve: null});
-    const serviceId = `com.rin.user-${sha.slice(0, 12)}`;
+    const serviceId = serviceIdForHome(home);
     await writeLaunchers(home, {binDir, platform, publish: true});
     const service = createService({home, node: process.execPath, platform, env: {...env, PATH: [binDir, dirname(process.execPath), env.PATH || ''].filter(Boolean).join(platform === 'win32' ? ';' : ':')}, serviceId});
     await service.install();
