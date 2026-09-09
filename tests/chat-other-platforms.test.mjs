@@ -4,66 +4,11 @@ import { EventEmitter } from 'node:events';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { QQBot } from '@tencent-connect/qqbot-nodejs';
-import { createAdapter as createQQ } from '../dist/chat/adapters/qqbot.js';
 import { createAdapter as createOneBot } from '../dist/chat/adapters/onebot.js';
 
 async function context() {
   return { dataDir: await mkdtemp(path.join(tmpdir(), 'rin-chat-')), log: {}, getCursor() {}, setCursor() {} };
 }
-
-class FakeQQBot extends EventEmitter {
-  constructor(options) { super(); this.options = options; FakeQQBot.instance = this; }
-  async start() {}
-  stop() {}
-  async sendText(target, text) { this.sent = { target, text }; return { id: 'qq-sent' }; }
-  async sendFile(target, source, options) { this.file = { target, source, options }; return { id: 'qq-file' }; }
-  async sendTyping(target) { this.typed = target; }
-}
-
-test('QQ official uses current SDK target shape and gates before attachment download', async () => {
-  let fetches = 0;
-  const adapter = createQQ({ id: 'qq', appId: 'a', appSecret: 's', allowUsers: ['owner'], dmOnly: true, sdk: { QQBot: FakeQQBot }, fetch: async () => { fetches++; throw new Error('must not fetch'); } }, await context());
-  const incoming = [];
-  await adapter.start((event) => incoming.push(event));
-  await FakeQQBot.instance.emit('message', {}, { kind: 'c2c', senderId: 'stranger', messageId: '1', content: 'x', attachments: [{ url: 'https://invalid/file' }] });
-  assert.equal(fetches, 0);
-  FakeQQBot.instance.emit('message', {}, { kind: 'c2c', senderId: 'owner', messageId: '2', content: 'hello', rawEventType: 'C2C_MESSAGE_CREATE' });
-  await new Promise(setImmediate);
-  assert.equal(incoming[0].kind, 'dm');
-  assert.equal(incoming[0].chatId, 'owner');
-  assert.deepEqual(await adapter.send({ chatId: 'owner', userId: 'owner', kind: 'dm', messageId: '2' }, { text: 'hi' }), { id: 'qq-sent' });
-  assert.deepEqual(FakeQQBot.instance.sent.target, { scope: 'c2c', targetId: 'owner', msgId: '2' });
-  await adapter.typing({ chatId: 'owner', kind: 'dm' });
-  assert.equal(FakeQQBot.instance.typed.scope, 'c2c');
-  await assert.rejects(() => adapter.send({ chatId: 'owner', kind: 'dm' }, { text: 'edit', editId: 'x' }), /does not support editing/);
-  await adapter.stop();
-});
-
-test('QQ official accepts the installed SDK 1.0 message callback fixture', async () => {
-  const bot = new QQBot({ appId: 'fixture-app', appSecret: 'fixture-secret', tokenPrefetch: 'async' });
-  bot.start = async () => {};
-  const adapter = createQQ({ id: 'qq-real-shape', appId: 'a', appSecret: 's', allowUsers: ['owner'], dmOnly: true, sdk: { QQBot }, bot }, await context());
-  const incoming = [];
-  await adapter.start(async (event) => incoming.push(event));
-  await bot.handleInboundMessage({ rawEventType: 'C2C_MESSAGE_CREATE', kind: 'c2c', senderId: 'owner', content: 'fixture', messageId: 'sdk-event', timestamp: new Date().toISOString(), raw: {} });
-  assert.equal(incoming[0].id, 'sdk-event');
-  assert.equal(incoming[0].text, 'fixture');
-  await adapter.stop();
-});
-
-test('QQ official admits only recognized group commands through dmOnly', async () => {
-  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
-  const adapter = createQQ({id:'qq-command',appId:'a',appSecret:'s',allowUsers:['owner'],dmOnly:true,requireMention:false,sdk:{QQBot:FakeQQBot}},ctx);
-  const incoming=[];
-  await adapter.start(async event=>incoming.push(event));
-  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'owner',groupOpenid:'g',messageId:'1',content:'/ping'});
-  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'stranger',groupOpenid:'g',messageId:'2',content:'/ping'});
-  FakeQQBot.instance.emit('message',{}, {kind:'group',senderId:'owner',groupOpenid:'g',messageId:'3',content:'/help'});
-  await new Promise(setImmediate);
-  assert.deepEqual(incoming.map(event=>event.id),['1']);
-  await adapter.stop();
-});
 
 class FakeWebSocket extends EventEmitter {
   static OPEN = 1;
@@ -190,20 +135,10 @@ test('OneBot never forwards its gateway token to attachment URLs', async () => {
 
 test('all enabled adapters reject an empty allowlist before creating transports', async () => {
   const ctx = await context();
-  assert.throws(() => createQQ({ appId: 'a', appSecret: 's', allowUsers: [] }, ctx), /non-empty allowUsers/);
   assert.throws(() => createOneBot({ wsUrl: 'ws://x', allowUsers: [] }, ctx), /non-empty allowUsers/);
 });
 
-test('all adapters check binding before attachment download', async () => {
-  let qqFetches = 0;
-  const unboundQQContext = { ...(await context()), isBound: async () => false };
-  const qq = createQQ({ id: 'qq-unbound', appId: 'a', appSecret: 's', allowUsers: ['owner'], dmOnly: true, sdk: { QQBot: FakeQQBot }, fetch: async () => { qqFetches++; throw new Error('must not fetch'); } }, unboundQQContext);
-  await qq.start(async () => assert.fail('unbound QQ message reached callback'));
-  FakeQQBot.instance.emit('message', {}, { kind: 'c2c', senderId: 'owner', messageId: 'q', content: '', attachments: [{ url: 'https://cdn.test/q' }] });
-  await new Promise(setImmediate);
-  assert.equal(qqFetches, 0);
-  await qq.stop();
-
+test('OneBot checks binding before attachment download', async () => {
   let obFetches = 0;
   const ob = createOneBot({ id: 'ob-unbound', wsUrl: 'ws://onebot', allowUsers: ['42'], dmOnly: true, WebSocket: FakeWebSocket, fetch: async () => { obFetches++; throw new Error('must not fetch'); } }, { ...(await context()), isBound: async () => false });
   await ob.start(async () => assert.fail('unbound OneBot message reached callback'));

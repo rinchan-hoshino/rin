@@ -1,14 +1,14 @@
 # Rin
 
-本仓库是以 Codex 为执行核心的下一版 Rin，未来替换旧 Rin 主干。
+本仓库是轻量、agent-neutral 的 Rin 公开核心。
 
-开始迁移或聊天桥工作前，先读 `docs/next-rin.md`。它记录当前决定、已验证事实、未验证接入和下一步。README 中的安装路径及 cc-connect 说明属于过渡部署，不是最终架构。
+开始运行、开发聊天桥或调整安装流程前先读 `docs/next-rin.md`。
 
-- 不依赖旧 Rin 安装、Pi、旧 daemon 或旧扩展加载器。
-- 只搬确有价值的收发实现，不整体移植旧聊天运行时。
-- QQ 官方机器人和 OneBot v11 是两个独立的必做适配器，分开配置与验收；OneBot 不绑定 NapCat。
-- 私人资料、人格、密钥与实际账号配置留在忽略的 private 目录，不进入公开代码。
-- 不把协议文档、连接成功或替身测试写成 App 会话端到端验证通过。
-- 源码改动不等于部署；修改过渡服务前检查当前会话归属，避免终止自身或造成重复连接。
-- 部署顺序固定为：完成验证并提交 → 推送远端 main → 执行 `rin update`。不得直接部署本地未推送提交，不得用本地仓库替换更新源或手动切换安装记录绕过更新流程。
-- 涉及以前的人物、权限、配置或决定，先查现有资料及旧 Rin 的身份库、规范消息记录和历史会话，再向用户询问确实缺失的信息。旧记录可作证据来源，不作为运行依赖；区分历史事实与当前状态，不混用不同平台的账号标识。
+- 核心依赖最小 `AgentBridge` 端口。Codex、Claude Code、pi 与 OpenCode 通过各自 adapter 接入。
+- daemon 管理 Rin 自身资源；agent session 由对应 agent 管理。
+- Nerve 提供 durable queue 与 command/HTTP receipt，不经 ChatBridge 执行，也不创建 agent 会话。
+- Discord、Telegram 与 OneBot v11 分开配置与验收。QQ 通过 OneBot 接入。
+- 用户身份、chat 黑白名单、人格、密钥与真实部署配置留在私有目录，不进入公开代码。
+- 公开安装方式是 agent 已安装并认证后的分步提示词。
+- 不把协议测试、fixture 或 mock 写成真实 agent/平台端到端验收；无法使用真实 CLI 时明确标记未验收。
+- 源码改动、验证、提交、推送和实际部署是分开的动作。

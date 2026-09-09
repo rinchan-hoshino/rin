@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { ChatBridge } from './chat/bridge.js';
-import { CodexBridge } from './chat/codex.js';
+import { createAgentBridge } from './agents/factory.js';
 import { validateConfig } from './chat/policy.js';
 
 export function readConfig(file: string) {
@@ -13,7 +13,7 @@ export function readConfig(file: string) {
   return config;
 }
 export function createLogger(config: ChatConfig): Logger {
-  const secrets = config.adapters.flatMap(a=>[a.token,a.appSecret,a.accessToken,a.verificationToken,a.encryptKey]).filter(Boolean) as string[];
+  const secrets = config.adapters.flatMap(a=>[a.token]).filter(Boolean) as string[];
   const scrub = (value: unknown) => {
     let s = value instanceof Error ? value.message : typeof value==='string' ? value : (JSON.stringify(value) ?? String(value));
     for (const secret of secrets) s=s.split(secret).join('[redacted]');
@@ -42,8 +42,8 @@ export async function serve(file: string) {
   }
   writeFileSync(pidPath,String(process.pid),{flag:'wx',mode:0o600});
   const log = createLogger(config);
-  const codex = new CodexBridge(config.codex || {});
-  const bridge = new ChatBridge(config,{codex,adapterFactory,log});
+  const agent = createAgentBridge(config.agent!);
+  const bridge = new ChatBridge(config,{agent,adapterFactory,log});
   let stopping: Promise<void> | undefined;
   const stop=()=>stopping ||= bridge.stop().finally(()=>{
     if(existsSync(pidPath) && readFileSync(pidPath,'utf8')===String(process.pid)) unlinkSync(pidPath);

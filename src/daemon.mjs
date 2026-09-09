@@ -1,4 +1,4 @@
-// Compatibility entrypoint for existing Rin installations; implementation is TypeScript.
+// JavaScript entrypoint for the compiled daemon implementation.
 export * from '../dist/daemon.js';
 import * as implementation from '../dist/daemon.js';
 import {resolve} from 'node:path';

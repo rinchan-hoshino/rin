@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { CodexBridge } from '../dist/chat/codex.js';
 import { CodexAppServer } from '../dist/codex-app-server.js';
-import { submitEvent } from '../dist/codex-input-command.js';
 
 async function peer(t, handle = () => undefined) {
   const wss = new WebSocketServer({port: 0, host: '127.0.0.1'});
@@ -51,24 +50,6 @@ test('validates before connection; stopped clients cannot send', async t => {
   await bridge.stop(); await assert.rejects(bridge.queue('id',{text:'x'}),/not started/);
 });
 
-for (const mode of ['lost','timeout','missing receipt']) test(`${mode} input is never replayed and event receipt is non-retryable`, async t => {
-  const {bridge,calls} = await peer(t,(m,ws)=>{
-    if(m.method!=='turn/start')return;
-    if(mode==='lost')ws.terminate();
-    if(mode==='missing receipt')ws.send(JSON.stringify({id:m.id,result:{}}));
-    return true;
-  });
-  const result=await submitEvent('11111111-1111-4111-8111-111111111111',{id:'event',payload:{prompt:'one'}},bridge);
-  assert.equal(result.accepted,false);assert.equal(result.retryable,false);
-  assert.equal(calls.filter(x=>x.method==='turn/start').length,1);
-});
-
-test('resume rejection occurs before business input and remains retryable', async t => {
-  const {bridge,calls}=await peer(t,(m,ws)=>{if(m.method==='thread/resume'){ws.send(JSON.stringify({id:m.id,error:{code:-32000,message:'missing'}}));return true;}});
-  const result=await submitEvent('11111111-1111-4111-8111-111111111111',{id:'event',payload:{prompt:'one'}},bridge);
-  assert.equal(result.retryable,true);assert.equal(calls.some(x=>x.method==='turn/start'),false);
-});
-
 test('creation uses the same connection, persists routing, and does not start a model turn', async t => {
   const {bridge,calls}=await peer(t);
   assert.equal(await bridge.createThread({cwd:'.',name:'频道'}),'new-thread');
@@ -110,6 +91,18 @@ test('missing default listener starts native app-server once with sanitized envi
   const c=new CodexAppServer({codexHome:dir,command:[process.execPath,script],queueTimeoutMs:200});t.after(()=>c.stop());
   await assert.rejects(c.connect());
   assert.deepEqual(JSON.parse(await readFile(log,'utf8')),{args:['app-server','--listen','unix://'],home:dir});
+});
+
+test('Codex chat adapter never starts a missing app-server', async t => {
+  const dir=await mkdtemp(join(tmpdir(),'rin-agent-no-bootstrap-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const marker=join(dir,'started'),script=join(dir,'must-not-start.mjs');
+  await writeFile(script,`import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'started');`);
+  const bridge=new CodexBridge({codexHome:dir,command:[process.execPath,script],queueTimeoutMs:200});
+  await bridge.start();t.after(()=>bridge.stop());
+  await assert.rejects(bridge.queue('thread',{text:'hello'}));
+  await assert.rejects(readFile(marker),{code:'ENOENT'});
+  await assert.rejects(bridge.createThread({cwd:dir}),{code:'CODEX_THREAD_CREATE_FAILED'});
+  await assert.rejects(readFile(marker),{code:'ENOENT'});
 });
 
 test('custom endpoint failures do not bootstrap a second server', async t => {

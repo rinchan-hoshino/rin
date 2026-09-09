@@ -20,7 +20,7 @@ test('editable working frames rotate without discarding summary or commentary an
   const dataDir=mkdtempSync(join(tmpdir(),'rin-working-rotation-'));const calls=[];
   const config={dataDir,display:{working:{frames:['One','Two'],intervalMs:100}},adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:true,typing:false,maxText:2000},start:async()=>{},stop:async()=>{},delete:async()=>{},send:async(_target,output)=>{calls.push(output);return{id:output.editId||'progress'};}};
-  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();bridge.event({threadId:'thread',turnId:'turn',type:'started'});await bridge.flush();
     await new Promise(resolve=>setTimeout(resolve,130));await bridge.flush();assert.match(calls.at(-1).text,/Two/);
@@ -41,9 +41,9 @@ test('editable working frames rotate without discarding summary or commentary an
 
 test('non-editing transports stage one custom working marker without rotation',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-working-marker-'));const calls=[];
-  const config={dataDir,display:{working:{text:'处理中...',intervalMs:100}},adapters:[{id:'q',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const config={dataDir,display:{working:{text:'处理中...',intervalMs:100}},adapters:[{id:'q',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false},start:async()=>{},stop:async()=>{},send:async(_target,output)=>{calls.push(output);return{id:'marker'};}};
-  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
+  const bridge=new ChatBridge(config,{agent:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
     await bridge.start();bridge.event({threadId:'thread',turnId:'turn',type:'started'});await bridge.flush();
     await new Promise(resolve=>setTimeout(resolve,130));await bridge.flush();

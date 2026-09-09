@@ -20,7 +20,7 @@ export class ChatStore {
         PRIMARY KEY(adapter,chat_id,topic_id,message_id));
       CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,route TEXT NOT NULL,payload TEXT NOT NULL,
         sent_payload TEXT,message_id TEXT,state TEXT NOT NULL,error TEXT,updated INTEGER NOT NULL,item_group TEXT);
-      UPDATE inbox SET state='uncertain',error='Interrupted while submitting to Codex' WHERE state='submitting';
+      UPDATE inbox SET state='uncertain',error='Interrupted while submitting to the agent' WHERE state='submitting';
       UPDATE deliveries SET state=CASE WHEN message_id IS NULL THEN 'uncertain' ELSE 'pending' END,
         error='Interrupted while sending' WHERE state='sending';`);
     if(!this.db.prepare('PRAGMA table_info(deliveries)').all().some(c=>c.name==='item_group')) this.db.exec('ALTER TABLE deliveries ADD COLUMN item_group TEXT');
@@ -33,7 +33,7 @@ export class ChatStore {
     const old = this.db.prepare('SELECT * FROM inbox WHERE id=?').get(id);
     // Telegram edits replace a payload only while it is still pending. Once we
     // begin submission, the provider edit cannot tell us whether retrying would
-    // duplicate a Codex turn, so preserve the accepted original instead.
+    // duplicate an agent turn, so preserve the accepted original instead.
     if (old) {
       // The durable inbox payload is the accepted submission. The separate
       // context index may still track a later provider edit for future replies.
@@ -57,8 +57,8 @@ export class ChatStore {
     if (!message.replyTo) return undefined;
     const row=this.db.prepare('SELECT payload FROM inbound_messages WHERE adapter=? AND chat_id=? AND topic_id=? AND message_id=?')
       .get(adapterId,String(message.chatId),String(message.topicId || ''),String(message.replyTo)) as {payload?: string} | undefined;
-    const legacyId=message.topicId ? JSON.stringify([adapterId,message.chatId,String(message.topicId),message.replyTo]) : JSON.stringify([adapterId,message.chatId,message.replyTo]);
-    const inbox=row?.payload ? row : this.db.prepare('SELECT payload FROM inbox WHERE id=?').get(legacyId) as {payload?: string} | undefined;
+    const priorKey=message.topicId ? JSON.stringify([adapterId,message.chatId,String(message.topicId),message.replyTo]) : JSON.stringify([adapterId,message.chatId,message.replyTo]);
+    const inbox=row?.payload ? row : this.db.prepare('SELECT payload FROM inbox WHERE id=?').get(priorKey) as {payload?: string} | undefined;
     if (!inbox?.payload) {
       const route=message.topicId ? JSON.stringify([adapterId,String(message.chatId),String(message.topicId)]) : JSON.stringify([adapterId,String(message.chatId)]);
       const sent=this.db.prepare('SELECT sent_payload,payload FROM deliveries WHERE route=? AND message_id=? ORDER BY updated DESC LIMIT 1').get(route,String(message.replyTo)) as {sent_payload?: string; payload?: string} | undefined;

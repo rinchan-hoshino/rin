@@ -5,9 +5,8 @@ interface SectionUpdate { kind?: string; textChunks?: string | string[]; persist
  * Source: src/core/chat/rich-text.ts, platform/common.ts, delivery-policy.ts
  * at f370ddf80f515642513dec650bd0a0cc577d1ffe (GNU GPL v3).
  * Extracted from deployed JS and cross-checked against the original TypeScript.
- * Native Codex Markdown replaces the old rich-node input boundary. These pure
- * functions intentionally retain legacy formatting; there is no runtime import
- * from the old installation. See docs/legacy-render-audit.md for provenance.
+ * Agent Markdown is the input boundary. These pure
+ * functions intentionally retain the established transport formatting.
  */
 const safeString = (value: unknown) => value == null ? "" : String(value);
 export const EDITABLE_INTERMEDIATE_PREFIX = "...";
@@ -224,7 +223,7 @@ export function splitPlainText(text: unknown, maxLength: number) {
     return chunks;
 }
 
-// The legacy HTML fallback strips tags, then applies its Markdown plain renderer.
+// Convert HTML replies to plain text when a platform needs a safe fallback.
 export function telegramHtmlToPlainText(text: unknown) {
     return stripMarkdownFormatting(normalizeRenderedText(stripHtmlFormatting(text)));
 }

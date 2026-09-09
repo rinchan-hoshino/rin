@@ -12,23 +12,18 @@ const boolean = { type: 'boolean' };
 const id = { ...string, description: 'Stable caller-chosen identifier; reuse it to prevent duplicate work.' };
 const target = { ...string, description: 'Existing configured Nerve target ID. Cannot define an output command.' };
 const source = {...string,description:'Stable producer ID supplied by the event producer, such as a trigger ID. Routing never comes from payload.'};
-const threadId = {...string,pattern:'^[\\da-fA-F]{8}-[\\da-fA-F]{4}-[\\da-fA-F]{4}-[\\da-fA-F]{4}-[\\da-fA-F]{12}$',description:'Existing unarchived Codex task UUID. Omit to restore this target default.'};
 const schema = (properties: Record<string,PropertySchema> = {}, required: string[] = []): InputSchema => ({ type: 'object', properties, required, additionalProperties: false });
 const definitions: [string,string,InputSchema,boolean][] = [
   ['nerve_status', 'Check the local Nerve service health.', schema(), true],
   ['nerve_list_events', 'Read recent event states; use nerve_get_event for full results.', schema(), true],
   ['nerve_get_event', 'Read an event and its result by stable event ID. Done means the configured target accepted delivery, not that an agent completed its work.', schema({ id }, ['id']), true],
-  ['nerve_enqueue_event', 'Queue one event for a configured target. Reuse a stable ID with the same source and payload to deduplicate. Task routing is snapshotted at first enqueue; retries never migrate to a later binding.', schema({ id, target, source, payload: { type: 'object' } }, ['id', 'target', 'payload']), false],
+  ['nerve_enqueue_event', 'Queue one event for a configured target. Reuse a stable ID with the same source and payload to deduplicate. The configured target is fixed at first enqueue.', schema({ id, target, source, payload: { type: 'object' } }, ['id', 'target', 'payload']), false],
   ['nerve_retry_event', 'Retry a failed or uncertain event after checking its current result and external effects. An uncertain event may have already acted; retry can duplicate side effects.', schema({ id }, ['id']), false],
-  ['nerve_list_task_bindings','Read configured default tasks and persisted target/source task bindings.',schema(),true],
-  ['nerve_bind_task','Bind a producer source to an existing task, or omit threadId to restore the configured default. Only affects future events. Requires a target with taskRouting configured.',schema({target,source,threadId},['target','source']),false],
-  ['nerve_create_task','Explicitly create a native Codex task and bind this producer source. No model turn is started. Reuse the creation ID; pending or uncertain results never create again. Inspect nerve_get_task_creation before recovery.',schema({id,target,source,cwd:{...string,description:'Existing absolute working directory for the new task.'},name:{...string,description:'Optional task title.'}},['id','target','source','cwd']),false],
-  ['nerve_get_task_creation','Read a task creation receipt, including any known task ID when creation or binding is incomplete. Never delete an existing user task to recover.',schema({id},['id']),true],
 ];
 
 export const toolDefinitions = definitions.map(([name, description, inputSchema, readOnlyHint]) => ({
   name, description, inputSchema,
-  annotations:{readOnlyHint,destructiveHint:!readOnlyHint,idempotentHint:readOnlyHint || ['nerve_enqueue_event','nerve_bind_task','nerve_create_task'].includes(name),openWorldHint:!readOnlyHint},
+  annotations:{readOnlyHint,destructiveHint:!readOnlyHint,idempotentHint:readOnlyHint || name==='nerve_enqueue_event',openWorldHint:!readOnlyHint},
 }));
 
 function validate(args: Record<string,unknown>, spec: InputSchema) {
@@ -71,7 +66,7 @@ export function createHandler({ port, token, requestTimeoutMs = 15000 }: {port:n
     if (!Object.hasOwn(message, 'id')) return null;
     const reply = (result: unknown) => ({ jsonrpc: '2.0', id: message.id, result });
     const error = (code: number, text: string) => ({ jsonrpc: '2.0', id: message.id, error: { code, message: text } });
-    if (message.method === 'initialize') return reply({ protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'nerve', version: '1.3.0' }, instructions: 'Nerve delivers generic events to configured targets. Done records target acceptance only. Explicit task setup does not start a model turn. Use stable IDs; investigate uncertain outcomes before retrying.' });
+    if (message.method === 'initialize') return reply({ protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'nerve', version: '2.0.0' }, instructions: 'Nerve delivers generic events to configured command or HTTP targets. Done records target acceptance only. Use stable IDs and investigate uncertain outcomes before retrying.' });
     if (message.method === 'ping') return reply({});
     if (message.method === 'tools/list') return reply({ tools: toolDefinitions });
     if (message.method !== 'tools/call') return error(-32601, 'Method not found');
@@ -89,12 +84,10 @@ export function createHandler({ port, token, requestTimeoutMs = 15000 }: {port:n
       nerve_status:['GET','/health'],
       nerve_list_events: ['GET', '/events'], nerve_get_event: ['GET', `/events/${encoded}`],
       nerve_enqueue_event: ['POST', '/events', args], nerve_retry_event: ['POST', `/events/${encoded}/retry`, {}],
-      nerve_list_task_bindings:['GET','/task-bindings'],nerve_bind_task:['POST','/task-bindings',args],
-      nerve_create_task:['POST','/task-bindings/create',args],nerve_get_task_creation:['GET',`/task-creations/${encoded}`],
     };
     try {
       const value = await request(...routes[name!]);
-      return reply({ content: [{ type: 'text', text: JSON.stringify(value) }], isError: name==='nerve_create_task' && value.state!=='bound' });
+      return reply({ content: [{ type: 'text', text: JSON.stringify(value) }], isError: false });
     } catch (cause) { return reply({ content: [{ type: 'text', text: (cause as Error).message }], isError: true }); }
   };
 }

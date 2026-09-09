@@ -34,10 +34,10 @@ test('forward expansion has depth, count and byte limits and declares truncation
   assert.equal(forward.truncated, true);
 });
 
-test('reply context survives a legacy inbox upgrade and identifies a sent assistant reply', () => {
+test('reply context survives an inbox key upgrade and identifies a sent assistant reply', () => {
   const dir=mkdtempSync(join(tmpdir(),'rin-reply-index-')); const store=new ChatStore(join(dir,'chat.sqlite'));
   try {
-    // This is the pre-topic durable key, as written by the previous release.
+    // A durable key without a topic remains readable when a topic is introduced.
     store.db.prepare("INSERT INTO inbox(id,thread,payload,state,created) VALUES(?,?,?,'queued',?)")
       .run(JSON.stringify(['tg','chat','old']), 'thread', JSON.stringify({id:'old',chatId:'chat',userId:'alice',kind:'dm',text:'old body'}), Date.now());
     assert.deepEqual(store.replyContext('tg',{id:'new',chatId:'chat',userId:'alice',kind:'dm',text:'',replyTo:'old'}), {messageId:'old',authorId:'alice',text:'old body'});

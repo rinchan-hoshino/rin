@@ -38,8 +38,8 @@ test('Discord admits an allowlisted bare group command without entering attentio
   let observed=0,handled=0;
   const adapter=discordAdapter({token:'x',allowUsers:['owner'],dmOnly:true,__client:client},{dataDir:'/tmp',log:{},observeDiscord:async()=>{observed++;}});
   await adapter.start(async()=>{handled++;});
-  client.emit('messageCreate',{id:'1',channelId:'g',guildId:'guild',content:'/usage',author:{id:'owner'},attachments:new Map()});
-  client.emit('messageCreate',{id:'2',channelId:'dm',content:'/usage',author:{id:'stranger'},attachments:new Map()});
+  client.emit('messageCreate',{id:'1',channelId:'g',guildId:'guild',content:'/help',author:{id:'owner'},attachments:new Map()});
+  client.emit('messageCreate',{id:'2',channelId:'dm',content:'/help',author:{id:'stranger'},attachments:new Map()});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(observed,0);assert.equal(handled,1);
   await adapter.stop();
@@ -194,7 +194,7 @@ test('Telegram normalization selects the largest photo and gates before file par
 test('Telegram normalizes commands addressed to this bot and preserves another bot target for admission', () => {
   const config={allowUsers:['1'],dmOnly:false};
   const message={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/usage@RinBot current'}},config,{id:'9',username:'rinbot'}).text,'/usage current');
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help@RinBot current'}},config,{id:'9',username:'rinbot'}).text,'/help current');
   const other=normalizeTelegramUpdate({message:{...message,text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'});
   assert.equal(other, null);
   const privateOther=normalizeTelegramUpdate({message:{...message,chat:{id:1,type:'private'},text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'});
@@ -219,7 +219,7 @@ test('Telegram admits recognized group commands for allowed users under dmOnly',
   assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot'}},config,{id:'9',username:'rinbot'},extensions),null);
 });
 
-test('Telegram clears legacy narrow scopes and authoritatively updates the default command menu', async () => {
+test('Telegram clears narrow scopes and authoritatively updates the default command menu', async () => {
   const calls=[]; const deleted=[]; let updates=0;
   const api={raw:{
     deleteWebhook:async()=>true,getMe:async()=>({id:9,username:'rin'}),
