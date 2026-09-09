@@ -6,7 +6,7 @@ export interface ExecResult { code: number | null; signal?: NodeJS.Signals | nul
 export type Exec = (command: string,args: string[],options?: ExecOptions)=>Promise<ExecResult>;
 export interface InstallState {
   schema: 1; type: 'git'; repository: string; current: string; previous?: string | null;
-  node: string;
+  node: string; serviceId?: string;
 }
 export type Candidate = {sha: string; changed: false} | {sha: string; release: string; changed: true};
 export interface Service { install(): Promise<void>; start(): Promise<void>; stop(): Promise<void>; isRunning(): Promise<boolean> }
