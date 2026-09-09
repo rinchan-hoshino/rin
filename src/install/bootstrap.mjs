@@ -78,6 +78,6 @@ export async function install({home=installHome(), repository=REPOSITORY, binDir
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) install().then(result => {
+if (process.argv[1] && process.argv[1].endsWith('/src/install/bootstrap.mjs')) install().then(result => {
   console.log(`Rin installed in ${result.home}. Open a new terminal, then run rin start after configuring the guided prompt.`);
 }, error => { console.error(error.message); process.exitCode = 1; });
