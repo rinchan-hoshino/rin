@@ -65,19 +65,19 @@ async function installation(t) {
   await writeFile(join(home,'private/daemon.json'),JSON.stringify({nerve:'nerve.json'}));
   return home;
 }
-test('CLI startup ensures the endpoint before service readiness, stop leaves it alone',async t=>{
+test('Rin service lifecycle never touches the agent endpoint',async t=>{
   const home=await installation(t),events=[];
   const options={home,codex:process.execPath,serviceFactory:()=>({start:async()=>events.push('rin.start'),stop:async()=>events.push('rin.stop')}),ensureServer:async()=>events.push('server.ready')};
   await main(['start'],options);await main(['stop'],options);
-  assert.deepEqual(events,['server.ready','rin.start','rin.stop']);
+  assert.deepEqual(events,['rin.start','rin.stop']);
 });
-test('explicit restart preflights before stopping Rin, then restarts server and Rin in order',async t=>{
+test('explicit app-server restart does not stop or start Rin',async t=>{
   const home=await installation(t),events=[];
-  await main(['restart','--app-server'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>events.push('rin.start'),stop:async()=>events.push('rin.stop')}),prepareServerRestart:async()=>{events.push('preflight');return async()=>events.push('server.restart');}});
-  assert.deepEqual(events,['preflight','rin.stop','server.restart','rin.start']);
+  await main(['app-server','restart'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>events.push('rin.start'),stop:async()=>events.push('rin.stop')}),prepareServerRestart:async()=>{events.push('preflight');return async()=>events.push('server.restart');}});
+  assert.deepEqual(events,['preflight','server.restart']);
 });
-test('failed app-server startup does not claim or launch a ready Rin service',async t=>{
+test('failed explicit app-server start does not launch Rin service',async t=>{
   const home=await installation(t);let started=false;
-  await assert.rejects(main(['start'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>{started=true;}}),ensureServer:async()=>{throw Error('handshake failed');}}),/handshake failed/);
+  await assert.rejects(main(['app-server','start'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>{started=true;}}),ensureServer:async()=>{throw Error('handshake failed');}}),/handshake failed/);
   assert.equal(started,false);
 });

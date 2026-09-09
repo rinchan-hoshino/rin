@@ -50,6 +50,7 @@ export class CodexBridge extends CodexInput {
     this.watchers = new Map();
 
   }
+  attachmentRoots(threadId: string) { return [join(this.codexHome!, 'generated_images', threadId)]; }
 
   async createThread({ cwd, model, name }: {cwd?: string; model?: string; name?: string} = {}) {
     if (!this.started) throw new Error('CodexBridge not started');

@@ -1,65 +1,17 @@
-# Rin：架构决定与后续工作
+# Current direction
 
-当前主线以 Codex 为执行核心。旧 Pi 版留在 `legacy/pi` 分支，供历史检索与源码对照；不作为运行依赖。本文件保存公开的架构决定，真实账号、任务 ID、部署路径与运行交接留在忽略目录。
+Rin is a small bridge around an agent the user already installed.
 
-## 已确定的边界
+The public core owns durable chat ingress and delivery, the Nerve event queue, normalized agent events, stable launchers, isolated updates, and its own user service. Agent configuration, private identity, credentials, and event-source policy stay outside the repository.
 
-- 聊天桥与通用事件投递是两个解耦模块。Nerve 只提供队列、脚本目录和 command/http 投递；事件源与个人策略由外部脚本维护。
-- 只保留旧版确有价值的协议与呈现逻辑，身份配置、人格、凭证与私人资料不进入公共源码。
-- Discord、Telegram、QQ 官方、OneBot v11 是四种独立适配器。QQ 官方和 OneBot 不合并，OneBot 不预设特定网关软件。
-- 直接聊天绑定只对应一个已有 Codex 任务；明确启用镜像后，该任务的后续公开输出会发到所绑定聊天。
-- Nerve 不拥有模型执行生命周期。独立输入命令可向共享 app-server 中的已有任务提交事件，提交回执与业务完成分开。
-- Nerve 的 command 目标可保留默认任务，并按稳定 producer source 绑定其他任务；绑定以 target/source 联合持久化，入队时固定任务快照。显式创建后绑定只调用共享 Codex 服务建立原生任务，不启动模型轮次。来源规则、私人正文与平台收发继续留在生产者层。
-- 同一机器人只运行一个接收者。修改部署前检查会话归属和在途收发，避免双重连接、丢失回执或抢占执行。
+The daemon does not manage agent servers. Codex app-server control exists only through explicit CLI commands. Claude Code, pi, and OpenCode resume an existing native session through their documented non-interactive command. Their adapters report only output that the real command produced.
 
-## 当前实现
+Discord, Telegram, and OneBot v11 are independent transports. OneBot is the supported path for ordinary QQ accounts. The QQ official Bot API has been removed.
 
-### 安装与生命周期
+Chat admission always starts with an explicit user ID list. Ordinary messages then pass deny and allow chat rules, private/group rules, mention rules, and binding checks before media is downloaded. A registered command still requires an authorized user but bypasses chat rules, DM-only, and mention gates. Telegram and OneBot may treat a group as private only after a fresh complete proof that the agent and exactly one authorized owner are its only members.
 
-英文 Git 安装器与 `rin update/start/stop/restart` 入口见 [安装说明](installation.md)。普通 `rin` 调用透传 Codex。候选 Git 版本在独立目录完成依赖安装和测试，再切换原子安装记录；更新失败保留前版。全新安装默认初始化并注册 Nerve MCP，启动只有空 targets 的本机服务，不复制私人账号或会话。普通 Codex CLI 调用本身仍不依赖后台服务。推荐配置按用户选择合并指定键，包括单条工具历史输出上限 4,000 tokens；安装器不复制私人设置。
+Quiet is a delivery setting. It suppresses working, commentary, and summary output for a route while final answers and errors remain visible. It does not discard input or stop the agent.
 
-Nerve MCP 使用安装根目录的稳定 `nerve-mcp-run.mjs` 入口，新连接按同一安装记录选择客户端发布版本，避免把配置固定在旧 release。已有连接在重连后加载新版；不通过新增用户命令管理 MCP。全新安装和 `rin update` 共用幂等初始化/注册流程；已是最新版本也检查缺项。首次补入 Nerve 时验证服务启动，失败留下待激活标记供下次更新继续；已完整配置但人为停止的服务保持停止。已有配置、密钥和 MCP 的额外设置保留，同名非 Rin MCP 或路径冲突会报错。
+Nerve is agent-neutral. It sends a durable event to a configured command or HTTP target and records the delivery receipt. It neither creates agent tasks nor sends work through ChatBridge.
 
-### Codex 接入
-
-聊天桥与独立事件输入命令只使用共享 app-server。Rin 启动前确认服务可连接，默认本机入口不存在时直接启动 `codex app-server --listen`，由 Codex 自身的 socket 独占处理并发启动；Rin 不维护额外 PID、监督器或执行状态。普通停止与重启不终止 app-server；显式 `rin restart --app-server` 核对本机监听进程后一起重启。恢复任务时不覆盖执行配置，原生 `turn/start` 负责新轮次与忙时追加输入。客户端退出不终止模型执行，提交回执与业务完成分开。App 通过 SSH、TUI 通过 `--remote` 接入同一服务。
-
-历史观察只读取公开消息、公开摘要和已完成的生成图片路径，不外发工具输出或私有推理。观察器锁定 0.153.x / paginated 表结构，不兼容时停止观察和新提交。详见 [App 接入](codex-app-steering.md)。
-
-### 聊天收发
-
-准入、附件下载、持久入队、Codex 投递和公开输出转发分层。平台 ID 白名单与群提及条件先于附件下载；输出文件经过真实路径及大小校验。生成图片限制在当前任务的生成目录。
-
-Discord、Telegram 有编辑能力时使用共享进度消息；异步提问切分进度段，后续进度保持在问题之后；最终消息清理进度。QQ 与 OneBot 发送完整快照，保留附件和引用。首次发送结果不确定时不盲目重试。
-
-### 私有事件源
-
-聊天桥只处理明确配置的直接会话。Discord 注意力、定时检查和 Minecraft 接入已经移出公共核心，由使用者自己的脚本维护，平台专用读写工具也由私有服务提供。Nerve 通过稳定事件 ID 接收生产者事件，收到目标接收回执即完成本次投递；不等待或观察模型轮次。详见 [Nerve](nerve.md)。
-
-## 已知差距与验证
-
-[能力审计](chat-parity-audit.md) 区分三种情况：实现缺失、已有代码但未实机验收、平台本身的限制。目前至少仍有身份映射、引用内容、OneBot 富媒体/合并转发、Telegram 更新事件、执行状态展示五类差距。
-
-近期修复的 QQ 发图缺陷来自 App 独立图片结果未被观察；上传已得到成功回执，但补发时旧 msg_id 已过期，不能宣称修复后的最终发送已验收。QQ 官方的被动回复关联、时限与额度必须在真实消息窗口中测试。
-
-## 下一步
-
-1. 完成 QQ 生成图片的有效窗口内真实投递，核对原消息关联和去重。
-2. 补最小的私人身份映射及入站引用上下文。
-3. 补 OneBot 富媒体与合并转发，分别验证真实平台接入。
-4. 明确 Telegram 更新事件、todo/压缩状态展示的保留范围。
-5. 做完整 App 重启、断网、取消、不确定发送和自主回复行为的验收。
-
-不因这次主干迁移自动启用未配置的平台、恢复旧业务定时任务、发布 npm 包或改动正在运行的部署。
-
-### 统一命令与可选安装配置
-
-聊天命令的当前目录默认含 `/help`、`/usage`，扩展放私有 `dataDir/commands/*.mjs`，启动时扫描并合入同一平台注册/执行目录；`rin restart` 生效。旧桥的目录曾由运行时动态提供，不能把这两个当前内建命令当作旧目录的完整历史。四种适配器共用显式 `allowUsers` 准入，不恢复旧身份库、主人角色或频道白名单；`dmOnly` 只控制普通消息路由，已注册文字命令可在群内裸发，不再要求提及。未知的斜杠文字在准入后的私聊回复帮助提示，在群聊静默；`/name@其他机器人` 不会执行本机命令。`privateOnly` 只限制结果呈现场景。额度及活动直接读取 Codex 原生 account/read、account/rateLimits/read、account/usage/read，只美化 PNG；提供 daily、weekly、cumulative 和文字视图。原生摘要不重算，不另建统计库、不按 API 价格估值，不读取旧历史。普通消息 `bindings` 路由保持独立。
-
-平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
-
-安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；选中后包含完整文件访问与 `approval_policy = "never"`，预览会明确说明；未选中的配置保持不变。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。
-
-## TypeScript 构建
-
-产品实现位于 `src/**/*.ts`，启用 strict 与 NodeNext，统一编译到 `dist/` 再执行；不依赖 Node 的实验性原生 TypeScript 加载。Git 安装和更新安装锁定构建依赖，并在切换发布版本前编译及运行回归。原有 `.mjs` 启动器和候选迁移入口保留为薄兼容层，私有命令扩展仍支持 `.mjs`。
+Installation is distributed as a prompt after the agent is installed. Persona design is a separate prompt. Private cost-optimization material is not part of this repository.

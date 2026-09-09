@@ -114,7 +114,7 @@ export async function prepareRelease(home: string, { repository = REPOSITORY, cu
     await exec('git', ['clone', '--no-hardlinks', '--no-checkout', source, staging]);
     await exec('git', ['-C', staging, 'checkout', '--detach', sha]);
     const pkg = JSON.parse(await readFile(join(staging, 'package.json'), 'utf8'));
-    if (pkg.name !== 'rin' || !await exists(join(staging, 'src/cli.mjs'))) throw new Error('The main branch does not contain the Codex Rin installer');
+    if (pkg.name !== 'rin' || !await exists(join(staging, 'src/cli.mjs')) || !await exists(join(staging,'prompts/install.md'))) throw new Error('The main branch does not contain a Rin release');
     const npm = await findNpmCli();
     await exec(process.execPath, [npm, 'ci', '--ignore-scripts', '--include=dev'], { cwd: staging });
     await exec(process.execPath, [npm, 'test'], { cwd: staging });

@@ -33,8 +33,8 @@ test('MCP handshake, tool discovery and annotations reflect reads versus mutatio
   assert.equal((await handle(rpc('initialize'))).result.protocolVersion, '2024-11-05');
   assert.equal(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   const result = await handle(rpc('tools/list'));
-  assert.equal(result.result.tools.length, 9);
-  for (const tool of toolDefinitions) assert.equal(tool.annotations.readOnlyHint, ['nerve_status','nerve_list_events','nerve_get_event','nerve_list_task_bindings','nerve_get_task_creation'].includes(tool.name));
+  assert.equal(result.result.tools.length, 5);
+  for (const tool of toolDefinitions) assert.equal(tool.annotations.readOnlyHint, ['nerve_status','nerve_list_events','nerve_get_event'].includes(tool.name));
   assert.equal((await handle(rpc('missing'))).error.code, -32601);
 });
 
@@ -46,14 +46,10 @@ test('all tools use loopback authenticated HTTP and encode IDs as one path compo
     ['nerve_get_event', { id: 'x/y' }, 'GET', '/events/x%2Fy'],
     ['nerve_enqueue_event', { id: 'once', target: 'codex', payload: { prompt: 'test data only' } }, 'POST', '/events'],
     ['nerve_retry_event', { id: 'once' }, 'POST', '/events/once/retry'],
-    ['nerve_list_task_bindings', {}, 'GET', '/task-bindings'],
-    ['nerve_bind_task', {target:'codex',source:'timer'}, 'POST', '/task-bindings'],
-    ['nerve_create_task', {id:'create-once',target:'codex',source:'timer',cwd:'/test'}, 'POST', '/task-bindings/create'],
-    ['nerve_get_task_creation', {id:'create/once'}, 'GET', '/task-creations/create%2Fonce'],
   ];
   for (const [name, args, method, path] of calls) {
     const result = await handle(rpc('tools/call', { name, arguments: args }));
-    assert.equal(result.result.isError, name==='nerve_create_task'); // Stub has no bound creation receipt.
+    assert.equal(result.result.isError, false);
     const request = requests.at(-1);
     assert.equal(request.method, method); assert.equal(request.url, path);
     assert.equal(request.authorization, `Bearer ${token}`);

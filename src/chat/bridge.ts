@@ -1,5 +1,5 @@
-import type { ChatConfig, AdapterConfig, ChatMessage, ChatTarget, ChatOutput, Binding, ChatCommand, CommandContext, Logger, AdapterContext, ChatAdapter, PublicItem, CodexEvent } from './types.js';
-import type { CodexBridge } from './codex.js';
+import type { ChatConfig, AdapterConfig, ChatMessage, ChatTarget, ChatOutput, Binding, ChatCommand, CommandContext, Logger, AdapterContext, ChatAdapter, PublicItem } from './types.js';
+import type {AgentBridge,AgentEvent} from '../agents/types.js';
 type AutoBindingState = {state: 'bound'; binding: Binding} | {state: 'creating' | 'uncertain'};
 type AutoBindings = Record<string, AutoBindingState>;
 interface Segments { current: number; questions: string[]; items: Record<string, number>; groups: string[]; }
@@ -11,11 +11,9 @@ interface DeferredImage { itemId: string; path: string; ordinal?: number; delive
 const failure = (error: unknown) => error as {threadId?: string; code?: string; cause?: {code?: string}; fallbackSafe?: boolean; deliveryUncertain?: boolean};
 import { COMMANDS, parseCommandText, builtinCommands, commandHelp } from './commands.js';
 import { loadCommandExtensions } from './command-extensions.js';
-import { executeUsage } from './usage.js';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { ChatStore, stableId } from './store.js';
-import { allowed, splitText, validateConfig } from './policy.js';
+import { allowed, quietFor, splitText, validateConfig } from './policy.js';
 import { effectivePrivate } from './private-like.js';
 import { outputFiles, outputParts } from './files.js';
 import { prepareText, editableIntermediateHeadText, composeEditableMessageText, normalizeAssistantSummaryText, stripMarkdownFormatting } from './presentation.js';
@@ -23,16 +21,15 @@ import { resolveWorking, workingFrame } from './working.js';
 import { composeInboundText } from './input-normalization.js';
 
 export class ChatBridge {
-  config: ChatConfig; log: Logger; usage: typeof executeUsage; commands: ChatCommand[]; store: ChatStore;
-  bindingCreations: Map<string, Promise<Binding>>; codex: CodexBridge; adapterFactory: (config: AdapterConfig, context: AdapterContext) => Promise<ChatAdapter> | ChatAdapter;
+  config: ChatConfig; log: Logger; commands: ChatCommand[]; store: ChatStore;
+  bindingCreations: Map<string, Promise<Binding>>; agent: AgentBridge; adapterFactory: (config: AdapterConfig, context: AdapterContext) => Promise<ChatAdapter> | ChatAdapter;
   adapters: Map<string, ChatAdapter>; items: Map<string, PublicItem>; finalizedTurns: Set<string>; active: Set<string>; faultedThreads: Set<string>;
   retryAt: Map<string, {at: number; delay: number}>; lastTypingAt: Map<string, number>; working: ReturnType<typeof resolveWorking>;
   workingTimers: Map<string, {timer: ReturnType<typeof setInterval>; threadId: string; turnId: string; presentationId: string}>;
   running: boolean; flushing: boolean; submittingThreads: Set<string>; timer?: ReturnType<typeof setInterval>; typingTimer?: ReturnType<typeof setInterval>;
-  constructor(config: ChatConfig, { codex, adapterFactory, log = console, store, usage = executeUsage }: {codex: CodexBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore; usage?: typeof executeUsage}) {
+  constructor(config: ChatConfig, { agent, codex, adapterFactory, log = console, store }: {agent?: AgentBridge; /** @deprecated */ codex?: AgentBridge; adapterFactory: ChatBridge['adapterFactory']; log?: Logger; store?: ChatStore}) {
     this.config = validateConfig(config);
     this.log = log;
-    this.usage = usage;
     this.commands = [];
     this.store = store || new ChatStore(resolve(config.dataDir, 'chat.sqlite'));
     if(this.store.cursor('bindings')) this.config.bindings=this.store.cursor<Binding[]>('bindings')!;
@@ -42,9 +39,10 @@ export class ChatBridge {
     }
     validateConfig(this.config);
     this.bindingCreations=new Map();
-    this.codex = codex;
-    this.codex.getCursor = key => this.store.cursor(key);
-    this.codex.setCursor = (key,value) => this.store.setCursor(key,value);
+    this.agent = agent || codex!;
+    if(!this.agent)throw new Error('agent bridge is required');
+    this.agent.getCursor = key => this.store.cursor(key);
+    this.agent.setCursor = (key,value) => this.store.setCursor(key,value);
     this.adapterFactory = adapterFactory;
     this.adapters = new Map();
     this.items = new Map(this.store.cursor<[string, PublicItem][]>('public-items') || []);
@@ -143,6 +141,7 @@ export class ChatBridge {
     return {chatId:binding.chatId,...(binding.topicId?{topicId:binding.topicId}:{}),kind:binding.kind,...context};
   }
   async beginReaction(binding: Binding, presentation: Presentation) {
+    if(quietFor(this.config,binding))return;
     const adapter=this.adapters.get(binding.adapter);
     if(!adapter?.capabilities.reaction || !adapter.startReaction || this.presentationFinalized(binding,presentation.id))return;
     const key=this.reactionKey(binding,presentation.id);
@@ -188,16 +187,15 @@ export class ChatBridge {
     }
   }
   attachmentRoots(threadId: string) {
-    return [...(this.config.attachmentRoots || [this.config.dataDir]),
-      resolve(this.config.codex?.codexHome || resolve(homedir(),'.codex'),'generated_images',threadId)];
+    return [...(this.config.attachmentRoots || [this.config.dataDir]),...(this.agent.attachmentRoots?.(threadId) || [])];
   }
   async start() {
     this.running = true;
     const builtins=builtinCommands((name,context)=>this.builtinCommand(name,context));
     const directory=resolve(this.config.dataDir,this.config.commands?.directory || 'commands');
     this.commands=[...builtins,...await loadCommandExtensions({directory,reservedNames:COMMANDS.map(c=>c.name),log:this.log})];
-    this.codex.onEvent = event => this.event(event);
-    await this.codex.start();
+    this.agent.onEvent = event => this.event(event);
+    await this.agent.start();
     for (const config of this.config.adapters.filter(a => a.enabled !== false)) {
       const adapter = await this.adapterFactory(config, {
         dataDir: this.config.dataDir, log: this.log,
@@ -205,14 +203,14 @@ export class ChatBridge {
         setCursor: (key,value) => this.store.setCursor(key,value),
         commands: this.commands,
         isCommand: message => Boolean(parseCommandText(message.text,this.commands)),
-        isBound: message => Boolean(parseCommandText(message.text,this.commands)) ||
+        isBound: message => Boolean(parseCommandText(message.text,this.commands)) || allowed(config,message) && (
           this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && String(b.topicId || '')===String(message.topicId || '') && b.kind===message.kind) ||
-          this.canAutoBind(config,message),
+          this.canAutoBind(config,message)),
       });
       this.adapters.set(config.id, adapter);
 
     }
-    for (const threadId of new Set(this.config.bindings.filter(b=>this.adapters.has(b.adapter)).map(b=>b.threadId))) await this.codex.watch?.(threadId);
+    for (const threadId of new Set(this.config.bindings.filter(b=>this.adapters.has(b.adapter)).map(b=>b.threadId))) await this.agent.watch?.(threadId);
     for (const config of this.config.adapters.filter(a => this.adapters.has(a.id))) {
       await this.adapters.get(config.id)!.start(message => this.receive(config,message));
       this.log.info('adapter started',{id:config.id,type:config.type});
@@ -242,7 +240,7 @@ export class ChatBridge {
       // must not roll the route's latest reply context back to an older message.
       this.store.setCursor(`reply:${this.routeKey(binding)}`,{messageId:message.id,userId:message.userId,topicId:message.topicId});
       // A durable admission only confirms that Rin accepted the message. Give the
-      // user one prompt typing hint, but wait for Codex to confirm actual work
+      // user one prompt typing hint, but wait for the agent to confirm actual work
       // before the periodic typing loop treats the thread as active.
       this.typing(binding.threadId);
       // Admission is durable before acknowledging a platform cursor. Submission runs separately.
@@ -264,14 +262,17 @@ export class ChatBridge {
     const pending=Promise.resolve().then(async()=>{
       try {
         let threadId;
-        try { threadId=await this.codex.createThread({cwd:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).cwd,model:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).model,name:`${config.id} · ${message.chatName || String(message.chatId)}`}); }
+        try {
+          if(!this.agent.createThread)throw new Error('This agent adapter cannot create sessions; bind an existing session ID');
+          threadId=await this.agent.createThread({cwd:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).cwd,model:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).model,name:`${config.id} · ${message.chatName || String(message.chatId)}`});
+        }
         catch(error) { if(typeof failure(error).threadId==='string' && failure(error).threadId)threadId=failure(error).threadId;else throw error; }
         if(typeof threadId!=='string' || !threadId)throw new Error('Missing created task id');
         const binding={adapter:config.id,chatId:String(message.chatId),...(message.topicId ? {topicId:String(message.topicId)} : {}),kind:message.kind,threadId,mirror:true};
         validateConfig({...this.config,bindings:[...this.config.bindings,binding]});
         const current=this.store.cursor<AutoBindings>('auto-bindings') || {};current[key]={state:'bound',binding};this.store.setCursor('auto-bindings',current);
         this.config.bindings.push(binding);
-        await this.codex.watch?.(threadId);
+        await this.agent.watch?.(threadId);
         return binding;
       } catch(error) {
         const current=this.store.cursor<AutoBindings>('auto-bindings') || {};
@@ -284,7 +285,6 @@ export class ChatBridge {
   }
   async builtinCommand(name: string,{args,message}: CommandContext) {
     if(name==='help')return {text:commandHelp(this.commands,effectivePrivate(message))};
-    if(name==='usage')return this.usage(args,{config:this.config.codex || {},dataDir:this.config.dataDir});
     throw new Error('Unknown built-in command');
   }
   async command(config: AdapterConfig,message: ChatMessage) {
@@ -363,7 +363,7 @@ export class ChatBridge {
           // that new physical turn look as though it belonged to a newer chat.
           const routedBindings=this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter));
           for(const binding of routedBindings)this.store.setCursor(this.inflightInputKey(binding,job.thread),{jobId:job.id,context:this.inboundContext(binding,ingressAdapterId,message)});
-          const receipt = await this.codex.queue(job.thread,{text:composeInboundText(message.text,{reply:this.store.replyContext(ingressAdapterId,message),forward:message.forward}),files:message.files || [],onClientMessageId:id=>{
+          const receipt = await this.agent.queue(job.thread,{text:composeInboundText(message.text,{reply:this.store.replyContext(ingressAdapterId,message),forward:message.forward}),files:message.files || [],onClientMessageId:id=>{
             for(const binding of this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter)))this.expectInput(binding,id);
           }});
           const accepted=Boolean(receipt?.turnId);
@@ -393,7 +393,7 @@ export class ChatBridge {
         } catch (error) {
           for(const binding of this.config.bindings.filter(b=>b.threadId===job.thread && b.mirror===true && this.adapters.has(b.adapter)))this.store.setCursor(this.inflightInputKey(binding,job.thread),false);
           // A lost CLI response may follow a successful submission. Do not replay it automatically.
-          this.store.inboxState(job.id,'uncertain',null,'Codex submission failed; inspect redacted service log');
+          this.store.inboxState(job.id,'uncertain',null,'Agent submission failed; inspect redacted service log');
           const [adapterId] = JSON.parse(job.id);
           const binding=this.config.bindings.find(b=>b.adapter===adapterId && String(b.chatId)===String(message.chatId) && String(b.topicId || '')===String(message.topicId || '') && b.kind===message.kind);
           if(binding) {
@@ -413,10 +413,10 @@ export class ChatBridge {
       if(this.running && !this.faultedThreads.has(thread) && this.store.pending().some(job=>job.thread===thread)) queueMicrotask(()=>this.submit().catch(error=>this.log.error('submit failed',error)));
     }
   }
-  event(event: CodexEvent) {
+  event(event: AgentEvent) {
     if (!event.threadId) return;
     if(event.type==='observerError') {
-      this.log.error('Codex observer stopped',event.error || event.text || 'unsupported history');
+      this.log.error('Agent observer stopped',event.error || event.text || 'unsupported history');
       this.stopWorkingRotation(event.threadId);
       for(const binding of this.config.bindings.filter(b=>b.threadId===event.threadId && this.adapters.has(b.adapter))) for(const presentation of Object.values(this.presentations(binding).entries)) this.endReaction(binding,presentation.id).catch(error=>this.log.warn('working reaction cleanup failed',error));
       this.active.delete(event.threadId);this.faultedThreads.add(event.threadId);return;
@@ -443,8 +443,7 @@ export class ChatBridge {
     if (event.type === 'image' && event.itemId && event.turnId && typeof event.path === 'string') {
       // Only the App's completed image artifact for this task is eligible;
       // generic tool outputs and artifacts belonging to other tasks stay private.
-      const root=resolve(this.config.codex?.codexHome || resolve(homedir(),'.codex'),'generated_images',event.threadId);
-      const files=outputFiles(`[image](${encodeURIComponent(event.path)})`,[root]).filter(file=>file.mimeType?.startsWith('image/'));
+      const files=outputFiles(`[image](${encodeURIComponent(event.path)})`,this.attachmentRoots(event.threadId)).filter(file=>file.mimeType?.startsWith('image/'));
       if (!files.length) { this.log.error('Generated image cannot be delivered: missing file or invalid task artifact path'); return; }
       for (const binding of bindings) this.stageImage(binding,event);
       return;
@@ -528,14 +527,13 @@ export class ChatBridge {
   stageFailure(binding: Binding, presentation: Presentation) {
     const context=presentation.context;
     this.store.stage(stableId(this.routeKey(binding),presentation.id,'failure'),this.routeKey(binding),{
-      text:'本轮执行未完成，请在 Codex 中查看错误后继续。',...(context.messageId?{replyTo:context.messageId}:{}),
+      text:'本轮执行未完成，请在所用 agent 中查看错误后继续。',...(context.messageId?{replyTo:context.messageId}:{}),
       target:{chatId:binding.chatId,...(binding.topicId?{topicId:binding.topicId}:{}),kind:binding.kind,...context},
     });
   }
-  stageImage(binding: Binding,event: Pick<CodexEvent,'threadId'|'turnId'|'itemId'|'path'|'ordinal'>) {
+  stageImage(binding: Binding,event: Pick<AgentEvent,'threadId'|'turnId'|'itemId'|'path'|'ordinal'>) {
     if(!event.itemId || !event.turnId || typeof event.path!=='string')return;
-    const root=resolve(this.config.codex?.codexHome || resolve(homedir(),'.codex'),'generated_images',event.threadId);
-    const files=outputFiles(`[image](${encodeURIComponent(event.path)})`,[root]).filter(file=>file.mimeType?.startsWith('image/'));
+    const files=outputFiles(`[image](${encodeURIComponent(event.path)})`,this.attachmentRoots(event.threadId)).filter(file=>file.mimeType?.startsWith('image/'));
     if(!files.length) { this.log.error('Generated image cannot be delivered: missing file or invalid task artifact path'); return; }
     const presentation=this.presentationFor(binding,{threadId:event.threadId,turnId:event.turnId,itemId:event.itemId,phase:'image',text:'',ordinal:event.ordinal});
     if(!presentation) {
@@ -548,6 +546,7 @@ export class ChatBridge {
     const images=this.deferredImages(binding,event.threadId,event.turnId);if(images[event.itemId]) {images[event.itemId].delivered=true;this.saveDeferredImages(binding,event.threadId,event.turnId,images);}
   }
   stageWorkingMarker(binding: Binding,turnId: string,context: Partial<ChatTarget>,presentationId=`turn:${turnId}`, force=false) {
+    if(quietFor(this.config,binding))return;
     const adapter=this.adapters.get(binding.adapter);
     if(!adapter || adapter.capabilities.edit || (adapter.capabilities.reaction && !force)) return;
     if(this.presentationFinalized(binding,presentationId))return;
@@ -561,6 +560,7 @@ export class ChatBridge {
   }
 
   stageText(binding: Binding,item: PublicItem,done: boolean) {
+    if(quietFor(this.config,binding) && !['final','error'].includes(item.phase))return;
     const adapter = this.adapters.get(binding.adapter)!;
     if (!adapter.capabilities.edit && !done) return;
     const type=this.config.adapters.find(a=>a.id===binding.adapter)?.type || '';
@@ -574,7 +574,7 @@ export class ChatBridge {
     }
     const replyContext=presentation.context;
     const replyTo=replyContext.messageId;
-    const targetContext=type==='qqbot' ? {target:{chatId:binding.chatId,kind:binding.kind,...replyContext}} : {};
+    const targetContext={};
     const progressScope=type==='telegram' ? 'chat' : (replyTo ? `quote:${replyTo}` : 'chat');
     const presentationScope=presentation.id.startsWith('turn:') ? item.turnId : presentation.id;
     const baseProgressGroup=stableId(this.routeKey(binding),'progress',...(presentation.id.startsWith('turn:') ? [progressScope] : [presentationScope,progressScope]));
@@ -622,7 +622,7 @@ export class ChatBridge {
       const parts=outputParts(item.text,this.attachmentRoots(item.threadId));
       for(const [index,part] of parts.entries()) {
         if(part.text && !adapter.capabilities.edit && !['final','question'].includes(item.phase))part.text=editableIntermediateHeadText(part.text);
-        if(part.text && ['qqbot','onebot'].includes(type))part.text=stripMarkdownFormatting(part.text);
+        if(part.text && type==='onebot')part.text=stripMarkdownFormatting(part.text);
         const outputs: ChatOutput[]=part.files ? [part] : ['discord','telegram'].includes(type)
           ? prepareText(type,part.text,adapter.capabilities.maxText || 1900)
           : splitText(part.text,adapter.capabilities.maxText || 1900).map(text=>({text}));
@@ -655,6 +655,7 @@ export class ChatBridge {
     }
   }
   startWorkingRotation(binding: Binding,threadId: string,turnId: string,presentationId=`turn:${turnId}`) {
+    if(quietFor(this.config,binding))return;
     const key=JSON.stringify([this.routeKey(binding),presentationId]);
     if(this.workingTimers.has(key) || this.working.frames.length<2)return;
     let index=0;
@@ -711,13 +712,14 @@ export class ChatBridge {
   typing(threadId?: string) {
     for (const b of this.config.bindings) {
       if (threadId ? b.threadId !== threadId : !this.active.has(b.threadId)) continue;
+      if(quietFor(this.config,b))continue;
       const a = this.adapters.get(b.adapter);
       const config=this.config.adapters.find(a=>a.id===b.adapter);
       const now=Date.now();
       const interval=config?.type==='telegram'?4000:config?.type==='discord'?9000:30000;
       if(!threadId && now-(this.lastTypingAt.get(this.routeKey(b)) || 0)<interval)continue;
       this.lastTypingAt.set(this.routeKey(b),now);
-      if (a?.capabilities.typing && !(config?.type==='qqbot' && b.kind==='group')) a.typing({...b,...this.store.cursor<Partial<ChatTarget>>(`reply:${this.routeKey(b)}`)}).catch(e=>this.log.warn('typing failed',e));
+      if (a?.capabilities.typing) a.typing({...b,...this.store.cursor<Partial<ChatTarget>>(`reply:${this.routeKey(b)}`)}).catch(e=>this.log.warn('typing failed',e));
     }
   }
   async stop() {
@@ -726,7 +728,7 @@ export class ChatBridge {
     this.workingTimers.clear();
     await Promise.allSettled(this.config.bindings.filter(binding=>this.adapters.has(binding.adapter)).flatMap(binding=>Object.keys(this.presentations(binding).entries).map(id=>this.endReaction(binding,id))));
     await Promise.allSettled([...this.adapters.values()].map(a=>a.stop()));
-    await this.codex.stop();
+    await this.agent.stop();
     const deadline = Date.now()+15000;
     while ((this.flushing || this.submittingThreads.size || this.bindingCreations.size) && Date.now()<deadline) await new Promise(r=>setTimeout(r,50));
     if (!this.flushing && !this.submittingThreads.size && !this.bindingCreations.size) this.store.close();

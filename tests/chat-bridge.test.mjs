@@ -6,50 +6,6 @@ import { join } from 'node:path';
 import { ChatBridge } from '../dist/chat/bridge.js';
 import { outputFiles } from '../dist/chat/files.js';
 
-test('usage cards stay image-only on every chat transport while retaining a delivery fallback',async()=>{
-  for(const type of ['discord','telegram','qqbot','onebot']){
-    const dataDir=mkdtempSync(join(tmpdir(),`rin-usage-card-${type}-`));const sent=[];let receive;
-    const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})};
-    const adapter={capabilities:{edit:type==='discord',typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return{id:'card'};}};
-    const config={dataDir,adapters:[{id:'a',type,allowUsers:['owner']}],bindings:[]};
-    const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,usage:async()=>({files:[{path:'/tmp/card.png',name:'card.png',mimeType:'image/png'}],fallbackText:'完整额度文字'}),log:{info(){},warn(){},error(){}}});
-    try{
-      await bridge.start();
-      await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[],...(type==='discord'?{commandInteraction:{id:'usage'}}:{})});
-      await bridge.flush();
-      assert.equal(sent.length,1,`${type} must send one card response`);
-      assert.ok(!sent[0].text,`${type} must not repeat the fallback on success`);
-      assert.equal(sent[0].fallbackText,'完整额度文字');
-      assert.equal(sent[0].files?.[0].name,'card.png');
-    }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
-  }
-});
-
-test('usage card media failures fall back to complete text on every normal chat transport',async()=>{
-  for(const type of ['discord','telegram','qqbot','onebot']){
-    const dataDir=mkdtempSync(join(tmpdir(),`rin-usage-fallback-${type}-`));const sent=[];let receive;
-    const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})};
-    const adapter={capabilities:{edit:type==='discord',typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);if(output.files)throw Object.assign(new Error('media rejected'),{fallbackSafe:true});return{id:'fallback'};}};
-    const config={dataDir,adapters:[{id:'a',type,allowUsers:['owner']}],bindings:[]};
-    const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,usage:async()=>({files:[{path:'/tmp/card.png',name:'card.png',mimeType:'image/png'}],fallbackText:'完整额度文字'}),log:{info(){},warn(){},error(){}}});
-    try{
-      await bridge.start();await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[]});await bridge.flush();
-      assert.equal(sent.length,2,`${type} must make one text fallback after media failure`);
-      assert.ok(sent[0].files?.length);assert.deepEqual(sent[1],{text:'完整额度文字',replyTo:'usage'});
-      assert.equal(bridge.store.outgoing().length,0);
-    }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
-  }
-});
-
-test('usage card media errors with unknown delivery outcome never send a fallback duplicate',async()=>{
-  const dataDir=mkdtempSync(join(tmpdir(),'rin-usage-uncertain-'));const sent=[];let receive;
-  const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({messageId:'q'})};
-  const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);throw new Error('connection closed');}};
-  const bridge=new ChatBridge({dataDir,adapters:[{id:'a',type:'telegram',allowUsers:['owner']}],bindings:[]},{codex,adapterFactory:async()=>adapter,usage:async()=>({files:[{path:'/tmp/card.png',mimeType:'image/png'}],fallbackText:'不得重复'}),log:{info(){},warn(){},error(){}}});
-  try{await bridge.start();await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[]});await bridge.flush();assert.equal(sent.length,1);assert.ok(sent[0].files?.length);}
-  finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
-});
-
 test('durable ingress queues once; commentary edits same remote message; tool events are suppressed',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-bridge-'));const sent=[],queued=[],deleted=[];
   let receive;
@@ -356,7 +312,7 @@ test('Discord keeps separate quote slots and a final deletes only its frozen sou
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-for(const type of ['qqbot','onebot']) test(`${type}: complete public snapshots arrive immediately with prefix, immutable deduplication, native file order and frozen quote`,async()=>{
+for(const type of ['onebot']) test(`${type}: complete public snapshots arrive immediately with prefix, immutable deduplication, native file order and frozen quote`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-snapshots-`));
   const file=join(dataDir,'image.png');writeFileSync(file,'image');
   const calls=[];let bridge;
@@ -386,10 +342,10 @@ for(const type of ['qqbot','onebot']) test(`${type}: complete public snapshots a
 });
 
 
-test('QQ freezes passive reply context for every queued text/media part across later inputs and restart',async()=>{
+test('OneBot freezes passive reply context for every queued text/media part across later inputs and restart',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-qq-passive-context-'));
   const file=join(dataDir,'image.png');writeFileSync(file,'image');
-  const config={dataDir,attachmentRoots:[dataDir],adapters:[{id:'qq',type:'qqbot',allowUsers:['owner'],dmOnly:false}],bindings:[{adapter:'qq',chatId:'group',kind:'group',threadId:'thread',mirror:true}]};
+  const config={dataDir,attachmentRoots:[dataDir],adapters:[{id:'qq',type:'onebot',allowUsers:['owner'],dmOnly:false}],bindings:[{adapter:'qq',chatId:'group',kind:'group',threadId:'thread',mirror:true}]};
   const calls=[];let bridge;
   const make=()=>new ChatBridge(config,{
     codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},
@@ -408,7 +364,6 @@ test('QQ freezes passive reply context for every queued text/media part across l
     bridge.store.setCursor(replyKey,{messageId:'source-c',userId:'owner-c'});
     await bridge.flush();assert.ok(calls.length>=4);
     for(const {target,output} of calls){
-      assert.equal(target.messageId,'source-a');assert.equal(target.userId,'owner-a');
       assert.equal(target.chatId,'group');assert.equal(target.kind,'group');assert.equal(output.editId,undefined);
     }
     assert.equal(calls[0].output.replyTo,'source-a');
@@ -422,7 +377,7 @@ test('QQ freezes passive reply context for every queued text/media part across l
 
 test('Working fallback is plain, quoted, durable and absent with edit or reaction',async()=>{
  const dataDir=mkdtempSync(join(tmpdir(),'rin-working-fallback-'));const calls=[];let bridge;
- const config={dataDir,adapters:[{id:'qq',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'qq',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+ const config={dataDir,adapters:[{id:'qq',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'qq',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
  const adapter={capabilities:{edit:false,typing:false},start:async()=>{},stop:async()=>{},send:async(target,output)=>{calls.push({target,output});return{id:String(calls.length)};}};
  const make=()=>new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
  try{
@@ -437,7 +392,7 @@ test('Working fallback is plain, quoted, durable and absent with edit or reactio
  }finally{await bridge?.stop();rmSync(dataDir,{recursive:true});}
 });
 
-for(const type of ['discord','telegram','qqbot','onebot'])test(`${type}: questions stay independent while commentary continues, including after restart`,async()=>{
+for(const type of ['discord','telegram','onebot'])test(`${type}: questions stay independent while commentary continues, including after restart`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-question-'));
   const editable=['discord','telegram'].includes(type),remote=new Map(),calls=[];
   let nextId=0,b;
@@ -487,12 +442,12 @@ for(const type of ['discord','telegram','qqbot','onebot'])test(`${type}: questio
   }finally{await b?.stop();rmSync(dataDir,{recursive:true});}
 });
 
-test('completed App images use task-scoped artifacts and durable QQ reply delivery',async()=>{
+test('completed App images use agent-scoped artifacts and durable OneBot reply delivery',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-generated-image-')),sent=[];
   const home=join(dataDir,'home'),root=join(home,'generated_images','t');mkdirSync(root,{recursive:true});
   const path=join(root,'result.png');writeFileSync(path,'image fixture');
   const outside=join(dataDir,'private.png');writeFileSync(outside,'private');symlinkSync(outside,join(root,'escape.png'));
-  const config={dataDir,codex:{codexHome:home},adapters:[{id:'q',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'g',kind:'group',threadId:'t',mirror:true}]};
+  const config={dataDir,attachmentRoots:[root],adapters:[{id:'q',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'q',chatId:'g',kind:'group',threadId:'t',mirror:true}]};
   const adapter={capabilities:{edit:false,maxText:2000},start:async()=>{},stop:async()=>{},send:async(_t,o)=>{sent.push(o);return{id:'sent-image'};}};
   const deps={codex:{start:async()=>{},stop:async()=>{},watch(){}},adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}};
   let bridge=new ChatBridge(config,deps);await bridge.start();
@@ -505,7 +460,7 @@ test('completed App images use task-scoped artifacts and durable QQ reply delive
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
 });
 
-for(const [type,edit] of [['discord',true],['qqbot',false]]) test(`${type}: an accepted same-turn steer gets an independent presentation without stealing an old item`,async()=>{
+for(const [type,edit] of [['discord',true],['onebot',false]]) test(`${type}: an accepted same-turn steer gets an independent presentation without stealing an old item`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-steer-presentation-${type}-`));const sent=[];let receive,call=0;
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1
     ? {transport:'app-server',turnId:'physical',messageId:'start-client'}
@@ -565,7 +520,7 @@ test('completed output buffered before a late steer receipt retains question, te
   const dataDir=mkdtempSync(join(tmpdir(),'rin-steer-terminal-race-')),home=join(dataDir,'home'),imageRoot=join(home,'generated_images','thread');mkdirSync(imageRoot,{recursive:true});
   const image=join(imageRoot,'result.png');writeFileSync(image,'pixels');const sent=[];let receive,call=0;
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++call===1?{transport:'app-server',turnId:'physical',messageId:'start'}:{transport:'app-server',turnId:'physical',messageId:'steer'}};
-  const config={dataDir,codex:{codexHome:home},adapters:[{id:'chat',type:'qqbot',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const config={dataDir,attachmentRoots:[imageRoot],adapters:[{id:'chat',type:'onebot',allowUsers:['owner'],requireMention:false}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   let bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
@@ -620,7 +575,7 @@ test('late terminal for an older physical turn does not clear the current manual
 test('start observed before its receipt keeps the submitting chat reply context when newer ingress arrives',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-start-before-receipt-'));const sent=[];let receive,release,calls=0;
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1 ? new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'turn-a',messageId:'start-a'});}) : {messageId:'queued'}};
-  const config={dataDir,adapters:[{id:'chat',type:'qqbot',allowUsers:['a','b']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const config={dataDir,adapters:[{id:'chat',type:'onebot',allowUsers:['a','b']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});
   try{
@@ -635,7 +590,7 @@ test('start observed before its receipt keeps the submitting chat reply context 
 
 test('a failed turn before the steer receipt delivers one failure to the accepted input without reviving working', async () => {
   const dataDir=mkdtempSync(join(tmpdir(),'rin-late-failure-')); const sent=[]; let receive, release, calls=0;
-  const config={dataDir,adapters:[{id:'chat',type:'qqbot',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const config={dataDir,adapters:[{id:'chat',type:'onebot',allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
   const adapter={capabilities:{edit:false,typing:false,maxText:2000},start:async handler=>{receive=handler;},stop:async()=>{},send:async(target,output)=>{sent.push({target,output});return{id:String(sent.length)};}};
   const codex={start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>++calls===1?{transport:'app-server',turnId:'physical'}:new Promise(resolve=>{release=()=>resolve({transport:'app-server',turnId:'physical',messageId:'client-b'});})};
   const bridge=new ChatBridge(config,{codex,adapterFactory:async()=>adapter,log:{info(){},warn(){},error(){}}});

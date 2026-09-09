@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { prepareRelease, switchRelease, withInstallLock, run } from '../dist/install/core.js';
-import { writeLaunchers } from '../dist/install/setup.js';
+import { writeLaunchers } from '../dist/install/launchers.js';
 import { routeArgs } from '../dist/cli.js';
 
 const execFileAsync = promisify(execFile);
@@ -31,8 +31,10 @@ async function repository(t) {
   await git(root, 'config', 'commit.gpgsign', 'false');
   await git(root, 'config', 'core.hooksPath', join(root, '.no-hooks'));
   await mkdir(join(root, 'src'));
+  await mkdir(join(root, 'prompts'));
   await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'rin', type: 'module' }));
   await writeFile(join(root, 'src/cli.mjs'), 'export const version = 1;\n');
+  await writeFile(join(root, 'prompts/install.md'), '# guided install\n');
   await git(root, 'add', '.');
   await git(root, 'commit', '-m', 'initial');
   const first = (await git(root, 'rev-parse', 'HEAD')).stdout.trim();
@@ -84,8 +86,10 @@ test('an update rejects rewritten history instead of replacing the current linea
   await git(repo.root, 'checkout', '--orphan', 'rewritten');
   await git(repo.root, 'rm', '-rf', '.');
   await mkdir(join(repo.root, 'src'));
+  await mkdir(join(repo.root, 'prompts'));
   await writeFile(join(repo.root, 'package.json'), JSON.stringify({ name: 'rin', type: 'module' }));
   await writeFile(join(repo.root, 'src/cli.mjs'), 'export const rewritten = true;\n');
+  await writeFile(join(repo.root, 'prompts/install.md'), '# guided install\n');
   await git(repo.root, 'add', '.');
   await git(repo.root, 'commit', '-m', 'rewritten history');
   await git(repo.root, 'branch', '-M', 'main');
@@ -162,17 +166,17 @@ test('install lock rejects contention and is released after the owner finishes',
   assert.equal(await withInstallLock(home, async () => 'next'), 'next');
 });
 
-test('CLI routing reserves exact lifecycle commands and preserves ordinary Codex argv', () => {
+test('CLI routing exposes only Rin lifecycle and explicit app-server actions', () => {
   assert.deepEqual(routeArgs(['start']), { type: 'rin', command: 'start' });
   assert.deepEqual(routeArgs(['stop']), { type: 'rin', command: 'stop' });
   assert.deepEqual(routeArgs(['restart']), { type: 'rin', command: 'restart' });
-  assert.deepEqual(routeArgs(['restart','--app-server']), { type: 'rin', command: 'restart',appServer:true });
-  assert.throws(()=>routeArgs(['start','--app-server']),/takes no arguments/);
+  assert.deepEqual(routeArgs(['app-server','start']), {type:'app-server',command:'start'});
+  assert.deepEqual(routeArgs(['app-server','restart']), {type:'app-server',command:'restart'});
   assert.deepEqual(routeArgs(['update']), { type: 'rin', command: 'update' });
-  assert.deepEqual(routeArgs(['--', 'start', '--quiet']), { type: 'codex', args: ['start', '--quiet'] });
-  assert.deepEqual(routeArgs(['exec', 'start']), { type: 'codex', args: ['exec', 'start'] });
-  assert.deepEqual(routeArgs([]), { type: 'codex', args: [] });
-  assert.throws(() => routeArgs(['restart', '--force']), /takes no arguments/);
+  assert.throws(()=>routeArgs(['--','start']),/Usage/);
+  assert.throws(()=>routeArgs(['exec','start']),/Usage/);
+  assert.throws(()=>routeArgs([]),/Usage/);
+  assert.throws(()=>routeArgs(['restart','--force']),/Usage/);
 });
 
 test('stable MCP launcher follows release changes without rewriting the entrypoint', async t => {

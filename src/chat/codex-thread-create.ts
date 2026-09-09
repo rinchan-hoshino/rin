@@ -1,11 +1,11 @@
 import type { CodexAppServer } from '../codex-app-server.js';
 
-/** Creation and submission use the same shared server. No private stdio host. */
+/** Creation and submission use the same operator-managed shared server. */
 export async function createCodexThread({server, cwd, model, name}: {server: CodexAppServer; cwd: string; model?: string; name?: string}) {
   let sent = false;
   let threadId: string | undefined;
   try {
-    await server.connect();
+    await server.connect({bootstrap: false});
     sent = true;
     const result = await server.request<{thread?: {id?: string}}>('thread/start', {cwd, ...(model ? {model} : {})});
     const id = result?.thread?.id;

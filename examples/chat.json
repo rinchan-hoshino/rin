@@ -1,11 +1,11 @@
 {
   "dataDir": "chat-data",
-  "codex": {"command": ["codex"]},
+  "agent": {"type":"codex","command":["codex"]},
   "display": {"summaries": true},
+  "quiet": {"default": false, "byRoute": {}},
   "adapters": [
     {"id":"discord","type":"discord","enabled":false,"token":"","allowUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}},
-    {"id":"telegram","type":"telegram","enabled":false,"token":"","allowUsers":[],"ownerUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}},
-    {"id":"qq-official","type":"qqbot","enabled":false,"appId":"","appSecret":"","allowUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}},
+    {"id":"telegram","type":"telegram","enabled":false,"token":"","allowUsers":[],"allowChats":[],"denyChats":[],"ownerUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}},
     {"id":"qq-onebot","type":"onebot","enabled":false,"wsUrl":"ws://127.0.0.1:3001","httpUrl":"http://127.0.0.1:3000","token":"","allowUsers":[],"dmOnly":true,"autoBind":{"cwd":"/absolute/path/to/chat-workspace"}}
   ],
   "bindings": []

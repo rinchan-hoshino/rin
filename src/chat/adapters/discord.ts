@@ -223,7 +223,7 @@ export function createAdapter(config: DiscordConfig, context: AdapterContext) {
         try { edited = await interaction.editReply({...payload,content:chunks[0]}); }
         catch {
           if (!payload.files?.length) throw new Error('discord_command_interaction_response_failed');
-          const fallback=String(output.fallbackText || chunks[0] || '附件发送失败，请在 Codex 中查看。');
+          const fallback=String(output.fallbackText || chunks[0] || '附件发送失败，请在所用 agent 中查看。');
           chunks=[];for(let index=0;index<fallback.length;index+=2000)chunks.push(fallback.slice(index,index+2000));
           try { edited = await interaction.editReply({content:chunks[0],allowedMentions:payload.allowedMentions,files:[],attachments:[]}); }
           catch { throw new Error('discord_command_interaction_response_failed'); }

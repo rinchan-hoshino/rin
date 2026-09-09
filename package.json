@@ -15,9 +15,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clack/prompts": "0.10.1",
-    "@resvg/resvg-js": "2.6.2",
-    "@tencent-connect/qqbot-nodejs": "1.0.4",
     "discord.js": "14.27.0",
     "grammy": "1.46.0",
     "marked": "15.0.12",
