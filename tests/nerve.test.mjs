@@ -49,6 +49,16 @@ test('same target admissions serialize while unrelated targets can progress',asy
  n.deliver=async event=>{seen.push(event.id);if(event.id==='a1')await new Promise(r=>release=r);return {accepted:true};};
  store.enqueue('a1','a',{});store.enqueue('a2','a',{});store.enqueue('b1','b',{});await n.tick();await n.tick();await Promise.resolve();assert.deepEqual(seen,['a1','b1']);release();await Promise.all(n.running);await n.tick();await Promise.all(n.running);assert.deepEqual(seen,['a1','b1','a2']);await n.close();store.close();
 });
+test('chat attention events coalesce by source and captured thread before native admission',async()=>{
+ const store=new Store(':memory:');const n=new Nerve({targets:{out:{type:'command',argv:['true']}}},store);const seen=[];
+ n.deliver=async event=>{seen.push({id:event.id,payload:JSON.parse(event.payload)});return {accepted:true};};
+ const old=Date.now()-6000;
+ store.enqueue('chat-1','out',{type:'group-social-attention',priority:20,messages:1,messageIds:['m1'],groups:[{chatKey:'qq/a:group/1',count:1}]},old,'group-social-attention');
+ store.enqueue('chat-2','out',{type:'group-social-attention',priority:100,messages:1,messageIds:['m2'],groups:[{chatKey:'telegram/a:group/2',count:1}]},old+1,'group-social-attention');
+ await n.tick();await Promise.all(n.running);
+ assert.equal(seen.length,1);assert.deepEqual(seen[0].payload.messageIds,['m1','m2']);assert.equal(seen[0].payload.messages,2);assert.equal(store.event('chat-1').state,'done');assert.equal(store.event('chat-2').state,'done');
+ await n.close();store.close();
+});
 test('producer fields are ignored while execution targets remain validated',()=>{
  for(const extra of [{triggers:[{id:'old'}]},{attention:{}},{minecraft:{}}])assert.doesNotThrow(()=>validateConfig({targets:{},...extra}));
  for(const type of ['codex','codex-app'])assert.throws(()=>validateConfig({targets:{out:{type,threadId:'existing'}}}),/Unknown target/);
