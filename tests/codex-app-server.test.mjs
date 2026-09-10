@@ -8,6 +8,9 @@ import { WebSocketServer } from 'ws';
 import { CodexBridge } from '../dist/chat/codex.js';
 import { CodexAppServer } from '../dist/codex-app-server.js';
 
+// Keep Unix socket fixtures short even when the OS temp directory is deeply nested.
+const socketTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp';
+
 async function peer(t, handle = () => undefined) {
   const wss = new WebSocketServer({port: 0, host: '127.0.0.1'});
   await once(wss, 'listening');
@@ -84,7 +87,7 @@ test('parallel connect initializes only once; stop cancels an in-flight request'
 });
 
 test('missing default listener starts native app-server once with sanitized environment', async t => {
-  const dir=await mkdtemp('/tmp/rin-daemon-');t.after(()=>rm(dir,{recursive:true,force:true}));
+  const dir=await mkdtemp(join(socketTempRoot,'rin-daemon-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const script=join(dir,'start.mjs'), log=join(dir,'log.json');
   await writeFile(script,`import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(log)},JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME,nerve:process.env.NERVE_API_TOKEN}));process.exit(9);`);
   const old=process.env.NERVE_API_TOKEN;process.env.NERVE_API_TOKEN='private';t.after(()=>{if(old===undefined)delete process.env.NERVE_API_TOKEN;else process.env.NERVE_API_TOKEN=old;});
@@ -94,7 +97,7 @@ test('missing default listener starts native app-server once with sanitized envi
 });
 
 test('Codex chat adapter never starts a missing app-server', async t => {
-  const dir=await mkdtemp(join(tmpdir(),'rin-agent-no-bootstrap-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const dir=await mkdtemp(join(socketTempRoot,'rin-agent-no-bootstrap-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const marker=join(dir,'started'),script=join(dir,'must-not-start.mjs');
   await writeFile(script,`import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'started');`);
   const bridge=new CodexBridge({codexHome:dir,command:[process.execPath,script],queueTimeoutMs:200});
@@ -106,7 +109,7 @@ test('Codex chat adapter never starts a missing app-server', async t => {
 });
 
 test('custom endpoint failures do not bootstrap a second server', async t => {
-  const dir=await mkdtemp(join(tmpdir(),'rin-no-fallback-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const dir=await mkdtemp(join(socketTempRoot,'rin-no-fallback-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const c=new CodexAppServer({endpoint:`unix://${dir}/missing.sock`,command:['must-not-run']});t.after(()=>c.stop());
   await assert.rejects(c.connect(),{code:'ENOENT'});
 });
