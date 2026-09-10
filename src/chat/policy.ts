@@ -26,7 +26,6 @@ export function validateConfig(config: ChatConfig) {
     if (a.ownerUsers !== undefined && (!Array.isArray(a.ownerUsers) || a.ownerUsers.some(x => typeof x !== 'string'))) throw new Error(`ownerUsers must be an array of explicit user IDs: ${a.id}`);
     for(const [name,rules] of [['allowChats',a.allowChats],['denyChats',a.denyChats]] as const)if(rules!==undefined && (!Array.isArray(rules) || rules.some(rule=>!validChatRule(rule))))throw new Error(`${name} must contain chat IDs or {chatId, topicId} rules: ${a.id}`);
     if (a.autoBind !== undefined && a.autoBind !== false) {
-      if(config.agent.type!=='codex')throw new Error('autoBind is available only for the Codex agent; bind an existing session ID');
       const v=a.autoBind;
       if (!v || typeof v!=='object' || Array.isArray(v) || typeof v.cwd!=='string' || !isAbsolute(v.cwd) ||
         (v.model!==undefined && (typeof v.model!=='string' || !v.model.trim())) ||

@@ -12,7 +12,7 @@ Open a coding agent you have already installed and signed in to, then copy and s
 Install and configure Rin using https://github.com/rinchan-hoshino/rin/blob/main/prompts/install.md
 ```
 
-Your agent will guide you through choosing an assistant, connecting your chats, and deciding who can use it. The installer sets up the `rin` command and background service with sensible defaults.
+Rin uses the agent you are installing from. It will guide you through connecting your chats and deciding who can use it. Each chat starts its own conversation and keeps its context as you talk.
 
 See the [installation guide](prompts/install.md) for the full steps. Node.js 24 or newer is required.
 

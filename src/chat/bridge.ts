@@ -262,7 +262,7 @@ export class ChatBridge {
       try {
         let threadId;
         try {
-          if(!this.agent.createThread)throw new Error('This agent adapter cannot create sessions; bind an existing session ID');
+          if(!this.agent.createThread)throw new Error('This agent adapter does not support session creation');
           threadId=await this.agent.createThread({cwd:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).cwd,model:(config.autoBind as Exclude<AdapterConfig['autoBind'], false | undefined>).model,name:`${config.id} · ${message.chatName || String(message.chatId)}`});
         }
         catch(error) { if(typeof failure(error).threadId==='string' && failure(error).threadId)threadId=failure(error).threadId;else throw error; }

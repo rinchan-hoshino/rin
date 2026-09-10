@@ -20,7 +20,7 @@ test('chat admission is deny-first and commands bypass chat lists but never iden
 
 test('chat rule and agent configuration fail closed',()=>{
   assert.throws(()=>validateConfig({agent:{type:'pi'},adapters:[{id:'a',type:'telegram',allowUsers:['owner'],allowChats:[{}]}],bindings:[]}),/allowChats/);
-  assert.throws(()=>validateConfig({agent:{type:'pi'},adapters:[{id:'a',type:'telegram',allowUsers:['owner'],autoBind:{cwd:'/tmp'}}],bindings:[]}),/only for the Codex agent/);
+  for(const type of ['codex','claude-code','pi','opencode'])assert.doesNotThrow(()=>validateConfig({agent:{type},adapters:[{id:'a',type:'telegram',allowUsers:['owner'],autoBind:{cwd:'/tmp'}}],bindings:[]}));
   assert.throws(()=>validateConfig({agent:{type:'unknown'},adapters:[],bindings:[]}),/agent.type/);
   assert.throws(()=>validateConfig({agent:{type:'codex',command:'codex'},adapters:[],bindings:[]}),/argv array/);
   assert.throws(()=>validateConfig({agent:{type:'claude-code',cwd:'relative'},adapters:[],bindings:[]}),/absolute path/);

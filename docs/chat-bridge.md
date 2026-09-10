@@ -1,6 +1,6 @@
 # Chat bridge
 
-A chat route binds one transport chat to one existing agent session. Output mirroring is explicit.
+A chat route associates one transport chat with its own agent conversation. The guided setup creates that conversation when the first message is admitted and reuses it for later messages.
 
 Supported transports are Discord, Telegram, and OneBot v11. OneBot can connect an ordinary QQ account. QQ's official Bot API is not supported.
 
@@ -27,4 +27,8 @@ Accepted true forms are `true`, `"quiet"`, `{"enabled":true}`, `{"quiet":true}`,
 
 ## Agent sessions
 
-Codex can explicitly auto-bind by creating a task. Claude Code, pi, and OpenCode require an existing native session ID in the binding. Each CLI adapter serializes turns for a session and returns a receipt when the real child process starts. Its final stdout becomes the final public answer after a successful exit.
+`autoBind` creates conversations for Codex, Claude Code, pi, and OpenCode. It specifies the workspace and an optional model. Each admitted chat or topic has an independent conversation; concurrent first messages share one creation operation. The association persists across restarts. An explicit binding can also connect an existing conversation.
+
+Codex creates its thread through app-server. CLI adapters reserve a local route, start a fresh native session with the first input, and save the session reference from structured output. Later turns use that native reference and the original workspace. They serialize turns per conversation and return a receipt when the child process starts. A successful native completion produces the final public answer; reasoning and tool output stay in the agent.
+
+An interrupted first run with no returned session reference remains unresolved until inspected. This state persists across restarts, preventing accidental duplicate conversations.

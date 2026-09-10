@@ -7,7 +7,7 @@ Fixtures and subprocess probes establish code behavior. They do not replace acce
 ## Acceptance sequence
 
 1. Start a disposable Codex app-server, bind a task, and verify input, intermediate output, final output, attachments, restart recovery, and the no-server error path.
-2. Install and authenticate each selected CLI agent. Verify its documented non-interactive resume command with a disposable native session.
+2. Install and authenticate each selected CLI agent. Starting from an empty chat configuration, verify that the first admitted message creates a native conversation, concurrent follow-ups share it, another chat gets a separate conversation, and a Rin restart preserves continuity. Check native errors and interrupted creation separately.
 3. For every enabled transport, verify an authorized message, rejected identity, configured allow and deny rules, registered command, quiet delivery, attachments, and restart recovery.
 4. For Telegram and OneBot, verify private-like routing only with a fresh complete member list containing the bot and exactly one configured owner.
 5. Run the installation flow in a clean per-user directory and verify launcher ownership, service registration, update rollback, and removal on each documented platform.
