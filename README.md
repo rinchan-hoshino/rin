@@ -1,10 +1,22 @@
 # Rin
 
-参考 https://github.com/rinchan-hoshino/rin/blob/main/prompts/install.md 来帮我安装 Rin
+Bring your coding agent into your chats.
 
-Rin connects a coding agent to durable chat and event inputs.
+Rin connects Codex, Claude Code, pi, and OpenCode to Discord, Telegram, and QQ (via OneBot v11).
 
-The core provides:
+## Install
+
+Open a coding agent you have already installed and signed in to, then copy and send this prompt:
+
+```text
+Install and configure Rin using https://github.com/rinchan-hoshino/rin/blob/main/prompts/install.md
+```
+
+Your agent will guide you through choosing an assistant, connecting your chats, and deciding who can use it. The installer sets up the `rin` command and background service with sensible defaults.
+
+See the [installation guide](prompts/install.md) for the full steps. Node.js 24 or newer is required.
+
+## Features
 
 - Codex through app-server
 - Claude Code, pi, and OpenCode through their non-interactive CLIs
@@ -12,11 +24,14 @@ The core provides:
 - Durable Nerve command and HTTP event delivery
 - Isolated updates, service lifecycle commands, and explicit Codex app-server controls
 
-Choose and authenticate an agent, then follow the [guided installation prompt](prompts/install.md). The installer places a per-user `rin` command and user daemon without administrator access. Runtime configuration is shown in [examples/chat.json](examples/chat.json) and [examples/nerve.json](examples/nerve.json). The [persona practice prompt](prompts/persona-practice.md) is an optional separate artifact.
+## Documentation
 
-Read [the architecture guide](docs/architecture.md), [chat bridge rules](docs/chat-bridge.md), [Nerve guide](docs/nerve.md), and [validation guide](docs/validation.md) for the operating model and acceptance checks.
+- [Chat bridge](docs/chat-bridge.md) · [Chat configuration](examples/chat.json)
+- [Nerve events](docs/nerve.md) · [Event configuration](examples/nerve.json)
+- [Architecture](docs/architecture.md) · [Validation](docs/validation.md)
+- [Persona practice prompt](prompts/persona-practice.md)
 
-QQ accounts connect through OneBot v11. Node.js 24 or newer is required.
+## Development
 
 ```sh
 npm ci
