@@ -12,4 +12,4 @@ Chat admission starts with an explicit user ID list. Messages then pass deny and
 
 Quiet is a delivery setting. It suppresses working, commentary, and summary output for a route while final answers and errors remain visible.
 
-Nerve sends durable events to configured command or HTTP targets and records delivery receipts. Persona design is a separate prompt.
+Nerve sends durable events to configured command or HTTP targets and records delivery receipts.

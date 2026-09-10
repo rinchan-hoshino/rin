@@ -29,7 +29,6 @@ See the [installation guide](prompts/install.md) for the full steps. Node.js 24 
 - [Chat bridge](docs/chat-bridge.md) · [Chat configuration](examples/chat.json)
 - [Nerve events](docs/nerve.md) · [Event configuration](examples/nerve.json)
 - [Architecture](docs/architecture.md) · [Validation](docs/validation.md)
-- [Persona practice prompt](prompts/persona-practice.md)
 
 ## Development
 
