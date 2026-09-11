@@ -6,7 +6,7 @@ import {mkdtemp,mkdir,rm,realpath,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {WebSocketServer} from 'ws';
-import {ensureAppServer,prepareAppServerRestart} from '../dist/codex-server-lifecycle.js';
+import {ensureAppServer,prepareAppServerRestart,prepareAppServerStop} from '../dist/codex-server-lifecycle.js';
 import {main} from '../dist/cli.js';
 
 async function unixPeer(t) {
@@ -73,11 +73,21 @@ test('Rin service lifecycle never touches the agent endpoint',async t=>{
 });
 test('explicit app-server restart does not stop or start Rin',async t=>{
   const home=await installation(t),events=[];
-  await main(['app-server','restart'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>events.push('rin.start'),stop:async()=>events.push('rin.stop')}),prepareServerRestart:async()=>{events.push('preflight');return async()=>events.push('server.restart');}});
+  await main(['codex','restart'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>events.push('rin.start'),stop:async()=>events.push('rin.stop')}),prepareServerRestart:async()=>{events.push('preflight');return async()=>events.push('server.restart');}});
   assert.deepEqual(events,['preflight','server.restart']);
 });
 test('failed explicit app-server start does not launch Rin service',async t=>{
   const home=await installation(t);let started=false;
-  await assert.rejects(main(['app-server','start'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>{started=true;}}),ensureServer:async()=>{throw Error('handshake failed');}}),/handshake failed/);
+  await assert.rejects(main(['codex','start'],{home,codex:process.execPath,serviceFactory:()=>({start:async()=>{started=true;}}),ensureServer:async()=>{throw Error('handshake failed');}}),/handshake failed/);
   assert.equal(started,false);
+});
+
+test('stopping a missing listener never starts one',posix,async t=>{
+ const home=await mkdtemp('/tmp/rin-stop-missing-');t.after(()=>rm(home,{recursive:true,force:true}));
+ const stop=await prepareAppServerStop({codexHome:home},{ensure:async()=>assert.fail('stop must not start')});await stop();
+});
+test('explicit codex stop uses only the server stop operation',async t=>{
+ const home=await installation(t),events=[];
+ await main(['codex','stop'],{home,prepareServerStop:async()=>async()=>events.push('server.stop'),serviceFactory:()=>assert.fail('Rin service must not be touched')});
+ assert.deepEqual(events,['server.stop']);
 });

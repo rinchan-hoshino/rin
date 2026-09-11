@@ -4,7 +4,7 @@ export const adapterTypes = ['discord', 'telegram', 'onebot'];
 
 export function validateConfig(config: ChatConfig) {
   if (!Array.isArray(config.adapters) || !Array.isArray(config.bindings)) throw new Error('adapters and bindings must be arrays');
-  if(!config.agent)config.agent={type:'codex'};
+  if(!config.agent)config.agent={...config.codex,type:'codex'};
   if(typeof config.agent!=='object' || !['codex','claude-code','pi','opencode'].includes(config.agent.type))throw new Error('agent.type must be codex, claude-code, pi, or opencode');
   if(config.agent.type==='codex') {
     if(config.agent.command!==undefined && (!Array.isArray(config.agent.command) || !config.agent.command.length || config.agent.command.some(value=>typeof value!=='string' || !value)))throw new Error('agent.command must be a non-empty argv array for Codex');

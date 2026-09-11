@@ -16,6 +16,8 @@ Rin uses the agent you are installing from. It will guide you through connecting
 
 See the [installation guide](prompts/install.md) for the full steps. Node.js 24 or newer is required.
 
+Run `rin` to open your configured agent, or `rin -- ...` to pass it arguments. Use `rin codex start|stop|restart` to manage the local Codex app-server.
+
 ## Features
 
 - Codex through app-server

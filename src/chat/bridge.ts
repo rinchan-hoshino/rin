@@ -413,6 +413,7 @@ export class ChatBridge {
   }
   event(event: AgentEvent) {
     if (!event.threadId) return;
+    if(event.type==='observerReady') { this.faultedThreads.delete(event.threadId);return; }
     if(event.type==='observerError') {
       this.log.error('Agent observer stopped',event.error || event.text || 'unsupported history');
       this.stopWorkingRotation(event.threadId);
@@ -421,6 +422,18 @@ export class ChatBridge {
     }
     const bindings = this.config.bindings.filter(b=>b.threadId===event.threadId && this.adapters.has(b.adapter) && b.mirror === true);
     if (!bindings.length) return;
+    if(event.type==='orderReset') {
+      for(const binding of bindings) {
+        const state=this.presentations(binding);
+        for(const presentation of Object.values(state.entries)) {
+          presentation.boundary=undefined;
+          this.saveInputBoundaries(binding,event.threadId,presentation.turnId,{});
+          this.saveDeferredImages(binding,event.threadId,presentation.turnId,{});
+        }
+        this.savePresentations(binding,state);
+      }
+      return;
+    }
     if(event.type==='input') {
       const ordinal=event.ordinal;
       if(ordinal===undefined || !Number.isFinite(ordinal))return;

@@ -1,222 +1,68 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { CodexBridge } from '../dist/chat/codex.js';
-
-function historyFixture(dir) {
-  const state = new DatabaseSync(join(dir, 'state_5.sqlite'));
-  state.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, cli_version TEXT NOT NULL, history_mode TEXT NOT NULL)`);
-  state.prepare('INSERT INTO threads VALUES (?, ?, ?)').run('thread-one', '0.153.4', 'paginated');
-  state.close();
-  const history = new DatabaseSync(join(dir, 'thread_history_1.sqlite'));
-  history.exec(`
-    CREATE TABLE thread_turns (
-      thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, rollout_ordinal INTEGER NOT NULL,
-      status TEXT NOT NULL, error_json TEXT, started_at INTEGER, completed_at INTEGER,
-      PRIMARY KEY(thread_id, turn_id));
-    CREATE TABLE thread_items (
-      thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, item_id TEXT NOT NULL,
-      rollout_ordinal INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, item_json TEXT NOT NULL,
-      item_type TEXT NOT NULL, updated_at_ordinal INTEGER NOT NULL,
-      PRIMARY KEY(thread_id, turn_id, item_id));
-  `);
-  return history;
+import {WebSocketServer} from 'ws';
+import {once} from 'node:events';
+import {CodexBridge} from '../dist/chat/codex.js';
+const waitFor=async fn=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,10));}throw Error('observer timeout');};
+const answer=(id,text,extra={})=>({id,type:'agentMessage',text,phase:'final_answer',...extra});
+async function fixture(t,turns=[]) {
+ const wss=new WebSocketServer({host:'127.0.0.1',port:0});await once(wss,'listening');
+ const f={turns,events:[],saved:undefined,calls:[],offline:false,bridges:[]};
+ wss.on('connection',ws=>ws.on('message',raw=>{
+  const m=JSON.parse(String(raw));if(!m.id)return;f.calls.push(m.method);
+  if(f.offline){ws.terminate();return;}
+  let result={};
+  if(m.method==='thread/turns/list'||m.method==='thread/items/list'){
+   assert.equal(m.params.threadId,'thread');
+   const rows=m.method==='thread/turns/list'?[...f.turns].reverse().map(({items,...x})=>x):(f.turns.find(t=>t.id===m.params.turnId)?.items||[]).map(item=>({turnId:m.params.turnId,item}));
+   const offset=Number(m.params.cursor||0),end=offset+m.params.limit;
+   result={data:rows.slice(offset,end),nextCursor:end<rows.length?String(end):null};
+  }else if(m.method!=='initialize')assert.fail(`unexpected RPC ${m.method}`);
+  ws.send(JSON.stringify({id:m.id,result}));
+ }));
+ f.make=()=>{const b=new CodexBridge({endpoint:`ws://127.0.0.1:${wss.address().port}`,codexHome:'/does-not-exist',pollMs:10,onEvent:e=>f.events.push(e),getCursor:()=>f.saved,setCursor:(_k,v)=>{f.saved=structuredClone(v);}});f.bridges.push(b);return b;};
+ t.after(async()=>{for(const b of f.bridges)await b.stop();for(const ws of wss.clients)ws.terminate();await new Promise(r=>wss.close(r));});
+ return f;
 }
 
-const waitFor = async predicate => {
-  for (let i = 0; i < 100; i++) {
-    if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  throw new Error('event wait timed out');
-};
-
-test('read-only observer baselines history and emits only new public output and completion', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  const db = historyFixture(dir);
-  t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'old', 1, 'completed', null, 1, 2);
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'old', 'old-message', 2, 1, JSON.stringify({ type: 'agentMessage', id: 'old-message', text: 'old answer', phase: 'final_answer' }), 'agentMessage', 2,
-  );
-  const events = [];
-  const bridge = new CodexBridge({ command: ['codex'], codexHome: dir, pollMs: 10, onEvent: event => events.push(event) });
-  await bridge.start();
-  const unwatch = bridge.watch('thread-one');
-  await new Promise(resolve => setTimeout(resolve, 30));
-  assert.deepEqual(events, []);
-
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'new', 3, 'inProgress', null, 3, null);
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'new', 'tool', 4, 4, JSON.stringify({ type: 'commandExecution', aggregatedOutput: 'secret tool output' }), 'commandExecution', 4,
-  );
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'new', 'reason', 5, 5, JSON.stringify({ type: 'reasoning', summary: ['Obsolete public summary', 'Public summary'], content: ['private reasoning'] }), 'reasoning', 5,
-  );
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'new', 'answer', 6, 6, JSON.stringify({ type: 'agentMessage', text: 'Work', phase: 'commentary' }), 'agentMessage', 6,
-  );
-  await waitFor(() => events.length === 3);
-  assert.deepEqual(events.map(event => [event.type, event.itemId, event.text]), [
-    ['started', undefined, undefined],
-    ['text', 'reason', 'Public summary'],
-    ['text', 'answer', 'Work'],
-  ]);
-  assert.equal(events[1].phase, 'summary');
-  assert.equal(JSON.stringify(events).includes('Obsolete public summary'), false);
-  assert.equal(JSON.stringify(events).includes('private reasoning'), false);
-  assert.equal(JSON.stringify(events).includes('secret tool output'), false);
-
-  db.prepare('UPDATE thread_items SET item_json=?, updated_at_ordinal=? WHERE item_id=?').run(
-    JSON.stringify({ type: 'agentMessage', text: 'Working', phase: 'commentary' }), 7, 'answer',
-  );
-  await waitFor(() => events.length === 4);
-  assert.equal(events[3].text, 'Working');
-  assert.equal(events[3].delta, undefined);
-  db.prepare('UPDATE thread_turns SET status=?, completed_at=? WHERE turn_id=?').run('completed', 8, 'new');
-  await waitFor(() => events.at(-1)?.type === 'completed');
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'bad', 9, 'failed', JSON.stringify({ message: 'model failed' }), 9, 10,
-  );
-  await waitFor(() => events.at(-1)?.type === 'failed');
-  assert.deepEqual(events.slice(-2).map(event => [event.type, event.turnId, event.text]), [
-    ['started', 'bad', undefined],
-    ['failed', 'bad', 'model failed'],
-  ]);
-  unwatch();
-  await bridge.stop();
+test('API observer baselines old history and emits public updates before completion without local databases',async t=>{
+ const f=await fixture(t,[{id:'old',status:'completed',items:[answer('old','old')]}]);const b=f.make();await b.start();await b.watch('thread');assert.deepEqual(f.events,[]);
+ f.turns.push({id:'new',status:'inProgress',items:[{id:'tool',type:'commandExecution',aggregatedOutput:'secret'}, {id:'reason',type:'reasoning',summary:['old summary','public summary'],content:['private reasoning']},answer('a','Work',{phase:'commentary'})]});
+ await waitFor(()=>f.events.some(e=>e.text==='Work'));assert.equal(JSON.stringify(f.events).includes('secret'),false);assert.equal(JSON.stringify(f.events).includes('private reasoning'),false);
+ f.turns[1].items[2].text='Working';await waitFor(()=>f.events.some(e=>e.text==='Working'));
+ f.turns[1].status='completed';await waitFor(()=>f.events.at(-1)?.type==='completed');
+ assert.ok(f.events.find(e=>e.text==='public summary'&&e.phase==='summary'));assert.ok(!f.calls.includes('thread/resume'));
 });
 
-test('observer projects the persisted steer input client id and immutable rollout ordinal before later output', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-steer-boundary-'));
-  const db = historyFixture(dir);t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'physical', 1, 'inProgress', null, 1, null);
-  const events=[];const bridge=new CodexBridge({command:['codex'],codexHome:dir,pollMs:10,onEvent:event=>events.push(event)});
-  await bridge.start();bridge.watch('thread-one');await new Promise(resolve=>setTimeout(resolve,30));
-  // The old output is discovered after the receipt boundary in wall-clock time,
-  // but its creation ordinal proves it belongs before the steered input.
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','old',10,10,JSON.stringify({type:'agentMessage',text:'old',phase:'final_answer'}),'agentMessage',30);
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','input-b',20,20,JSON.stringify({type:'userMessage',id:'input-b',clientId:'steer-receipt'}),'userMessage',31);
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','new',21,21,JSON.stringify({type:'agentMessage',text:'new',phase:'final_answer'}),'agentMessage',32);
-  await waitFor(()=>events.filter(event=>event.type!=='started').length===3);
-  assert.deepEqual(events.filter(event=>event.type!=='started').map(event=>[event.type,event.itemId,event.ordinal,event.clientMessageId,event.text]),[
-    ['text','old',10,undefined,'old'],['input','input-b',20,'steer-receipt',undefined],['text','new',21,undefined,'new'],
-  ]);
-  await bridge.stop();
+test('persistent API checkpoint recovers a missed final and does not replay it on another restart',async t=>{
+ const f=await fixture(t,[{id:'active',status:'inProgress',items:[]}]);let b=f.make();await b.start();await b.watch('thread');await b.stop();
+ f.turns[0].items.push(answer('final','done'));f.turns[0].status='completed';b=f.make();await b.start();await b.watch('thread');assert.equal(f.events.filter(e=>e.text==='done').length,1);assert.equal(f.events.at(-1).type,'completed');await b.stop();
+ b=f.make();await b.start();await b.watch('thread');assert.equal(f.events.filter(e=>e.text==='done').length,1);
 });
 
-test('observer rejects unsupported history schema and stop disables watch', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const db = historyFixture(dir);
-  db.close();
-  const state = new DatabaseSync(join(dir, 'state_5.sqlite'));
-  state.prepare('UPDATE threads SET cli_version=?').run('0.154.0');
-  state.close();
-  const bridge = new CodexBridge({ codexHome: dir });
-  await bridge.start();
-  assert.throws(() => bridge.watch('thread-one'), /Unsupported Codex history schema/);
-  await bridge.stop();
-  assert.throws(() => bridge.watch('thread-one'), /not started/);
+test('all missed turn and item pages are consumed in canonical order with steer boundaries first',async t=>{
+ const f=await fixture(t,[{id:'anchor',status:'completed',items:[]}]);let b=f.make();await b.start();await b.watch('thread');await b.stop();
+ for(let i=0;i<205;i++)f.turns.push({id:`t${i}`,status:'completed',items:[answer(`a${i}`,`answer${i}`)]});
+ const active={id:'active',status:'inProgress',items:Array.from({length:105},(_,i)=>({id:`tool${i}`,type:'commandExecution'}))};
+ active.items.push(answer('old','old output'),{id:'input',type:'userMessage',clientId:'receipt'},answer('new','new output'));f.turns.push(active);
+ b=f.make();await b.start();await b.watch('thread');assert.equal(f.events.filter(e=>e.type==='completed').length,205);
+ const events=f.events.filter(e=>e.turnId==='active');assert.equal(events[1].type,'input');assert.equal(events[1].ordinal,106);assert.equal(events.find(e=>e.itemId==='old').ordinal,105);assert.equal(events.find(e=>e.itemId==='new').ordinal,107);
 });
 
-test('observer reports live schema drift as a typed event without crashing', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const db = historyFixture(dir);
-  db.close();
-  const events = [];
-  const bridge = new CodexBridge({ codexHome: dir, pollMs: 10, onEvent: event => events.push(event) });
-  await bridge.start();
-  bridge.watch('thread-one');
-  const state = new DatabaseSync(join(dir, 'state_5.sqlite'));
-  state.prepare('UPDATE threads SET cli_version=?').run('0.154.0');
-  state.close();
-  await waitFor(() => events.some(event => event.type === 'observerError'));
-  assert.match(events.at(-1).text, /Unsupported Codex history schema/);
-  await bridge.stop();
+test('disconnect retains checkpoint and recovers without submitting or resuming a model turn',async t=>{
+ const f=await fixture(t,[{id:'a',status:'inProgress',items:[]}]);const b=f.make();await b.start();await b.watch('thread');f.offline=true;
+ await waitFor(()=>f.events.some(e=>e.type==='observerError'));f.offline=false;f.turns[0].items.push(answer('a','recovered'));f.turns[0].status='completed';
+ await waitFor(()=>f.events.some(e=>e.type==='observerReady'));assert.equal(f.events.filter(e=>e.text==='recovered').length,1);assert.ok(f.calls.every(m=>['initialize','thread/turns/list','thread/items/list'].includes(m)));
 });
 
-test('persistent cursor catches a missed final after observer restart', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
-  const db = historyFixture(dir);
-  t.after(async () => { db.close(); await rm(dir, { recursive: true, force: true }); });
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'active', 1, 'inProgress', null, 1, null);
-  let cursor;
-  const cursorApi = {
-    getCursor: () => cursor,
-    setCursor: (_key, value) => { cursor = structuredClone(value); },
-  };
-  const first = new CodexBridge({ codexHome: dir, pollMs: 10, ...cursorApi });
-  await first.start();
-  first.watch('thread-one');
-  await first.stop();
-  assert.deepEqual(cursor.activeTurns.map(row => row.turnId), ['active']);
-
-  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one', 'active', 'final', 2, 2, JSON.stringify({ type: 'agentMessage', text: 'Finished' }), 'agentMessage', 2,
-  );
-  db.prepare('UPDATE thread_turns SET status=?, completed_at=? WHERE turn_id=?').run('completed', 3, 'active');
-  const events = [];
-  const second = new CodexBridge({ codexHome: dir, pollMs: 10, onEvent: event => events.push(event), ...cursorApi });
-  await second.start();
-  second.watch('thread-one');
-  await waitFor(() => events.at(-1)?.type === 'completed');
-  assert.deepEqual(events.map(event => [event.type, event.phase, event.text]), [
-    ['text', 'final', 'Finished'],
-    ['completed', undefined, undefined],
-  ]);
-  await second.stop();
+test('images, asynchronous questions and failed turns keep their public semantics',async t=>{
+ const f=await fixture(t);const b=f.make();await b.start();await b.watch('thread');
+ f.turns.push({id:'x',status:'failed',error:{message:'failed'},items:[answer('q','question',{delivery:'async'}),{id:'img',type:'imageGeneration',status:'completed',savedPath:'/tmp/image.png'}]});
+ await waitFor(()=>f.events.at(-1)?.type==='failed');assert.equal(f.events.find(e=>e.itemId==='q').phase,'question');assert.equal(f.events.find(e=>e.type==='image').path,'/tmp/image.png');assert.equal(f.events.at(-1).text,'failed');
 });
 
-test('async final_answer questions do not terminate the visible output stream', async t => {
-  const dir=await mkdtemp(join(tmpdir(),'rin-question-history-'));
-  const db=historyFixture(dir);
-  const events=[];
-  const bridge=new CodexBridge({codexHome:dir,pollMs:10,onEvent:event=>events.push(event)});
-  t.after(async()=>{await bridge.stop();db.close();await rm(dir,{recursive:true,force:true});});
-  await bridge.start();bridge.watch('thread-one');
-  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one','turn',1,'inProgress',null,1,null);
-  const items=[
-    {text:'before',phase:'commentary'},
-    {text:'Which permission?',phase:'final_answer',delivery:'async',questions:[{title:'Which permission?',options:null}]},
-    {text:'after',phase:'commentary'},
-    {text:'Another question',phase:'final_answer',questions:[{title:'Another question'}]},
-    {text:'finished',phase:'final_answer',delivery:null,questions:null},
-  ];
-  for(const [index,item] of items.entries())db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'thread-one','turn',`item-${index}`,index+2,index+2,JSON.stringify({type:'agentMessage',...item}),'agentMessage',index+2,
-  );
-  await waitFor(()=>events.length===6);
-  assert.deepEqual(events.filter(event=>event.type==='text').map(({phase,text})=>({phase,text})),[
-    {phase:'commentary',text:'before'},
-    {phase:'question',text:'Which permission?'},
-    {phase:'commentary',text:'after'},
-    {phase:'question',text:'Another question'},
-    {phase:'final',text:'finished'},
-  ]);
-});
-
-test('observer emits completed image artifacts without exposing image payload or tool output, and resumes once', async t => {
-  const dir=await mkdtemp(join(tmpdir(),'rin-image-history-'));
-  const db=historyFixture(dir);t.after(async()=>{db.close();await rm(dir,{recursive:true,force:true});});
-  const events=[];let cursor;
-  const options={codexHome:dir,pollMs:10,onEvent:e=>events.push(e),getCursor:()=>cursor,setCursor:(_k,v)=>{cursor=v;}};
-  let bridge=new CodexBridge(options);await bridge.start();bridge.watch('thread-one');
-  db.prepare('INSERT INTO thread_turns VALUES (?,?,?,?,?,?,?)').run('thread-one','image-turn',1,'inProgress',null,1,null);
-  const insert=db.prepare('INSERT INTO thread_items VALUES (?,?,?,?,?,?,?,?)');
-  insert.run('thread-one','image-turn','image',2,2,JSON.stringify({status:'inProgress',savedPath:'/tmp/not-ready.png',result:'private pixels'}),'imageGeneration',2);
-  insert.run('thread-one','image-turn','tool',3,3,JSON.stringify({output:'private tool image'}),'mcpToolCall',3);
-  await waitFor(()=>events.some(e=>e.type==='started'));
-  const path=join(dir,'generated_images','thread-one','image.png');
-  db.prepare('UPDATE thread_items SET item_json=?,updated_at_ordinal=4 WHERE item_id=?').run(JSON.stringify({status:'completed',savedPath:path,result:'private pixels',revisedPrompt:'private prompt'}),'image');
-  await waitFor(()=>events.some(e=>e.type==='image'));
-  assert.deepEqual(events.filter(e=>e.type==='image'),[{threadId:'thread-one',turnId:'image-turn',type:'image',itemId:'image',path,ordinal:2}]);
-  assert.equal(JSON.stringify(events).includes('private'),false);
-  await bridge.stop();bridge=new CodexBridge(options);await bridge.start();bridge.watch('thread-one');
-  await new Promise(r=>setTimeout(r,35));await bridge.stop();
-  assert.equal(events.filter(e=>e.type==='image').length,1);
+test('legacy active checkpoint is recovered through the API with a fresh ordering baseline',async t=>{
+ const f=await fixture(t,[{id:'active',status:'completed',items:[{id:'input',type:'userMessage',clientId:'old-receipt'},answer('final','finished offline')]}]);
+ f.saved={version:1,turnHighWater:10,itemHighWater:20,activeTurns:[{turnId:'active',status:'inProgress'}]};const b=f.make();await b.start();await b.watch('thread');
+ assert.equal(f.events[0].type,'orderReset');assert.equal(f.events.find(e=>e.type==='input').ordinal,0);assert.equal(f.events.at(-1).type,'completed');assert.equal(f.saved.version,2);
 });

@@ -29,7 +29,7 @@ export class CodexInput {
       ...images.map(file => ({type: 'localImage', path: file.path})),
     ];
     // Runtime adapters connect only to an operator-managed server. Starting one
-    // is reserved for the explicit `rin app-server` CLI action.
+    // is reserved for the explicit `rin codex` CLI action.
     await this.server.connect({bootstrap: false});
     // Rejoins an already running task; otherwise loads it from durable history.
     // No model, cwd, instructions or permissions are overridden here.

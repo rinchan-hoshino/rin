@@ -72,6 +72,22 @@ test('HTTP failures are tool errors and never forward secrets from diagnostics',
   assert.ok(!JSON.stringify(response).includes(token));
 });
 
+test('recent event pages preserve all metadata, errors and exact filters; full window remains accessible', async t => {
+  const rows=Array.from({length:47},(_,n)=>({id:`event-${n}`,state:n%2?'failed':'done',source:'check',target:'codex',error:n%2?'whole diagnostic':null}));
+  const {handle,requests}=await fixture(t,(_,res)=>res.end(JSON.stringify(rows)));
+  const call=async args=>JSON.parse((await handle(rpc('tools/call',{name:'nerve_list_events',arguments:args}))).result.content[0].text);
+  let args={},all=[];
+  do {const page=await call(args);all.push(...page.events);args=page.nextRead;}while(args);
+  assert.deepEqual(all,rows);
+  assert.deepEqual(await call({compact:false}),rows);
+  const filtered=await call({state:'failed',limit:100});
+  assert.deepEqual(filtered.events,rows.filter(x=>x.state==='failed'));
+  assert.equal(filtered.windowSize,47);
+  const count=requests.length;
+  for(const invalid of [{limit:101},{offset:1.5},{compact:false,limit:2}])assert.equal((await handle(rpc('tools/call',{name:'nerve_list_events',arguments:invalid}))).error.code,-32602);
+  assert.equal(requests.length,count);
+});
+
 test('stdio entrypoint uses private test configuration and emits only JSON RPC', async t => {
   const { port } = await fixture(t);
   const folder = await mkdtemp(join(tmpdir(), 'nerve-mcp-'));

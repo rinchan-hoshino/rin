@@ -170,12 +170,13 @@ test('CLI routing exposes only Rin lifecycle and explicit app-server actions', (
   assert.deepEqual(routeArgs(['start']), { type: 'rin', command: 'start' });
   assert.deepEqual(routeArgs(['stop']), { type: 'rin', command: 'stop' });
   assert.deepEqual(routeArgs(['restart']), { type: 'rin', command: 'restart' });
-  assert.deepEqual(routeArgs(['app-server','start']), {type:'app-server',command:'start'});
-  assert.deepEqual(routeArgs(['app-server','restart']), {type:'app-server',command:'restart'});
+  assert.deepEqual(routeArgs(['codex','start']), {type:'codex',command:'start'});
+  assert.deepEqual(routeArgs(['codex','restart']), {type:'codex',command:'restart'});
   assert.deepEqual(routeArgs(['update']), { type: 'rin', command: 'update' });
-  assert.throws(()=>routeArgs(['--','start']),/Usage/);
+  assert.deepEqual(routeArgs(['--','start']),{type:'agent',args:['start']});
+  assert.deepEqual(routeArgs(['codex','stop']),{type:'codex',command:'stop'});
   assert.throws(()=>routeArgs(['exec','start']),/Usage/);
-  assert.throws(()=>routeArgs([]),/Usage/);
+  assert.deepEqual(routeArgs([]),{type:'agent',args:[]});
   assert.throws(()=>routeArgs(['restart','--force']),/Usage/);
 });
 

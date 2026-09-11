@@ -13,10 +13,15 @@ rin update
 rin start
 rin stop
 rin restart
-rin app-server start
-rin app-server restart
+rin codex start
+rin codex stop
+rin codex restart
 ```
 
 `rin start|stop|restart` manage Rin resources. The app-server commands are explicit Codex operator actions. `rin update` verifies an isolated candidate, switches the atomic release record, and recovers the previous service when a transition fails.
 
 Validate configuration before starting the registered user service. Test an authorized message, an identity rejection, configured chat rules, a final response, and conversation continuity for every enabled transport. Record real agent and platform checks separately from fixture or mocked tests.
+
+## Open your agent
+
+Run `rin` to open the same agent configured for the chat bridge. Use `rin -- ...` to pass arguments to that CLI, for example `rin -- --help`. Other arguments are Rin commands. The configured executable, environment, and workspace are used; chat-only non-interactive protocol flags are not added.

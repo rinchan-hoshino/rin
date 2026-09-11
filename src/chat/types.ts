@@ -10,7 +10,7 @@ export interface AutoBind { cwd: string; model?: string; excludedChatIds?: strin
 export type ChatRule = string | {chatId: string; topicId?: string};
 export interface AdapterConfig { id: string; type: string; enabled?: boolean; allowUsers: string[]; allowChats?: ChatRule[]; denyChats?: ChatRule[]; /** Owner identities used for private-like membership proofs. */ ownerUsers?: string[]; dmOnly?: boolean; requireMention?: boolean; autoBind?: AutoBind | false; token?: string; tokenEnv?: string; url?: string; [key: string]: unknown; }
 export type QuietValue = boolean | 'quiet' | {enabled?: boolean; quiet?: boolean; mode?: string};
-export interface ChatConfig { dataDir: string; adapters: AdapterConfig[]; bindings: Binding[]; agent?: AgentConfig; attachmentRoots?: string[]; display?: {working?: WorkingConfig; summaries?: boolean}; quiet?: {default?: QuietValue; byRoute?: Record<string,QuietValue>}; commands?: {directory?: string}; }
+export interface ChatConfig { dataDir: string; adapters: AdapterConfig[]; bindings: Binding[]; agent?: AgentConfig; codex?: Omit<import('../agents/types.js').CodexAgentConfig,'type'>; attachmentRoots?: string[]; display?: {working?: WorkingConfig; summaries?: boolean}; quiet?: {default?: QuietValue; byRoute?: Record<string,QuietValue>}; commands?: {directory?: string}; }
 export interface WorkingConfig { frames?: string[]; text?: string; intervalMs?: number; }
 export interface Logger { info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void; }
 export interface CommandContext { args: string; message: ChatMessage; dataDir: string; }

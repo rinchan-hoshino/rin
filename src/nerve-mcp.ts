@@ -15,7 +15,7 @@ const source = {...string,description:'Stable producer ID supplied by the event 
 const schema = (properties: Record<string,PropertySchema> = {}, required: string[] = []): InputSchema => ({ type: 'object', properties, required, additionalProperties: false });
 const definitions: [string,string,InputSchema,boolean][] = [
   ['nerve_status', 'Check the local Nerve service health.', schema(), true],
-  ['nerve_list_events', 'Read recent event states; use nerve_get_event for full results.', schema(), true],
+  ['nerve_list_events', 'Read recent event metadata, 20 per page. Filter by exact state/source/target and follow nextRead. This is the service recent window, not all history; pages reflect live state. compact:false returns the entire window. Use nerve_get_event by ID for full payload/results.', schema({compact:boolean,limit:{type:'number',minimum:1},offset:{type:'number',minimum:0},state:string,source:string,target:string}), true],
   ['nerve_get_event', 'Read an event and its result by stable event ID. Done means the configured target accepted delivery, not that an agent completed its work.', schema({ id }, ['id']), true],
   ['nerve_enqueue_event', 'Queue one event for a configured target. Reuse a stable ID with the same source and payload to deduplicate. The configured target is fixed at first enqueue.', schema({ id, target, source, payload: { type: 'object' } }, ['id', 'target', 'payload']), false],
   ['nerve_retry_event', 'Retry a failed or uncertain event after checking its current result and external effects. An uncertain event may have already acted; retry can duplicate side effects.', schema({ id }, ['id']), false],
@@ -77,6 +77,11 @@ export function createHandler({ port, token, requestTimeoutMs = 15000 }: {port:n
     try {
       validate(args, tool.inputSchema);
       if (args.id === '.' || args.id === '..') throw new Error('ID cannot be a path traversal segment');
+      if (name === 'nerve_list_events') {
+        for (const key of ['offset','limit']) if (args[key] !== undefined && (!Number.isSafeInteger(args[key]) || Number(args[key]) < (key === 'limit' ? 1 : 0))) throw new Error(`${key} must be an integer`);
+        if (Number(args.limit) > 100) throw new Error('limit must not exceed 100');
+        if (args.compact === false && (args.offset !== undefined || args.limit !== undefined)) throw new Error('Full view cannot be combined with pagination');
+      }
 
     } catch (cause) { return error(-32602, (cause as Error).message); }
     const encoded = encodeURIComponent(args.id ?? '');
@@ -86,7 +91,19 @@ export function createHandler({ port, token, requestTimeoutMs = 15000 }: {port:n
       nerve_enqueue_event: ['POST', '/events', args], nerve_retry_event: ['POST', `/events/${encoded}/retry`, {}],
     };
     try {
-      const value = await request(...routes[name!]);
+      let value = await request(...routes[name!]);
+      if (name === 'nerve_list_events' && Array.isArray(value)) {
+        const windowSize = value.length;
+        const rows = value.filter(row => ['state','source','target'].every(key => args[key] === undefined || row[key] === args[key]));
+        if (args.compact === false) value = rows;
+        else {
+          const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? 20);
+          const events = rows.slice(offset,offset+limit), next = offset+events.length;
+          value = {events,windowSize,total:rows.length,offset,returned:events.length,
+            nextRead:next<rows.length ? {...args,offset:next,limit}:null,
+            detail:'Recent service window only; pages reflect live state. Read full events by ID.'};
+        }
+      }
       return reply({ content: [{ type: 'text', text: JSON.stringify(value) }], isError: false });
     } catch (cause) { return reply({ content: [{ type: 'text', text: (cause as Error).message }], isError: true }); }
   };

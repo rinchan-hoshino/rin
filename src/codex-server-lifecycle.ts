@@ -25,7 +25,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const isCodexServer = (command: string) => /(?:^|[\\/\s])codex(?:\.exe)?["']?(?:\s|$)/.test(command) && /(?:^|\s)["']?app-server["']?(?:\s|$)/.test(command) && !/\bapp-server["']?\s+["']?(?:proxy|daemon|generate-|help)/.test(command);
 
 /** Inspect the exact local listener before the caller stops Rin. No PID file or supervisor. */
-export async function prepareAppServerRestart(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
+export async function prepareAppServerStop(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
   const exec = dependencies.run ?? run;
   const signal = dependencies.kill ?? process.kill.bind(process);
   const platform = dependencies.platform ?? process.platform;
@@ -34,13 +34,13 @@ export async function prepareAppServerRestart(options: AppServerOptions = {}, de
   const client = new CodexAppServer(options);
   const endpoint = client.endpoint;
   if (endpoint !== (platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://')) {
-    throw new Error('App-server restart requires the default local endpoint. Restart custom servers at their host.');
+    throw new Error('App-server stop/restart requires the default local endpoint. Restart custom servers at their host.');
   }
   // Never start a missing server merely to stop it. The handshake verifies its
   // protocol and CODEX_HOME before any process inspection or signal.
   try { await client.connect({bootstrap: false}); }
   catch (error) {
-    if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) return () => (dependencies.ensure ?? ensureAppServer)(options);
+    if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) return async () => {};
     throw error;
   } finally { await client.stop(); }
   const socketPath = resolve(endpoint.slice('unix://'.length) || join(client.codexHome, 'app-server-control/app-server-control.sock'));
@@ -96,7 +96,7 @@ export async function prepareAppServerRestart(options: AppServerOptions = {}, de
   const before = await inspect();
   const parents = new Map(before.processes.map(p => [p.pid, p.parent]));
   for (let pid = ownPid, seen = new Set<number>(); pid && !seen.has(pid); pid = parents.get(pid) ?? 0) {
-    if (pid === before.target.pid) throw new Error('Run rin restart --app-server from a separate terminal outside this app-server; it is executing the current task.');
+    if (pid === before.target.pid) throw new Error('Run rin codex stop/restart from a separate terminal outside this app-server; it is executing the current task.');
     seen.add(pid);
   }
   return async () => {
@@ -109,9 +109,14 @@ export async function prepareAppServerRestart(options: AppServerOptions = {}, de
     while (true) {
       try { signal(current.target.pid, 0); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') break; throw error; }
-      if (Date.now() >= deadline) throw new Error('App-server did not exit after SIGTERM. No force kill was attempted; Rin remains stopped.');
+      if (Date.now() >= deadline) throw new Error('App-server did not exit after SIGTERM. No force kill was attempted; The server was not restarted.');
       await delay(100);
     }
-    await (dependencies.ensure ?? ensureAppServer)(options);
   };
+}
+
+/** Restart reuses the same verified stop operation, then starts one listener. */
+export async function prepareAppServerRestart(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
+  const stop = await prepareAppServerStop(options, dependencies);
+  return async () => { await stop(); await (dependencies.ensure ?? ensureAppServer)(options); };
 }

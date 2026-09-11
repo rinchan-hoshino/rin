@@ -1,13 +1,14 @@
 import {spawn, type ChildProcess} from 'node:child_process';
+import {agentExecutables} from './command.js';
 import {randomUUID} from 'node:crypto';
 import {isAbsolute} from 'node:path';
 import type {AgentBridge,AgentEvent,AgentInput,CliAgentConfig} from './types.js';
 
 const profiles = {
-  'claude-code': {command:'claude',args:['-p','--input-format','stream-json','--output-format','stream-json','--verbose'],resume:'--resume',reserved:['--resume','-r','--continue','-c','--session-id','--fork-session','--no-session-persistence','--output-format','--input-format']},
-  pi: {command:'pi',args:['-p','--mode','json'],resume:'--session',reserved:['--session','--session-id','--resume','-r','--continue','-c','--fork','--no-session','--mode']},
-  opencode: {command:'opencode',args:['run','--format','json'],resume:'--session',reserved:['--session','-s','--continue','-c','--fork','--format']},
-} satisfies Record<CliAgentConfig['type'],{command:string;args:string[];resume:string;reserved:string[]}>;
+  'claude-code': {args:['-p','--input-format','stream-json','--output-format','stream-json','--verbose'],resume:'--resume',reserved:['--resume','-r','--continue','-c','--session-id','--fork-session','--no-session-persistence','--output-format','--input-format']},
+  pi: {args:['-p','--mode','json'],resume:'--session',reserved:['--session','--session-id','--resume','-r','--continue','-c','--fork','--no-session','--mode']},
+  opencode: {args:['run','--format','json'],resume:'--session',reserved:['--session','-s','--continue','-c','--fork','--format']},
+} satisfies Record<CliAgentConfig['type'],{args:string[];resume:string;reserved:string[]}>;
 
 interface Session {cwd:string;model?:string;state:'new'|'starting'|'ready';nativeId?:string;}
 const sessionPrefix='rin-session:';
@@ -113,7 +114,7 @@ export class CliAgentBridge implements AgentBridge {
     if(!session)throw new Error('Agent session metadata is missing');
     if(session.state==='starting' && !session.nativeId)throw new Error('Previous agent session creation was not confirmed; inspect the native agent before continuing');
     const fresh=managed && session.state==='new';
-    const profile=profiles[this.config.type],command=this.config.command || profile.command;
+    const profile=profiles[this.config.type],command=this.config.command || agentExecutables[this.config.type];
     const args=[...profile.args,...(session.nativeId?[profile.resume,session.nativeId]:[]),...(session.model?['--model',session.model]:[]),...(this.config.extraArgs || [])];
     const save=()=>{if(managed)this.setCursor!(this.sessionKey(threadId),session);};
     const output=new TurnOutput(this.config.type,id=>{
