@@ -66,3 +66,17 @@ test('per-route quiet override wins over the default',async()=>{
   try{await bridge.start();bridge.event({threadId:'thread',turnId:'turn',type:'text',itemId:'comment',phase:'commentary',text:'visible'});await bridge.flush();assert.match(sent[0].text,/visible/);}
   finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
 });
+
+
+test('disabled unsupported adapters remain inert through bridge startup',async()=>{
+  const dataDir=mkdtempSync(join(tmpdir(),'rin-disabled-adapter-'));
+  const config={dataDir,agent:{type:'pi'},adapters:[{id:'retired',type:'retired-transport',enabled:false,allowUsers:[]}],bindings:[{adapter:'retired',chatId:'old-chat',kind:'dm',threadId:'old-thread',mirror:true}]};
+  const before=JSON.stringify(config.adapters);
+  const bridge=new ChatBridge(config,{
+    agent:{start:async()=>{},stop:async()=>{},watch:async()=>assert.fail('disabled adapter must not watch sessions'),queue:async()=>assert.fail('disabled adapter must not submit work')},
+    adapterFactory:async()=>assert.fail('disabled adapter must not load a transport'),
+    log:{info(){},warn(){},error(){}},
+  });
+  try{await bridge.start();assert.equal(bridge.adapters.size,0);assert.equal(JSON.stringify(config.adapters),before);}finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
+  for(const enabled of [true,undefined])assert.throws(()=>validateConfig({...config,adapters:[{...config.adapters[0],enabled}]}),/Unsupported adapter type/);
+});

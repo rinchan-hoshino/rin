@@ -20,7 +20,7 @@ export function validateConfig(config: ChatConfig) {
   const ids = new Set();
   for (const a of config.adapters) {
     if (!a.id || ids.has(a.id)) throw new Error('Each adapter requires a unique id');
-    if (!adapterTypes.includes(a.type)) throw new Error(`Unsupported adapter type: ${a.type}`);
+    if (a.enabled !== false && !adapterTypes.includes(a.type)) throw new Error(`Unsupported adapter type: ${a.type}`);
     if (!Array.isArray(a.allowUsers) || a.allowUsers.some(x => typeof x !== 'string')) throw new Error(`allowUsers must be an array of user IDs: ${a.id}`);
     if (a.enabled !== false && a.allowUsers.length === 0) throw new Error(`Enabled adapter requires an explicit allowUsers list: ${a.id}`);
     if (a.ownerUsers !== undefined && (!Array.isArray(a.ownerUsers) || a.ownerUsers.some(x => typeof x !== 'string'))) throw new Error(`ownerUsers must be an array of explicit user IDs: ${a.id}`);
