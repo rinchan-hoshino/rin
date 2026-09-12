@@ -32,20 +32,18 @@ export async function ensureAppServer(options: AppServerOptions = {}, dependenci
 interface ProcessInfo {pid: number; parent: number; uid: number; command: string; started?: string}
 interface RestartDependencies {
   run?: (command: string, args: string[]) => Promise<string>;
-  kill?: (pid: number, signal: NodeJS.Signals | 0) => boolean;
+  daemon?: StartDependencies['start'];
   platform?: NodeJS.Platform;
   pid?: number;
   uid?: number;
-  ensure?: typeof ensureAppServer;
+
 }
 const run = async (command: string, args: string[]) => (await execute(command, args, {timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true})).stdout;
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const isCodexServer = (command: string) => /(?:^|[\\/\s])codex(?:\.exe)?["']?(?:\s|$)/.test(command) && /(?:^|\s)["']?app-server["']?(?:\s|$)/.test(command) && !/\bapp-server["']?\s+["']?(?:proxy|daemon|generate-|help)/.test(command);
 
 /** Inspect the exact local listener before the caller stops Rin. No PID file or supervisor. */
-export async function prepareAppServerStop(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
+async function prepareDaemonAction(action: 'stop' | 'restart', options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
   const exec = dependencies.run ?? run;
-  const signal = dependencies.kill ?? process.kill.bind(process);
   const platform = dependencies.platform ?? process.platform;
   const ownPid = dependencies.pid ?? process.pid;
   const ownUid = dependencies.uid ?? process.getuid?.();
@@ -54,11 +52,20 @@ export async function prepareAppServerStop(options: AppServerOptions = {}, depen
   if (endpoint !== (platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://')) {
     throw new Error('App-server stop/restart requires the default local endpoint. Restart custom servers at their host.');
   }
+  async function invokeDaemon() {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$|RIN_MANAGED_DAEMON$)/i.test(key)));
+    env.CODEX_HOME = client.codexHome;
+    await (dependencies.daemon ?? start)(client.command[0], [...client.command.slice(1), 'app-server', 'daemon', action], env);
+    if (action === 'restart') {
+      const verification = new CodexAppServer(options);
+      try { await verification.connect(); } finally { await verification.stop(); }
+    }
+  }
   // Never start a missing server merely to stop it. The handshake verifies its
   // protocol and CODEX_HOME before any process inspection or signal.
   try { await client.connect(); }
   catch (error) {
-    if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) return async () => {};
+    if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) return () => invokeDaemon();
     throw error;
   } finally { await client.stop(); }
   const socketPath = resolve(endpoint.slice('unix://'.length) || join(client.codexHome, 'app-server-control/app-server-control.sock'));
@@ -122,19 +129,14 @@ export async function prepareAppServerStop(options: AppServerOptions = {}, depen
     if (current.target.pid !== before.target.pid || current.target.command !== before.target.command || current.target.started !== before.target.started) {
       throw new Error('App-server changed while preparing restart; no process was stopped. Retry from a separate terminal.');
     }
-    signal(current.target.pid, 'SIGTERM');
-    const deadline = Date.now() + client.timeoutMs;
-    while (true) {
-      try { signal(current.target.pid, 0); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') break; throw error; }
-      if (Date.now() >= deadline) throw new Error('App-server did not exit after SIGTERM. No force kill was attempted; The server was not restarted.');
-      await delay(100);
-    }
+    await invokeDaemon();
   };
 }
 
-/** Restart reuses the same verified stop operation, then starts one listener. */
+/** Explicit lifecycle commands delegate shutdown and restart to Codex. */
+export async function prepareAppServerStop(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
+  return prepareDaemonAction('stop', options, dependencies);
+}
 export async function prepareAppServerRestart(options: AppServerOptions = {}, dependencies: RestartDependencies = {}) {
-  const stop = await prepareAppServerStop(options, dependencies);
-  return async () => { await stop(); await (dependencies.ensure ?? ensureAppServer)(options); };
+  return prepareDaemonAction('restart', options, dependencies);
 }

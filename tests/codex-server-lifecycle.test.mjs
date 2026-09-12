@@ -39,15 +39,14 @@ test('startup rejects a configured executable without daemon support even when a
   await assert.rejects(ensureAppServer(p.options,{start:async()=>{throw new Error('unknown command daemon');}}),/configured Codex executable must support this command/);
 });
 
-test('restart signals only the verified socket owner, after preparation, then reconnects',posix,async t=>{
+for (const action of ['stop','restart']) test(`${action} delegates once to the configured daemon after preparation`,posix,async t=>{
   const p=await unixPeer(t),events=[];
-  let alive=true;
-  const run=async(command,args)=>command==='ps'?'101 1 501 /usr/bin/codex app-server --listen unix://\n102 1 501 /usr/bin/codex app-server --listen unix://\n900 1 501 node rin restart --app-server':socketTable([[101,p.canonical],[102,'/tmp/another.sock']]);
-  const restart=await prepareAppServerRestart(p.options,{platform:'darwin',uid:501,pid:900,run,kill:(pid,signal)=>{
-    assert.equal(pid,101);if(signal==='SIGTERM'){events.push('term');alive=false;return true;}
-    if(!alive)throw Object.assign(new Error('gone'),{code:'ESRCH'});return true;
-  },ensure:async()=>events.push('ready')});
-  assert.deepEqual(events,[]);await restart();assert.deepEqual(events,['term','ready']);
+  const run=async(command,args)=>command==='ps'?'101 1 501 /usr/bin/codex app-server --listen unix://\n900 1 501 node rin':socketTable([[101,p.canonical]]);
+  const prepare=action==='stop'?prepareAppServerStop:prepareAppServerRestart;
+  const operation=await prepare({...p.options,command:['custom-codex','--profile','rin']},{platform:'darwin',uid:501,pid:900,run,daemon:async(command,args,env)=>events.push({command,args,home:env.CODEX_HOME})});
+  assert.deepEqual(events,[]);
+  await operation();
+  assert.deepEqual(events,[{command:'custom-codex',args:['--profile','rin','app-server','daemon',action],home:p.home}]);
 });
 
 for(const mode of ['ambiguous','different user','self','changed'])test(`restart refuses ${mode} without signalling`,posix,async t=>{
@@ -56,14 +55,15 @@ for(const mode of ['ambiguous','different user','self','changed'])test(`restart 
     if(command==='ps')return `101 1 ${mode==='different user'?502:501} /usr/bin/codex app-server --listen unix://\n102 1 501 /usr/bin/codex app-server --listen unix://\n900 ${mode==='self'?101:1} 501 node rin restart --app-server`;
     scans++;return mode==='ambiguous'?socketTable([[101,p.canonical],[102,p.canonical]]):socketTable([[mode==='changed'&&scans>1?102:101,p.canonical]]);
   };
-  await assert.rejects(async()=>{const restart=await prepareAppServerRestart(p.options,{platform:'darwin',uid:501,pid:900,run,kill:()=>{signals++;return true;}});await restart();});
+  await assert.rejects(async()=>{const restart=await prepareAppServerRestart(p.options,{platform:'darwin',uid:501,pid:900,run,daemon:async()=>{signals++;}});await restart();});
   assert.equal(signals,0);
 });
 
-test('a missing default server starts without looking up or stopping a PID',posix,async t=>{
-  const home=await mkdtemp('/tmp/rin-as-missing-');t.after(()=>rm(home,{recursive:true,force:true}));let ready=0;
-  const restart=await prepareAppServerRestart({codexHome:home},{platform:'darwin',run:async()=>{throw Error('must not inspect');},kill:()=>{throw Error('must not signal');},ensure:async()=>{ready++;}});
-  await restart();assert.equal(ready,1);
+test('restart propagates daemon failure without a fallback start',posix,async t=>{
+  const home=await mkdtemp('/tmp/rin-as-missing-');t.after(()=>rm(home,{recursive:true,force:true}));const calls=[];
+  const restart=await prepareAppServerRestart({codexHome:home},{platform:'darwin',run:async()=>assert.fail('no process inspection for missing socket'),daemon:async(command,args)=>{calls.push(args);throw Error('daemon restart rejected');}});
+  await assert.rejects(restart(),/daemon restart rejected/);
+  assert.deepEqual(calls,[['app-server','daemon','restart']]);
 });
 
 test('custom endpoints are rejected before any shutdown',async()=>{
@@ -95,7 +95,7 @@ test('failed explicit app-server start does not launch Rin service',async t=>{
 
 test('stopping a missing listener never starts one',posix,async t=>{
  const home=await mkdtemp('/tmp/rin-stop-missing-');t.after(()=>rm(home,{recursive:true,force:true}));
- const stop=await prepareAppServerStop({codexHome:home},{ensure:async()=>assert.fail('stop must not start')});await stop();
+ const calls=[];const stop=await prepareAppServerStop({codexHome:home},{daemon:async(command,args)=>calls.push(args)});await stop();assert.deepEqual(calls,[['app-server','daemon','stop']]);
 });
 test('explicit codex stop uses only the server stop operation',async t=>{
  const home=await installation(t),events=[];
