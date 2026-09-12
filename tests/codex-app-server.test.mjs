@@ -86,14 +86,13 @@ test('parallel connect initializes only once; stop cancels an in-flight request'
   await bridge.stop();await p;
 });
 
-test('missing default listener starts native app-server once with sanitized environment', async t => {
+test('missing default listener never starts a process', async t => {
   const dir=await mkdtemp(join(socketTempRoot,'rin-daemon-'));t.after(()=>rm(dir,{recursive:true,force:true}));
-  const script=join(dir,'start.mjs'), log=join(dir,'log.json');
-  await writeFile(script,`import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(log)},JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME,nerve:process.env.NERVE_API_TOKEN}));process.exit(9);`);
-  const old=process.env.NERVE_API_TOKEN;process.env.NERVE_API_TOKEN='private';t.after(()=>{if(old===undefined)delete process.env.NERVE_API_TOKEN;else process.env.NERVE_API_TOKEN=old;});
+  const marker=join(dir,'started'),script=join(dir,'must-not-start.mjs');
+  await writeFile(script,`import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'started');`);
   const c=new CodexAppServer({codexHome:dir,command:[process.execPath,script],queueTimeoutMs:200});t.after(()=>c.stop());
-  await assert.rejects(c.connect());
-  assert.deepEqual(JSON.parse(await readFile(log,'utf8')),{args:['app-server','--listen','unix://'],home:dir});
+  await assert.rejects(c.connect(),{code:'ENOENT'});
+  await assert.rejects(readFile(marker),{code:'ENOENT'});
 });
 
 test('Codex chat adapter never starts a missing app-server', async t => {

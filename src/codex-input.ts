@@ -28,9 +28,7 @@ export class CodexInput {
       {type: 'text', text: (message || '附件') + attachmentText, text_elements: []},
       ...images.map(file => ({type: 'localImage', path: file.path})),
     ];
-    // Runtime adapters connect only to an operator-managed server. Starting one
-    // is reserved for the explicit `rin codex` CLI action.
-    await this.server.connect({bootstrap: false});
+    await this.server.connect();
     // Rejoins an already running task; otherwise loads it from durable history.
     // No model, cwd, instructions or permissions are overridden here.
     await this.server.request('thread/resume', {threadId, excludeTurns: true});

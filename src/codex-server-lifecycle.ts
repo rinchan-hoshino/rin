@@ -5,8 +5,26 @@ import {join, resolve} from 'node:path';
 import {CodexAppServer, type AppServerOptions} from './codex-app-server.js';
 
 const execute = promisify(execFile);
-export async function ensureAppServer(options: AppServerOptions = {}) {
+interface StartDependencies {
+  start?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void>;
+  platform?: NodeJS.Platform;
+}
+const start = async (command: string, args: string[], env: NodeJS.ProcessEnv) => {
+  await execute(command, args, {env, timeout: 30_000, maxBuffer: 1024 * 1024, windowsHide: true});
+};
+export async function ensureAppServer(options: AppServerOptions = {}, dependencies: StartDependencies = {}) {
   const client = new CodexAppServer(options);
+  const platform = dependencies.platform ?? process.platform;
+  const defaultEndpoint = platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://';
+  if (client.endpoint !== defaultEndpoint) throw new Error('Rin starts Codex only at the default local app-server endpoint. Start remote or custom endpoints at their host.');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$|RIN_MANAGED_DAEMON$)/i.test(key)));
+  env.CODEX_HOME = client.codexHome;
+  try {
+    await (dependencies.start ?? start)(client.command[0], [...client.command.slice(1), 'app-server', 'daemon', 'start'], env);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`Codex app-server daemon start failed. The configured Codex executable must support this command: ${detail}`);
+  }
   try { await client.connect(); }
   finally { await client.stop(); }
 }
@@ -38,7 +56,7 @@ export async function prepareAppServerStop(options: AppServerOptions = {}, depen
   }
   // Never start a missing server merely to stop it. The handshake verifies its
   // protocol and CODEX_HOME before any process inspection or signal.
-  try { await client.connect({bootstrap: false}); }
+  try { await client.connect(); }
   catch (error) {
     if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) return async () => {};
     throw error;

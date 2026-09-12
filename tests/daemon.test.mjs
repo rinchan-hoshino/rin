@@ -46,6 +46,19 @@ test('chat PID lock blocks before bridge or agent construction',async t=>{
   assert.equal(agents,1);assert.equal(bridges,1);await first.stop();
 });
 
+test('Codex chat startup requires app-server daemon start before constructing the bridge',async t=>{
+  const f=fixture(t),dataDir=join(f.dir,'chat-data'),chatFile=f.write('chat.json',{}),daemonFile=f.write('daemon.json',{chat:chatFile}),events=[];
+  const dependencies={
+    readChatConfig:()=>({dataDir,agent:{type:'codex',command:['codex-standalone'],codexHome:join(f.dir,'.codex')},adapters:[],bindings:[]}),
+    ensureAppServer:async config=>events.push(['daemon',config.command[0]]),
+    createAgentBridge:()=>{events.push('agent');return{};},
+    ChatBridge:class{async start(){events.push('chat');}async stop(){}},
+  };
+  const daemon=await startDaemon(daemonFile,{log:quietLog,dependencies});
+  assert.deepEqual(events,[['daemon','codex-standalone'],'agent','chat']);
+  await daemon.stop();
+});
+
 test('chat startup failure rolls back an already started Nerve',async t=>{
   const f=fixture(t),dataDir=join(f.dir,'chat-data'),stopped=[];
   const daemonFile=f.write('daemon.json',{chat:f.write('chat.json',{}),nerve:f.write('nerve.json',{database:':memory:',targets:{}})});

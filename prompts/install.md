@@ -6,6 +6,8 @@ Install and configure [Rin](https://github.com/rinchan-hoshino/rin) in this envi
 
 Identify the coding agent you are running in, its executable, authentication, and the operating system. Configure Rin to use that agent: Codex, Claude Code, pi, or OpenCode. Read the repository's [installation guide](../docs/installation.md) and [configuration example](../examples/chat.json), and check the prerequisites for this machine.
 
+For Codex, run the configured executable with `app-server daemon start` and verify a successful connection before configuring chats. Do not infer support from the installation source. Command failure is a prerequisite error, not a reason to start `codex app-server --listen` directly.
+
 ## 2. Set up the user's chats
 
 Guide the user through these choices one at a time:

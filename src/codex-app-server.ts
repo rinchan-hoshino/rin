@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process';
-import { mkdir, open, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -25,48 +24,15 @@ export class CodexAppServer {
     this.command = [...command]; this.codexHome = codexHome; this.endpoint = endpoint; this.timeoutMs = queueTimeoutMs;
   }
   start() { this.stopped = false; }
-  async connect({bootstrap = true}: {bootstrap?: boolean} = {}) {
+  async connect() {
     if (this.stopped) throw new Error('app-server client stopped');
     if (this.connecting) return this.connecting;
     if (this.socket?.readyState === WebSocket.OPEN) return;
-    this.connecting = this.open(bootstrap).finally(() => { this.connecting = undefined; });
+    this.connecting = this.open().finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
-  private async open(bootstrap: boolean) {
-    try { await this.openSocket(); }
-    catch (error) {
-      // Only absence of the default local listener allows bootstrap. A custom
-      // endpoint, auth rejection or broken handshake must not start another host.
-      const defaultEndpoint = process.platform === 'win32' ? 'ws://127.0.0.1:4500' : 'unix://';
-      if (!bootstrap || this.endpoint !== defaultEndpoint || !['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
-      if (this.stopped) throw new Error('app-server client stopped');
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NERVE_|PI_|RIN_DIR$|RIN_MANAGED_DAEMON$)/i.test(key)));
-      env.CODEX_HOME = this.codexHome;
-      const directory = join(this.codexHome, 'app-server-control');
-      await mkdir(directory, {recursive: true, mode: 0o700});
-      const log = await open(join(directory, 'rin-start.log'), 'a', 0o600);
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const child = spawn(this.command[0], [...this.command.slice(1), 'app-server', '--listen', this.endpoint], {
-            env, detached: true, stdio: ['ignore', log.fd, log.fd], windowsHide: true,
-          });
-          child.once('error', reject);
-          child.once('spawn', () => { child.unref(); resolve(); });
-        });
-      } finally { await log.close(); }
-      // Codex owns socket exclusivity. Concurrent starters can lose the bind
-      // race safely; each client connects to the winner, without a PID ledger.
-      const deadline = Date.now() + this.timeoutMs;
-      while (true) {
-        if (this.stopped) throw new Error('app-server client stopped');
-        try { await this.openSocket(); break; }
-        catch (cause) {
-          if (!['ENOENT', 'ECONNREFUSED'].includes((cause as NodeJS.ErrnoException).code || '')) throw cause;
-          if (Date.now() >= deadline) throw new Error(`app-server did not become ready; see ${join(directory, 'rin-start.log')}`);
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-    }
+  private async open() {
+    await this.openSocket();
     try {
       const result = await this.request<{codexHome?: string}>('initialize', {
         clientInfo: {name: 'rin', version: '1'},

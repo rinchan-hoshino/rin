@@ -14,7 +14,7 @@ Install and configure Rin using https://github.com/rinchan-hoshino/rin/blob/main
 
 Rin uses the agent you are installing from. It will guide you through connecting your chats and deciding who can use it. Each chat starts its own conversation and keeps its context as you talk.
 
-See the [installation guide](prompts/install.md) for the full steps. Node.js 24 or newer is required.
+See the [installation guide](prompts/install.md) for the full steps. Node.js 24 or newer is required. A configured Codex executable must support `codex app-server daemon start`.
 
 Run `rin` to open your configured agent, or `rin -- ...` to pass it arguments. Use `rin codex start|stop|restart` to manage the local Codex app-server.
 

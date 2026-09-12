@@ -23,9 +23,20 @@ const posix={skip:process.platform==='win32'};
 const socketTable=(rows)=>'Address Type Recv-Q Send-Q Inode Conn Refs Nextref rxbytes txbytes rhiwat shiwat process:pid state options gencnt flags flags1 usecnt rtncnt fltrs Addr\n'+rows.map(([pid,path])=>`1 stream 0 0 2 0 0 0 0 0 8192 8192 codex:${pid} 00100 00000002 1 1 0 1 0 0 ${path}`).join('\n');
 
 test('startup waits for a real handshake and disconnect leaves server running',posix,async t=>{
+  const p=await unixPeer(t),starts=[];
+  const start=async(command,args,env)=>starts.push({command,args,home:env.CODEX_HOME,nerve:env.NERVE_API_TOKEN});
+  const old=process.env.NERVE_API_TOKEN;process.env.NERVE_API_TOKEN='private';t.after(()=>{if(old===undefined)delete process.env.NERVE_API_TOKEN;else process.env.NERVE_API_TOKEN=old;});
+  await ensureAppServer({...p.options,command:['codex-standalone','--profile','rin']},{start});
+  await ensureAppServer({...p.options,command:['codex-standalone','--profile','rin']},{start});
+  assert.deepEqual(starts,[
+    {command:'codex-standalone',args:['--profile','rin','app-server','daemon','start'],home:p.home,nerve:undefined},
+    {command:'codex-standalone',args:['--profile','rin','app-server','daemon','start'],home:p.home,nerve:undefined},
+  ]);
+});
+
+test('startup rejects a configured executable without daemon support even when a server exists',posix,async t=>{
   const p=await unixPeer(t);
-  await ensureAppServer(p.options);
-  await ensureAppServer(p.options);
+  await assert.rejects(ensureAppServer(p.options,{start:async()=>{throw new Error('unknown command daemon');}}),/configured Codex executable must support this command/);
 });
 
 test('restart signals only the verified socket owner, after preparation, then reconnects',posix,async t=>{

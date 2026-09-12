@@ -47,7 +47,7 @@ export async function observeCodexHistory(options:Options) {
     return rows;
   }
   async function scan(initial=false) {
-    await server.connect({bootstrap:false});
+    await server.connect();
     const turns:Turn[]=[];
     const needed=new Set(Object.entries(state.turns).filter(([,v])=>!terminal(v.status)).map(([id])=>id));
     if(state.anchor)needed.add(state.anchor);

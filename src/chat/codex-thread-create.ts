@@ -5,7 +5,7 @@ export async function createCodexThread({server, cwd, model, name}: {server: Cod
   let sent = false;
   let threadId: string | undefined;
   try {
-    await server.connect({bootstrap: false});
+    await server.connect();
     sent = true;
     const result = await server.request<{thread?: {id?: string}}>('thread/start', {cwd, ...(model ? {model} : {})});
     const id = result?.thread?.id;

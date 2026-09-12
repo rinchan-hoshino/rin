@@ -4,6 +4,8 @@ Open your installed, authenticated coding agent and send it [the installation pr
 
 The guided setup enables `autoBind` with a workspace for the agent and an empty `bindings` list. The first admitted message in each chat creates a fresh conversation. Later messages continue it across Rin restarts. The native agent stores the conversation history; Rin persists the chat association and session reference.
 
+Codex integrations require the configured executable to support `codex app-server daemon start`. Setup verifies that command and the resulting connection; Rin does not classify installation sources or fall back to a direct `codex app-server --listen` process.
+
 Rin stores its release record, private configuration, credentials, chat database, and Nerve database in its installation data directory. Agent authentication stays with the agent.
 
 After installation, the stable CLI provides:

@@ -2,13 +2,14 @@ import {ScriptDirectory} from './nerve-scripts.js';
 import type {Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import type {Logger} from './chat/types.js';
-interface DaemonDependencies {readChatConfig:typeof readChatConfig; createLogger:typeof createLogger; adapterFactory:typeof adapterFactory; ChatBridge:typeof ChatBridge; createAgentBridge:typeof createAgentBridge; Nerve:typeof Nerve; Store:typeof Store; makeServer:typeof makeServer; validateNerveConfig:typeof validateNerveConfig}
+interface DaemonDependencies {readChatConfig:typeof readChatConfig; createLogger:typeof createLogger; adapterFactory:typeof adapterFactory; ChatBridge:typeof ChatBridge; createAgentBridge:typeof createAgentBridge; ensureAppServer:typeof ensureAppServer; Nerve:typeof Nerve; Store:typeof Store; makeServer:typeof makeServer; validateNerveConfig:typeof validateNerveConfig}
 interface DaemonOptions extends Partial<DaemonDependencies> {readConfig?:typeof readChatConfig; dependencies?:Partial<DaemonDependencies>; pid?:number; processKill?:typeof process.kill; env?:NodeJS.ProcessEnv; intervalMs?:number; log?:Logger; nerveToken?:string}
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ChatBridge } from './chat/bridge.js';
 import { createAgentBridge } from './agents/factory.js';
+import {ensureAppServer} from './codex-server-lifecycle.js';
 import { Nerve, Store, makeServer, validateConfig as validateNerveConfig } from './nerve.js';
 import { adapterFactory, createLogger, readConfig as readChatConfig } from './rin.js';
 
@@ -79,6 +80,7 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
     adapterFactory: options.adapterFactory ?? adapterFactory,
     ChatBridge: options.ChatBridge ?? ChatBridge,
     createAgentBridge: options.createAgentBridge ?? createAgentBridge,
+    ensureAppServer: options.ensureAppServer ?? ensureAppServer,
     Nerve: options.Nerve ?? Nerve,
     Store: options.Store ?? Store,
     makeServer: options.makeServer ?? makeServer,
@@ -165,6 +167,7 @@ export async function startDaemon(configFile: string, options: DaemonOptions = {
     if (chatFile) {
       const chatConfig = dependencies.readChatConfig(chatFile);
       log = options.log ?? dependencies.createLogger(chatConfig);
+      if(chatConfig.agent?.type==='codex')await dependencies.ensureAppServer(chatConfig.agent);
       // Combined entrypoints share this lock. Acquire it before ChatBridge constructs its SQLite store.
       chatPidPath = acquireChatPid(chatConfig.dataDir, pid, processKill);
       const agent = dependencies.createAgentBridge(chatConfig.agent!);
